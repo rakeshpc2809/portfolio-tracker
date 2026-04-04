@@ -1,0 +1,11 @@
+nsepython
+pandas
+sqlalchemy
+psycopg2-binary
+cloudscraper
+beautifulsoup4
+schedule
+lxml
+openpyxl
+yfinance
+requests

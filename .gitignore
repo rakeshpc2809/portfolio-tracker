@@ -1,0 +1,54 @@
+# General
+.DS_Store
+*.log
+*.tmp
+.idea/
+.vscode/
+*.swp
+*.bak
+
+# Environment / Secrets
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Java (Maven/Spring)
+**/target/
+**/.mvn/wrapper/maven-wrapper.jar
+**/.mvn/wrapper/maven-wrapper.properties
+!**/.mvn/wrapper/maven-wrapper.properties (optional)
+.classpath
+.project
+.settings/
+*.class
+
+# Python
+**/venv/
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+**/*.pyd
+**/.pytest_cache/
+**/.mypy_cache/
+**/isin_ticker_map.json (optional, can be versioned if you want pre-mapped tickers)
+
+# Node (React/Vite)
+**/node_modules/
+**/dist/
+**/build/
+.eslintcache
+.stylelintcache
+*.tsbuildinfo
+
+# Docker / Database
+postgres_data/
+logs/
+docker-compose.override.yml
+
+# Temporary Plan Files
+MF_Portfolio_System_Plan.*
+MF_Metrics_Engine_V2_Logic.*
+robust_metrics_engine_plan.md
+mf_metrics_pipeline_plan.md
