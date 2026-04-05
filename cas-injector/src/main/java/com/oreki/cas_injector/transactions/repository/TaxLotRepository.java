@@ -15,5 +15,7 @@ public interface TaxLotRepository extends JpaRepository<TaxLot, Long> {
 
     long countByStatus(String status);
 
+    long countByStatusAndSchemeFolioInvestorPan(String status, String investorPan);
+
     List<TaxLot> findByStatusAndSchemeFolioInvestorPan(String status,String investorPan);
 }

@@ -7,10 +7,14 @@ export default function App() {
   const [portfolioData, setPortfolioData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [sipAmount, setSipAmount] = useState(75000);
+  const [lumpsum, setLumpsum] = useState(0);
+  
   const investorPan = "CFXPR4533R"; 
 
   useEffect(() => {
-    fetchMasterPortfolio(investorPan)
+    setLoading(true);
+    fetchMasterPortfolio(investorPan, sipAmount, lumpsum)
       .then(data => {
         setPortfolioData(data);
         setLoading(false);
@@ -20,11 +24,11 @@ export default function App() {
         setError("Unable to load portfolio data. Please check connection.");
         setLoading(false);
       });
-  }, []);
+  }, [sipAmount, lumpsum]);
 
   return (
     <AnimatePresence mode="wait">
-      {loading ? (
+      {loading && !portfolioData ? (
         <motion.div 
           key="loader"
           initial={{ opacity: 0 }}
@@ -46,7 +50,13 @@ export default function App() {
           animate={{ opacity: 1 }}
           transition={{ duration: 0.4 }}
         >
-          <Dashboard portfolioData={portfolioData} />
+          <Dashboard 
+            portfolioData={portfolioData} 
+            sipAmount={sipAmount} 
+            setSipAmount={setSipAmount}
+            lumpsum={lumpsum}
+            setLumpsum={setLumpsum}
+          />
         </motion.div>
       )}
     </AnimatePresence>

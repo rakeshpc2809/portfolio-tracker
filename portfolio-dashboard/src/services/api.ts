@@ -1,7 +1,7 @@
 import { normalizeCategory } from '../utils/formatters';
 
 const BASE_URL = '/api';
-const API_KEY = 'dev-secret-key'; // In production, this should be an environment variable
+const API_KEY = 'dev-secret-key'; 
 
 const authenticatedFetch = (url: string, options: RequestInit = {}) => {
   return fetch(url, {
@@ -13,9 +13,9 @@ const authenticatedFetch = (url: string, options: RequestInit = {}) => {
   });
 };
 
-export const fetchMasterPortfolio = async (investorPan: string) => {
+export const fetchMasterPortfolio = async (investorPan: string, sip: number = 75000, lumpsum: number = 0) => {
   try {
-    const response = await authenticatedFetch(`${BASE_URL}/dashboard/full/${investorPan}`);
+    const response = await authenticatedFetch(`${BASE_URL}/dashboard/full/${investorPan}?sip=${sip}&lumpsum=${lumpsum}`);
     if (!response.ok) throw new Error("Portfolio synchronization failed");
     
     const dashboard = await response.json();

@@ -23,12 +23,22 @@ import LedgerView from '../views/LedgerView';
 import FundDetailView from '../views/FundDetailView';
 import FundsListView from '../views/FundsListView';
 
-export default function Dashboard({ portfolioData }: { portfolioData: any }) {
+export default function Dashboard({ 
+  portfolioData,
+  sipAmount,
+  setSipAmount,
+  lumpsum,
+  setLumpsum 
+}: { 
+  portfolioData: any;
+  sipAmount: number;
+  setSipAmount: (val: number) => void;
+  lumpsum: number;
+  setLumpsum: (val: number) => void;
+}) {
   const [activeTab, setActiveTab] = useState('today');
   const [isPrivate, setIsPrivate] = useState(false);
   const [selectedFundName, setSelectedFundName] = useState<string | null>(null);
-  const [sipAmount, setSipAmount] = useState(75000);
-  const [lumpsum, setLumpsum] = useState(0);
 
   const investorPan = "CFXPR4533R";
 

@@ -7,6 +7,7 @@ import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.oreki.cas_injector.core.repository.FolioRepository;
@@ -44,8 +45,12 @@ public class DashboardController {
     }
 
     @GetMapping("/full/{pan}")
-    public ResponseEntity<DashboardSummaryDTO> getFullPortfolio(@PathVariable String pan) {
-        return ResponseEntity.ok(fullService.getFullPortfolio(pan));
+    public ResponseEntity<DashboardSummaryDTO> getFullPortfolio(
+        @PathVariable String pan,
+        @RequestParam(defaultValue = "75000") double sip,
+        @RequestParam(defaultValue = "0") double lumpsum
+    ) {
+        return ResponseEntity.ok(fullService.getFullPortfolio(pan, sip, lumpsum));
     }
 
     @DeleteMapping("/reset")
