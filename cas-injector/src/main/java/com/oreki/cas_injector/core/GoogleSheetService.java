@@ -8,6 +8,7 @@ import java.util.Map;
 import org.apache.commons.csv.CSVFormat;
 import org.apache.commons.csv.CSVParser;
 import org.apache.commons.csv.CSVRecord;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 
@@ -19,7 +20,8 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class GoogleSheetService {
 
-    private static final String CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vTq7bqtww_gsZv4FPXBWErHOSmuPSNrnL-82cno8rShNP9TsTOjJmkPBnocg_GqSWALUQo9YEI_dyto/pub?gid=412111003&single=true&output=csv";
+    @Value("${google.sheet.url}")
+    private String csvUrl;
 
     private final RestTemplate restTemplate;
 
@@ -30,7 +32,7 @@ public class GoogleSheetService {
     public List<StrategyTarget> fetchLatestStrategy() {
         List<StrategyTarget> targets = new ArrayList<>();
         try {
-            String csvData = restTemplate.getForObject(CSV_URL, String.class);
+            String csvData = restTemplate.getForObject(csvUrl, String.class);
             
             if (csvData == null || csvData.isBlank()) {
                 log.warn("🚨 Google Sheet returned empty data.");

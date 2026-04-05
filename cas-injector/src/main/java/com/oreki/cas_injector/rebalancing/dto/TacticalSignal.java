@@ -1,6 +1,8 @@
 package com.oreki.cas_injector.rebalancing.dto;
 
+import java.time.LocalDate;
 import java.util.List;
+
 public record TacticalSignal(
     String schemeName,
     String action,
@@ -9,9 +11,14 @@ public record TacticalSignal(
     double actualPercentage,
     double sipPercentage,
     String fundStatus,
-    int confidenceScore,
-    double sortinoRatio,    // 🚀 MUST BE HERE
-    double maxDrawdown,     // 🚀 MUST BE HERE
+    int convictionScore,
+    double sortinoRatio,
+    double maxDrawdown,
+    double peRatio,
+    double pbRatio,
+    double zScore,
+    double coveragePct,
+    LocalDate lastBuyDate,
+    String valuationStatus, // 🚀 NEW
     List<String> justifications
-
 ) {}

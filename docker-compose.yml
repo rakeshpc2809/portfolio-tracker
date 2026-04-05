@@ -1,11 +1,17 @@
+# Create a .env file to override these defaults in production
+# .env should contain:
+# DB_PASSWORD=your_secure_password
+# GOOGLE_SHEET_URL=your_csv_url
+# PORTFOLIO_API_KEY=your_secure_api_key
+
 services:
   postgres:
     image: postgres:16-alpine
     container_name: cas_postgres
     environment:
-      POSTGRES_USER: user
-      POSTGRES_PASSWORD: password
-      POSTGRES_DB: cas_db
+      POSTGRES_USER: ${DB_USER:-user}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-password}
+      POSTGRES_DB: ${DB_NAME:-cas_db}
     ports:
       - "5432:5432"
     volumes:
@@ -21,9 +27,11 @@ services:
     ports:
       - "8080:8080"
     environment:
-      - SPRING_DATASOURCE_URL=jdbc:postgresql://postgres:5432/cas_db
-      - SPRING_DATASOURCE_USERNAME=user
-      - SPRING_DATASOURCE_PASSWORD=password
+      - SPRING_DATASOURCE_URL=jdbc:postgresql://postgres:5432/${DB_NAME:-cas_db}
+      - SPRING_DATASOURCE_USERNAME=${DB_USER:-user}
+      - SPRING_DATASOURCE_PASSWORD=${DB_PASSWORD:-password}
+      - GOOGLE_SHEET_URL=${GOOGLE_SHEET_URL:-https://docs.google.com/spreadsheets/d/e/2PACX-1vTq7bqtww_gsZv4FPXBWErHOSmuPSNrnL-82cno8rShNP9TsTOjJmkPBnocg_GqSWALUQo9YEI_dyto/pub?gid=412111003&single=true&output=csv}
+      - PORTFOLIO_API_KEY=${PORTFOLIO_API_KEY:-dev-secret-key}
     volumes:
       - ./logs:/app/logs
       - ./cas-scraper:/app/cas-scraper
@@ -40,6 +48,18 @@ services:
       - JAVA_BACKEND_URL=http://java-backend:8080/api/cas/inject
     depends_on:
       - java-backend
+
+  # 3.5 The Python Scraper Service
+  python-scraper:
+    build: ./cas-scraper
+    container_name: cas_scraper_service
+    ports:
+      - "8001:8001"
+    environment:
+      - DATABASE_URL=postgresql://${DB_USER:-user}:${DB_PASSWORD:-password}@postgres:5432/${DB_NAME:-cas_db}
+    depends_on:
+      - postgres
+    restart: always
 
   # 4. The React Frontend
   react-frontend:

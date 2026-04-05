@@ -110,7 +110,7 @@ public class PortfolioOrchestrator {
             // Fetch Metrics
             Scheme scheme = schemeRepository.findByNameIgnoreCase(holding.getSchemeName()).orElse(null);
             String amfiCode = scheme != null ? scheme.getAmfiCode() : "";
-            MarketMetrics metrics = liveMetricsMap.getOrDefault(amfiCode, new MarketMetrics(0,0,0,0,0,0));
+            MarketMetrics metrics = liveMetricsMap.getOrDefault(amfiCode, new MarketMetrics(0,0,0,0,0,0,0,0,0, LocalDate.of(1970,1,1), "N/A"));
             
             // Run Base V1 Engine
             TacticalSignal rawSignal = engine.evaluate(holding, target, metrics, totalPortfolioValue);
@@ -164,7 +164,7 @@ if ("EXIT".equalsIgnoreCase(rawSignal.action()) || "DROPPED".equalsIgnoreCase(ta
         for (TacticalSignal sig : draftSignals) {
             if ("BUY".equalsIgnoreCase(sig.action())) {
                 double baseDeficit = Double.parseDouble(sig.amount().replace(",", ""));
-                double scoreMult = Math.max(0.2, sig.confidenceScore() / 100.0);
+                double scoreMult = Math.max(0.2, sig.convictionScore() / 100.0);
                 totalRiskAdjustedDemand += (baseDeficit * scoreMult);
             }
         }
@@ -177,7 +177,7 @@ if ("EXIT".equalsIgnoreCase(rawSignal.action()) || "DROPPED".equalsIgnoreCase(ta
 
             List<String> justs = new ArrayList<>(sig.justifications());
             double baseDeficit = Double.parseDouble(sig.amount().replace(",", ""));
-            double scoreMult = Math.max(0.2, sig.confidenceScore() / 100.0);
+            double scoreMult = Math.max(0.2, sig.convictionScore() / 100.0);
             double riskAdjustedDemand = baseDeficit * scoreMult;
             
             double allocatedAmount = 0.0;
@@ -206,28 +206,53 @@ if ("EXIT".equalsIgnoreCase(rawSignal.action()) || "DROPPED".equalsIgnoreCase(ta
     }
 
     private TacticalSignal createSignal(TacticalSignal s, String action, String amt, List<String> justs) {
-        return new TacticalSignal(s.schemeName(), action, amt, s.plannedPercentage(), s.actualPercentage(), s.sipPercentage(), s.fundStatus(), s.confidenceScore(),s.sortinoRatio(),s.maxDrawdown(), justs);
+        return new TacticalSignal(s.schemeName(), action, amt, s.plannedPercentage(), s.actualPercentage(), s.sipPercentage(), s.fundStatus(), s.convictionScore(), s.sortinoRatio(), s.maxDrawdown(), s.peRatio(), s.pbRatio(), s.zScore(), s.coveragePct(), s.lastBuyDate(), s.valuationStatus(), justs);
     }
 
    private Map<String, MarketMetrics> fetchLiveMetricsMap(String pan) {
+        // 1. Fetch Conviction Metrics
         String sql = """
-            SELECT m.amfi_code, m.sortino_ratio, m.cvar_5, m.win_rate, m.max_drawdown, m.conviction_score
+            SELECT m.amfi_code, m.sortino_ratio, m.cvar_5, m.win_rate, m.max_drawdown, 
+                   m.conviction_score, m.pe_ratio, m.pb_ratio, m.z_score, m.coverage_pct, m.valuation_status
             FROM fund_conviction_metrics m
             JOIN scheme s ON m.amfi_code = s.amfi_code 
             JOIN folio f ON s.folio_id = f.id
             WHERE f.investor_pan = ?
             AND m.calculation_date = (SELECT MAX(calculation_date) FROM fund_conviction_metrics)
             """;
+        
+        // 2. Fetch Last Buy Date per Scheme
+        String lastBuySql = """
+            SELECT s.amfi_code, MAX(t.transaction_date) as last_buy
+            FROM transaction t
+            JOIN scheme s ON t.scheme_id = s.id
+            JOIN folio f ON s.folio_id = f.id
+            WHERE f.investor_pan = ? AND t.transaction_type = 'BUY'
+            GROUP BY s.amfi_code
+        """;
+
+        Map<String, LocalDate> lastBuyDates = jdbcTemplate.queryForList(lastBuySql, pan).stream()
+            .collect(Collectors.toMap(
+                r -> (String) r.get("amfi_code"),
+                r -> r.get("last_buy") != null ? ((java.sql.Date) r.get("last_buy")).toLocalDate() : LocalDate.of(1970, 1, 1)
+            ));
+
         List<Map<String, Object>> rows = jdbcTemplate.queryForList(sql, pan);
         Map<String, MarketMetrics> map = new HashMap<>();
         for (Map<String, Object> r : rows) {
-            map.put((String)r.get("amfi_code"), new MarketMetrics(
+            String amfi = (String) r.get("amfi_code");
+            map.put(amfi, new MarketMetrics(
                 r.get("conviction_score") != null ? ((Number)r.get("conviction_score")).intValue() : 0,
                 r.get("sortino_ratio") != null ? ((Number)r.get("sortino_ratio")).doubleValue() : 0.0,
                 r.get("cvar_5") != null ? ((Number)r.get("cvar_5")).doubleValue() : 0.0,
                 r.get("win_rate") != null ? ((Number)r.get("win_rate")).doubleValue() : 0.0,
                 r.get("max_drawdown") != null ? ((Number)r.get("max_drawdown")).doubleValue() : 0.0,
-                0.0
+                r.get("pe_ratio") != null ? ((Number)r.get("pe_ratio")).doubleValue() : 0.0,
+                r.get("pb_ratio") != null ? ((Number)r.get("pb_ratio")).doubleValue() : 0.0,
+                r.get("z_score") != null ? ((Number)r.get("z_score")).doubleValue() : 0.0,
+                r.get("coverage_pct") != null ? ((Number)r.get("coverage_pct")).doubleValue() : 0.0,
+                lastBuyDates.getOrDefault(amfi, LocalDate.of(1970, 1, 1)),
+                (String) r.get("valuation_status")
             ));
         }
         return map;

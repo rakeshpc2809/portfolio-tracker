@@ -1,10 +1,12 @@
+import os
 from nsepython import index_pe_pb_div
 import pandas as pd
 from sqlalchemy import create_engine, text
 from datetime import datetime, timedelta
 
-# 1. Database Connection
-engine = create_engine('postgresql://user:password@postgres:5432/cas_db')
+# 1. Database Connection (Use env vars for security)
+DB_URL = os.getenv('DATABASE_URL', 'postgresql://user:password@postgres:5432/cas_db')
+engine = create_engine(DB_URL)
 
 def get_target_indices():
     """Fetch unique benchmark indices from the scheme table."""

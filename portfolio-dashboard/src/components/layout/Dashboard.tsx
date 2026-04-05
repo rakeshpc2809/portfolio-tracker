@@ -18,6 +18,8 @@ import DeviationTab from '../views/DeviationTab';
 import HoldingsTab from '../views/HoldingsTab';
 import TacticalPanel from '../views/TacticalPanel';
 import TransactionsTab from '../views/TransactionTab';
+import ErrorBoundary from '../ui/ErrorBoundary';
+import { OverviewSkeleton } from '../ui/Skeleton';
 
 export default function Dashboard({ portfolioData }: { portfolioData: any }) {
   const [activeTab, setActiveTab] = useState('overview');
@@ -34,6 +36,14 @@ export default function Dashboard({ portfolioData }: { portfolioData: any }) {
 
   // Helper to mask sensitive data
   const maskValue = (value: string | number) => isPrivate ? "••••••••" : value;
+
+  if (!portfolioData) {
+    return (
+      <div className="min-h-screen bg-[#020202] text-zinc-100 font-sans p-6 max-w-7xl mx-auto">
+        <OverviewSkeleton />
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-[#020202] text-zinc-100 font-sans selection:bg-blue-500/30">
@@ -80,37 +90,39 @@ export default function Dashboard({ portfolioData }: { portfolioData: any }) {
 
       {/* 🏗️ MAIN WORKSPACE */}
       <main className="relative z-10 p-6 pb-32 max-w-7xl mx-auto">
-        <AnimatePresence mode="wait">
-          <motion.div
-            key={activeTab}
-            initial={{ opacity: 0, y: 20, filter: "blur(10px)" }}
-            animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
-            exit={{ opacity: 0, y: -20, filter: "blur(10px)" }}
-            transition={{ duration: 0.4, ease: [0.23, 1, 0.32, 1] }}
-          >
-            {activeTab === 'overview' && (
-              <OverviewTab 
-                data={portfolioData.schemeBreakdown} 
-                portfolioSummary={portfolioData} 
-              />
-            )}
-            
-            {activeTab === 'ledger' && (
-              <TransactionsTab investorPan={investorPan} />
-            )}
+        <ErrorBoundary>
+          <AnimatePresence mode="wait">
+            <motion.div
+              key={activeTab}
+              initial={{ opacity: 0, y: 20, filter: "blur(10px)" }}
+              animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
+              exit={{ opacity: 0, y: -20, filter: "blur(10px)" }}
+              transition={{ duration: 0.4, ease: [0.23, 1, 0.32, 1] }}
+            >
+              {activeTab === 'overview' && (
+                <OverviewTab 
+                  data={portfolioData.schemeBreakdown} 
+                  portfolioSummary={portfolioData} 
+                />
+              )}
+              
+              {activeTab === 'ledger' && (
+                <TransactionsTab investorPan={investorPan} />
+              )}
 
-            {activeTab === 'deviation' && <DeviationTab data={portfolioData.schemeBreakdown} />}
-            
-            {activeTab === 'holdings' && <HoldingsTab data={portfolioData.schemeBreakdown} />}
-            
-            {activeTab === 'tactical' && (
-              <TacticalPanel 
-                signals={portfolioData.rawSignals} 
-                totalPortfolioValue={portfolioData.currentValueAmount} 
-              />
-            )}
-          </motion.div>
-        </AnimatePresence>
+              {activeTab === 'deviation' && <DeviationTab data={portfolioData.schemeBreakdown} />}
+              
+              {activeTab === 'holdings' && <HoldingsTab data={portfolioData.schemeBreakdown} />}
+              
+              {activeTab === 'tactical' && (
+                <TacticalPanel 
+                  signals={portfolioData.schemeBreakdown} 
+                  totalPortfolioValue={portfolioData.currentValueAmount} 
+                />
+              )}
+            </motion.div>
+          </AnimatePresence>
+        </ErrorBoundary>
       </main>
 
       {/* 🕹️ FLOATING COMMAND DOCK */}

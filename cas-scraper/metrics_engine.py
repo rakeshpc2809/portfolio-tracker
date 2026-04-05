@@ -9,7 +9,7 @@ from sqlalchemy.orm import declarative_base, sessionmaker
 from sqlalchemy.dialects.postgresql import insert
 
 # Configuration
-DB_URL = os.getenv('DATABASE_URL', 'postgresql://user:password@localhost:5432/cas_db')
+DB_URL = os.getenv('DATABASE_URL', 'postgresql://user:password@postgres:5432/cas_db')
 spring_db_url = os.getenv('SPRING_DATASOURCE_URL', '')
 if spring_db_url.startswith('jdbc:postgresql://'):
     parts = spring_db_url.split('jdbc:postgresql://')[1].split('?')[0]
@@ -221,14 +221,11 @@ def get_watchlist(engine):
             return {row[0]: row[1] for row in result}
     except: return {}
 
-def get_holdings(amfi_code: str) -> tuple:
-    """Returns (holdings_list, as_of_date)"""
-    try:
-        r = requests.get(f'{MFDATA}/schemes/{amfi_code}/holdings', timeout=10)
-        res = r.json()
+def get_holdings(amfi_code: str, scheme_name: str = "") -> tuple:
+    """Returns (holdings_list, as_of_date) with fallback search."""
+    def parse_holdings_res(res):
         if res.get('status') == 'success':
             data = res.get('data', {})
-            # mfdata.in usually returns month like '2026-03' in the holdings response
             as_of_str = data.get('month', '')
             as_of_date = None
             if as_of_str:
@@ -236,24 +233,44 @@ def get_holdings(amfi_code: str) -> tuple:
                 try: as_of_date = datetime.strptime(as_of_str, '%Y-%m').date()
                 except: pass
             return data.get('equity_holdings', []), as_of_date
+        return [], None
+
+    try:
+        # 1. Direct fetch
+        r = requests.get(f'{MFDATA}/schemes/{amfi_code}/holdings', timeout=10)
+        h, d = parse_holdings_res(r.json())
+        if h: return h, d
         
-        # Fallback to family holdings
+        # 2. Family fallback
         r_detail = requests.get(f'{MFDATA}/schemes/{amfi_code}', timeout=10)
-        d_res = r_detail.json()
-        if d_res.get('status') == 'success':
-            fid = d_res.get('data', {}).get('family_id')
+        det = r_detail.json()
+        if det.get('status') == 'success':
+            fid = det.get('data', {}).get('family_id')
             if fid:
                 r2 = requests.get(f'{MFDATA}/families/{fid}/holdings', timeout=10)
-                res2 = r2.json()
-                if res2.get('status') == 'success':
-                    data2 = res2.get('data', {})
-                    as_of_str = data2.get('month', '')
-                    as_of_date = None
-                    if as_of_str:
-                        from datetime import datetime
-                        try: as_of_date = datetime.strptime(as_of_str, '%Y-%m').date()
-                        except: pass
-                    return data2.get('equity_holdings', []), as_of_date
+                h, d = parse_holdings_res(r2.json())
+                if h: return h, d
+
+        # 3. Search Fallback (by Name)
+        if scheme_name:
+            # Clean name for search
+            q = scheme_name.split(' - ')[0].replace(' FUND', '').strip()
+            r_search = requests.get(f'{MFDATA}/search', params={'q': q}, timeout=10)
+            s_res = r_search.json()
+            if s_res.get('status') == 'success' and s_res.get('data'):
+                for match in s_res['data'][:3]: # Try top 3 matches
+                    alt_code = match.get('amfi_code')
+                    if alt_code and alt_code != amfi_code:
+                        r_alt = requests.get(f'{MFDATA}/schemes/{alt_code}/holdings', timeout=10)
+                        h, d = parse_holdings_res(r_alt.json())
+                        if h: return h, d
+                        # Try family of match
+                        fid = match.get('family_id')
+                        if fid:
+                            r_alt_fam = requests.get(f'{MFDATA}/families/{fid}/holdings', timeout=10)
+                            h, d = parse_holdings_res(r_alt_fam.json())
+                            if h: return h, d
+
     except Exception as e:
         print(f"      Holdings fetch error: {e}")
     return [], None
@@ -294,7 +311,7 @@ def daily_fetch():
 
             # 2. Compute if API missing or unreliable
             if pe is None:
-                holdings, holdings_as_of = get_holdings(code)
+                holdings, holdings_as_of = get_holdings(code, name)
                 if holdings:
                     res = compute_fund_ratios(holdings)
                     pe, pb, coverage = res['pe_ratio'], res['pb_ratio'], res['coverage_pct']

@@ -1,22 +1,29 @@
 package com.oreki.cas_injector.taxmanagement.service;
 
 
+import java.io.InputStream;
 import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.TreeMap;
 import java.util.stream.Collectors;
 
+import org.springframework.core.io.ClassPathResource;
 import org.springframework.stereotype.Service;
 
+import tools.jackson.core.type.TypeReference;
+import tools.jackson.databind.ObjectMapper;
 import com.oreki.cas_injector.backfill.service.NavService;
 import com.oreki.cas_injector.core.model.Scheme;
 import com.oreki.cas_injector.taxmanagement.dto.TlhOpportunity;
 import com.oreki.cas_injector.transactions.model.TaxLot;
 import com.oreki.cas_injector.transactions.repository.TaxLotRepository;
 
+import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
 
 @Service
@@ -25,22 +32,35 @@ public class TaxLossHarvestingService {
 
     private final TaxLotRepository taxLotRepository;
     private final NavService amfiService;
+    private final ObjectMapper objectMapper;
 
     // Minimum loss required to trigger a harvest (e.g., ₹1,000) to avoid "dusting"
     private static final double MIN_ABSOLUTE_LOSS_THRESHOLD = 1000.0;
     // Minimum percentage drop to consider the lot "broken"
     private static final double MIN_PERCENTAGE_DROP = -0.05; // -5%
 
-    // A basic proxy map: If you sell X, you must buy Y to maintain market exposure without triggering wash sale rules
-    private static final Map<String, String> PROXY_MAP = Map.of(
-        "MOTILAL OSWAL NIFTY MIDCAP 150 INDEX FUND - DIRECT PLAN GROWTH", "NIPPON INDIA NIFTY MIDCAP 150 INDEX FUND",
-        "PARAG PARIKH FLEXI CAP FUND - DIRECT PLAN GROWTH", "HDFC FLEXI CAP FUND - DIRECT PLAN",
-        "ICICI PRUDENTIAL NIFTY LARGEMIDCAP 250 INDEX FUND - DIRECT PLAN - GROWTH", "ZERODHA NIFTY LARGEMIDCAP 250 INDEX FUND"
-    );
+    // Externalized proxy map for maintaining market exposure without violating 
+    // commercial substance rules (avoiding circular trading suspicion)
+    private Map<String, String> proxyMap = Collections.emptyMap();
 
-    public TaxLossHarvestingService(TaxLotRepository taxLotRepository, NavService amfiService) {
+    public TaxLossHarvestingService(TaxLotRepository taxLotRepository, NavService amfiService, ObjectMapper objectMapper) {
         this.taxLotRepository = taxLotRepository;
         this.amfiService = amfiService;
+        this.objectMapper = objectMapper;
+    }
+
+    @PostConstruct
+    public void loadProxyMap() {
+        try {
+            InputStream is = new ClassPathResource("tlh_proxy.json").getInputStream();
+            Map<String, String> rawMap = objectMapper.readValue(is, new TypeReference<Map<String, String>>() {});
+            // Use a Case-Insensitive TreeMap for robust lookups
+            this.proxyMap = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
+            rawMap.forEach((k, v) -> this.proxyMap.put(k.trim(), v));
+            log.info("✅ Loaded {} TLH proxy pairs from configuration.", proxyMap.size());
+        } catch (Exception e) {
+            log.error("🚨 Failed to load TLH proxy map: {}", e.getMessage());
+        }
     }
 
     public List<TlhOpportunity> scanForOpportunities(String investorPan) {
@@ -94,7 +114,7 @@ public class TaxLossHarvestingService {
             // 5. Evaluate the accumulated FIFO harvest
             if (accumCapitalLoss >= MIN_ABSOLUTE_LOSS_THRESHOLD) {
                 String taxBucket = isShortTerm ? "STCL (Offsets any gain)" : "LTCL (Offsets only LTCG)";
-                String proxy = PROXY_MAP.getOrDefault(scheme.getName(), "Search for similar category peer");
+                String proxy = proxyMap.getOrDefault(scheme.getName().trim(), "Search for similar category peer");
 
                 opportunities.add(new TlhOpportunity(
                     scheme.getName(),

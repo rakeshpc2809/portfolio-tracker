@@ -82,6 +82,11 @@ public class RebalanceEngine {
             justifications.add("Strategic: Weight is within the ±2.5% target tolerance.");
         }
 
+        // 🚀 C. CONFIDENCE RATING
+        if (metrics.coveragePct() > 0 && metrics.coveragePct() < 85.0) {
+            justifications.add(String.format("⚠️ Low Confidence: Only %.1f%% of holdings were identified for valuation. Signal may be less accurate.", metrics.coveragePct()));
+        }
+
         // Format to string to prevent scientific notation (e.g., "10500.50")
         String formattedAmount = String.format(Locale.US, "%.2f", Math.abs(diffAmount));
 
@@ -94,8 +99,14 @@ public class RebalanceEngine {
             round(sipPct),
             status,
             calculateStrategicScore(action, status),
-            metrics.sortinoRatio(),    // 🚀 THIS PLUGS THE HOLE
-            metrics.maxDrawdown(), // 🚀 THIS PLUGS THE HOLE
+            metrics.sortinoRatio(),    
+            metrics.maxDrawdown(), 
+            metrics.peRatio(),
+            metrics.pbRatio(),
+            metrics.zScore(),      
+            metrics.coveragePct(), 
+            metrics.lastBuyDate(), 
+            metrics.valuationStatus(), // 🚀 PASS TO SIGNAL
             justifications
         );
     }

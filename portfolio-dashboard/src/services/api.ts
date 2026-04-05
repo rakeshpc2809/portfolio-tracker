@@ -1,49 +1,41 @@
 import { normalizeCategory } from '../utils/formatters';
 
 const BASE_URL = '/api';
+const API_KEY = 'dev-secret-key'; // In production, this should be an environment variable
+
+const authenticatedFetch = (url: string, options: RequestInit = {}) => {
+  return fetch(url, {
+    ...options,
+    headers: {
+      ...options.headers,
+      'X-API-KEY': API_KEY,
+    },
+  });
+};
 
 export const fetchMasterPortfolio = async (investorPan: string) => {
   try {
-    const [dashRes, sigRes, metRes] = await Promise.all([
-      fetch(`${BASE_URL}/dashboard/summary/${investorPan}`),
-      fetch(`${BASE_URL}/portfolio/${investorPan}/tactical-signals`),
-      fetch(`${BASE_URL}/metrics/latest/${investorPan}`)
-    ]);
-
+    const response = await authenticatedFetch(`${BASE_URL}/dashboard/full/${investorPan}`);
+    if (!response.ok) throw new Error("Portfolio synchronization failed");
     
-
-    const dashboard = await dashRes.json();
-    const signals = await sigRes.json();
-    const metrics = await metRes.json();
+    const dashboard = await response.json();
 
     const mergedData = (dashboard.schemeBreakdown || []).map((item: any) => {
-      const nameToMatch = item.schemeName?.trim().toLowerCase();
-      const m = metrics.find((met: any) => met.schemeName?.trim().toLowerCase() === nameToMatch);
-      const s = signals.find((sig: any) => sig.schemeName?.trim().toLowerCase() === nameToMatch);
-      
-      const actualPct = parseFloat(s?.actualPercentage) || parseFloat(item?.allocationPercentage) || 0;
-      const plannedPct = parseFloat(s?.plannedPercentage) || actualPct;
-      
       return {
         ...item,
-        ...s, 
-        convictionScore: m?.convictionScore ?? 0,
-        sortinoRatio: m?.sortinoRatio ?? 0,
-        maxDrawdown: m?.maxDrawdown ? Math.abs(m.maxDrawdown) : 0, 
         cleanCategory: normalizeCategory(item.category),
         shortName: item.schemeName ? item.schemeName.substring(0, 25) + "..." : "Unknown Fund",
-        actualPercentage: actualPct,
-        plannedPercentage: plannedPct,
-        deviation: (actualPct - plannedPct).toFixed(2)
+        deviation: (parseFloat(item.allocationPercentage || 0) - parseFloat(item.plannedPercentage || 0)).toFixed(2)
       };
     }).sort((a: any, b: any) => b.convictionScore - a.convictionScore);
 
-    return { ...dashboard, schemeBreakdown: mergedData, rawSignals: signals };
+    return { ...dashboard, schemeBreakdown: mergedData };
   } catch (error) {
     console.error("API Error:", error);
     throw error;
   }
 };
+
 
 export const fetchTransactions = async (
   pan: string, 
@@ -52,7 +44,7 @@ export const fetchTransactions = async (
   size: number = 20
 ) => {
   const typeParam = type !== "ALL" ? `&type=${type}` : "";
-  const response = await fetch(
+  const response = await authenticatedFetch(
     `${BASE_URL}/transactions?pan=${pan}${typeParam}&page=${page}&size=${size}&sort=date,desc`
   );
   if (!response.ok) throw new Error("Ledger synchronization failed");

@@ -1,6 +1,8 @@
 package com.oreki.cas_injector.core.dto;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
+import java.util.List;
 
 import com.oreki.cas_injector.core.utils.FundStatus;
 
@@ -15,6 +17,7 @@ import lombok.NoArgsConstructor;
 public class SchemePerformanceDTO {
     private String schemeName;
     private String isin;
+    private String amfiCode;
     
     // 1. Total Invested (Gross historical Buy amounts)
     private BigDecimal totalInvested; 
@@ -44,4 +47,23 @@ public class SchemePerformanceDTO {
     private String bucket;
 
     private String benchmarkIndex;
+
+    // Conviction & Risk Metrics
+    private int convictionScore;
+    private double sortinoRatio;
+    private double maxDrawdown;
+    private double allocationPercentage;
+    private double plannedPercentage;
+    
+    // Tactical Signal Details
+    private String signalType;
+    private String action;
+    private BigDecimal signalAmount;
+    private List<String> justifications;
+    private LocalDate lastBuyDate;
+    private double peRatio;
+    private double pbRatio;
+    private double zScore;
+    private double coveragePct;
+    private String valuationStatus;
 }

@@ -14,6 +14,7 @@ import com.oreki.cas_injector.core.repository.InvestorRepository;
 import com.oreki.cas_injector.core.repository.SchemeRepository;
 import com.oreki.cas_injector.dashboard.dto.DashboardSummaryDTO;
 import com.oreki.cas_injector.dashboard.service.DashboardService;
+import com.oreki.cas_injector.dashboard.service.PortfolioFullService;
 import com.oreki.cas_injector.transactions.repository.CapitalGainAuditRepository;
 import com.oreki.cas_injector.transactions.repository.TaxLotRepository;
 import com.oreki.cas_injector.transactions.repository.TransactionRepository;
@@ -23,10 +24,11 @@ import lombok.extern.slf4j.Slf4j;
 @RestController
 @RequestMapping("/dashboard")
 @Slf4j
-@CrossOrigin(origins = "http://localhost:5173")
+@CrossOrigin(origins = "*")
 public class DashboardController {
 
     @Autowired private DashboardService dashboardService;
+    @Autowired private PortfolioFullService fullService;
     
     // Repositories for the "Wipe" operation
     @Autowired private TransactionRepository txnRepo;
@@ -39,6 +41,11 @@ public class DashboardController {
     @GetMapping("/summary/{pan}")
     public ResponseEntity<DashboardSummaryDTO> getSummary(@PathVariable String pan) {
         return ResponseEntity.ok(dashboardService.getInvestorSummary(pan));
+    }
+
+    @GetMapping("/full/{pan}")
+    public ResponseEntity<DashboardSummaryDTO> getFullPortfolio(@PathVariable String pan) {
+        return ResponseEntity.ok(fullService.getFullPortfolio(pan));
     }
 
     @DeleteMapping("/reset")

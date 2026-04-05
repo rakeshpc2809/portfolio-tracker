@@ -9,3 +9,5 @@ lxml
 openpyxl
 yfinance
 requests
+fastapi
+uvicorn

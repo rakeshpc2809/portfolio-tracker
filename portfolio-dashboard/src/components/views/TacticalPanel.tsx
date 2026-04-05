@@ -2,7 +2,8 @@ import React, { useState, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   TrendingUp, ShieldAlert, CheckCircle2, ChevronRight, 
-  Info, ArrowRight, Wallet, Zap, Receipt 
+  Info, ArrowRight, Wallet, Zap, Receipt,
+  AlertTriangle, Snowflake, Clock
 } from 'lucide-react';
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, 
@@ -13,15 +14,19 @@ import { formatCurrency } from '../../utils/formatters';
 interface TacticalSignal {
   schemeName: string;
   action: 'BUY' | 'EXIT' | 'HOLD';
-  amount: string;
+  signalAmount: number;
   plannedPercentage: number;
-  actualPercentage: number;
-  sipPercentage: number;
-  fundStatus: string;
-  confidenceScore: number;
+  allocationPercentage: number;
+  convictionScore: number;
   sortinoRatio: number;
   maxDrawdown: number;
+  peRatio: number;
+  pbRatio: number;
+  zScore: number;
+  coveragePct: number;
+  lastBuyDate: string; 
   justifications: string[];
+  valuationStatus: string;
 }
 
 interface TacticalPanelProps {
@@ -42,7 +47,7 @@ const TacticalPanel: React.FC<TacticalPanelProps> = ({
     // 1. CONSTANT: Cash from Exits (from Backend)
     const exitProceeds = signals
       .filter(s => s.action === 'EXIT')
-      .reduce((acc, s) => acc + (parseFloat(s.amount) || 0), 0);
+      .reduce((acc, s) => acc + (s.signalAmount || 0), 0);
 
     // 2. TOTAL: Live War Chest
     const currentWarChest = (sipAmount || 0) + (lumpsum || 0) + exitProceeds;
@@ -50,32 +55,44 @@ const TacticalPanel: React.FC<TacticalPanelProps> = ({
     // 3. REFERENCE: What did the backend originally want to buy?
     const apiTotalBuyRequest = signals
       .filter(s => s.action === 'BUY')
-      .reduce((acc, s) => acc + (parseFloat(s.amount) || 0), 0);
+      .reduce((acc, s) => acc + (s.signalAmount || 0), 0);
 
     // 4. MAPPING: 
     const scaled = signals.map(s => {
+      // 🚀 B. COOLDOWN LOGIC (21 days window)
+      const lastBuy = new Date(s.lastBuyDate);
+      const diffDays = (new Date().getTime() - lastBuy.getTime()) / (1000 * 3600 * 24);
+      const isOnCooldown = diffDays < 21;
+
+      // 🚀 C. CONFIDENCE LOGIC
+      const isLowConfidence = s.coveragePct > 0 && s.coveragePct < 85;
+
       // EXITS: Do not scale. Keep backend amount.
-      if (s.action === 'EXIT') return s; 
+      if (s.action === 'EXIT') return { ...s, displayAmount: s.signalAmount, isOnCooldown, isLowConfidence }; 
       
       // HOLDS: Force to 0.
-      if (s.action === 'HOLD') return { ...s, amount: "0" };
+      if (s.action === 'HOLD') return { ...s, displayAmount: 0, isOnCooldown, isLowConfidence };
 
       // BUYS: These are the only ones that "breathe" with the slider
       if (s.action === 'BUY') {
-        const originalBuyAmount = parseFloat(s.amount) || 0;
-        const weight = originalBuyAmount / apiTotalBuyRequest;
-        const liveScaledAmount = weight * currentWarChest;
+        const originalBuyAmount = s.signalAmount || 0;
+        const weight = originalBuyAmount / (apiTotalBuyRequest || 1); // Avoid division by zero
         
-        return { ...s, amount: liveScaledAmount.toFixed(2) };
+        // If on cooldown, effectively force amount to 0 for display
+        const liveScaledAmount = isOnCooldown ? 0 : (weight * currentWarChest);
+        
+        return { ...s, displayAmount: liveScaledAmount, isOnCooldown, isLowConfidence };
       }
-      return s;
+      return { ...s, displayAmount: 0, isOnCooldown, isLowConfidence };
     });
 
     // 5. SORT: Actionable (High Amount) -> Non-actionable
-    const sorted = [...scaled].sort((a, b) => {
+    const sorted = [...scaled].sort((a: any, b: any) => {
       if (a.action === 'HOLD' && b.action !== 'HOLD') return 1;
       if (b.action === 'HOLD' && a.action !== 'HOLD') return -1;
-      return (parseFloat(b.amount) || 0) - (parseFloat(a.amount) || 0);
+      if (a.isOnCooldown && !b.isOnCooldown) return 1;
+      if (!a.isOnCooldown && b.isOnCooldown) return -1;
+      return (b.displayAmount || 0) - (a.displayAmount || 0);
     });
 
     return { 
@@ -88,16 +105,16 @@ const TacticalPanel: React.FC<TacticalPanelProps> = ({
   // 📊 Live Chart Simulation Data
   const chartData = useMemo(() => {
     return scaledSignals.map(s => {
-      const amt = parseFloat(s.amount) || 0;
+      const amt = s.displayAmount || 0;
       const weightChange = totalPortfolioValue > 0 ? (amt / totalPortfolioValue) * 100 : 0;
       
-      let simulated = s.actualPercentage || 0;
+      let simulated = s.allocationPercentage || 0;
       if (s.action === 'BUY') simulated += weightChange;
       if (s.action === 'EXIT') simulated -= weightChange;
 
       return {
         name: s.schemeName ? s.schemeName.split(' - ')[0].substring(0, 12) + '...' : 'Unknown',
-        Actual: parseFloat((s.actualPercentage || 0).toFixed(2)),
+        Actual: parseFloat((s.allocationPercentage || 0).toFixed(2)),
         Target: parseFloat((s.plannedPercentage || 0).toFixed(2)),
         Simulated: parseFloat(Math.max(0, simulated).toFixed(2)),
       };
@@ -180,23 +197,28 @@ const TacticalPanel: React.FC<TacticalPanelProps> = ({
           <h3 className="text-[10px] font-black text-zinc-500 uppercase tracking-widest mb-4 flex items-center gap-2">
             <ArrowRight size={12}/> Execution Roadmap
           </h3>
-          {scaledSignals.map((signal) => (
+          {scaledSignals.map((signal: any) => (
             <div 
               key={signal.schemeName}
               onClick={() => setSelectedSchemeName(signal.schemeName)}
               className={`flex items-center justify-between p-4 rounded-xl border transition-all cursor-pointer group
-                ${selectedSchemeName === signal.schemeName ? 'bg-zinc-800 border-blue-500/50 shadow-lg' : 'bg-zinc-900 border-zinc-800 hover:border-zinc-700'}`}
+                ${selectedSchemeName === signal.schemeName ? 'bg-zinc-800 border-blue-500/50 shadow-lg' : 'bg-zinc-900 border-zinc-800 hover:border-zinc-700'}
+                ${signal.isOnCooldown ? 'opacity-50 grayscale-[0.5]' : ''}`}
             >
               <div className="flex items-center gap-4">
                 <div className={`p-2 rounded-lg ${
                   signal.action === 'BUY' ? 'bg-emerald-500/10 text-emerald-500' : 
                   signal.action === 'EXIT' ? 'bg-rose-500/10 text-rose-500' : 'bg-zinc-800 text-zinc-500'
                 }`}>
-                  {signal.action === 'BUY' ? <TrendingUp size={18}/> : <ShieldAlert size={18}/>}
+                  {signal.isOnCooldown ? <Snowflake size={18}/> : (signal.action === 'BUY' ? <TrendingUp size={18}/> : <ShieldAlert size={18}/>)}
                 </div>
                 <div>
-                  <p className="text-xs font-black text-zinc-100 group-hover:text-white transition-colors">{signal.schemeName.split(' - ')[0]}</p>
-                  <p className="text-[9px] text-zinc-500 font-bold uppercase tracking-widest mt-0.5">SCORE: {signal.confidenceScore}</p>
+                  <div className="flex items-center gap-2">
+                    <p className="text-xs font-black text-zinc-100 group-hover:text-white transition-colors">{signal.schemeName.split(' - ')[0]}</p>
+                    {signal.isLowConfidence && <AlertTriangle size={12} className="text-amber-500" />}
+                    {signal.isOnCooldown && <span className="text-[8px] font-black text-blue-400 uppercase tracking-tighter bg-blue-500/10 px-1 rounded">Cooldown</span>}
+                  </div>
+                  <p className="text-[9px] text-zinc-500 font-bold uppercase tracking-widest mt-0.5">SCORE: {signal.convictionScore}</p>
                 </div>
               </div>
               <div className="flex items-center gap-4">
@@ -206,7 +228,7 @@ const TacticalPanel: React.FC<TacticalPanelProps> = ({
     signal.action === 'EXIT' ? 'text-rose-400' : 'text-white'
   }`}>
     {signal.action === 'BUY' ? '+ ' : signal.action === 'EXIT' ? '- ' : ''}
-    {signal.action === 'HOLD' ? '—' : formatCurrency(Math.abs(parseFloat(signal.amount)))}
+    {signal.action === 'HOLD' ? '—' : formatCurrency(Math.abs(signal.displayAmount))}
   </p>
   <p className={`text-[9px] font-bold uppercase tracking-widest ${
     signal.action === 'BUY' ? 'text-emerald-500' : 
@@ -239,6 +261,38 @@ const TacticalPanel: React.FC<TacticalPanelProps> = ({
                   <div className="px-3 py-1.5 bg-zinc-950 rounded border border-zinc-800">
                     <p className="text-[8px] text-zinc-500 font-black uppercase tracking-widest">Drawdown</p>
                     <p className="text-sm font-black text-rose-400">{Math.abs(activeScheme.maxDrawdown || 0).toFixed(1)}%</p>
+                  </div>
+                  <div className="px-3 py-1.5 bg-zinc-950 rounded border border-zinc-800">
+                    <p className="text-[8px] text-zinc-500 font-black uppercase tracking-widest">PE Ratio</p>
+                    <p className="text-sm font-black text-amber-400">
+                      {activeScheme.peRatio > 0 ? activeScheme.peRatio.toFixed(1) : 'N/A'}
+                    </p>
+                  </div>
+                  <div className="px-3 py-1.5 bg-zinc-950 rounded border border-zinc-800">
+                    <p className="text-[8px] text-zinc-500 font-black uppercase tracking-widest">Valuation</p>
+                    <p className={`text-sm font-black ${
+                      (activeScheme.valuationStatus?.includes('CHEAP') || activeScheme.valuationStatus?.includes('VALUE')) ? 'text-emerald-400' : 
+                      (activeScheme.valuationStatus?.includes('EXPENSIVE') || activeScheme.valuationStatus?.includes('PREMIUM')) ? 'text-rose-400' : 'text-zinc-400'
+                    }`}>
+                      {activeScheme.valuationStatus || 'N/A'}
+                    </p>
+                  </div>
+                </div>
+
+                {activeScheme.valuationStatus?.includes('(REL)') && (
+                  <p className="text-[9px] text-zinc-500 font-bold mb-6 italic">
+                    * Showing Relative Valuation. Z-Score will activate after 10 days of history.
+                  </p>
+                )}
+
+                <div className="flex flex-wrap gap-2 mb-8">
+                  <div className="flex items-center gap-1.5 text-[10px] text-zinc-400 font-bold bg-zinc-950 px-2 py-1 rounded border border-zinc-800">
+                    <Clock size={10} />
+                    Last Buy: {activeScheme.lastBuyDate !== '1970-01-01' ? new Date(activeScheme.lastBuyDate).toLocaleDateString() : 'Never'}
+                  </div>
+                  <div className="flex items-center gap-1.5 text-[10px] text-zinc-400 font-bold bg-zinc-950 px-2 py-1 rounded border border-zinc-800">
+                    <Info size={10} />
+                    Coverage: {activeScheme.coveragePct.toFixed(1)}%
                   </div>
                 </div>
                 <div className="space-y-4">

@@ -9,9 +9,9 @@ import java.util.List;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
+import com.oreki.cas_injector.backfill.repository.HistoricalNavRepository;
 import com.oreki.cas_injector.backfill.service.NavService;
 import com.oreki.cas_injector.core.dto.SchemeDetailsDTO;
 import com.oreki.cas_injector.core.dto.SchemePerformanceDTO;
@@ -28,16 +28,20 @@ import com.oreki.cas_injector.transactions.repository.CapitalGainAuditRepository
 import com.oreki.cas_injector.transactions.repository.TaxLotRepository;
 import com.oreki.cas_injector.transactions.repository.TransactionRepository;
 
+import lombok.RequiredArgsConstructor;
+
 
 
 @Service
+@RequiredArgsConstructor
 public class DashboardService {
 
-    @Autowired private InvestorRepository investorRepo;
-    @Autowired private TaxLotRepository taxLotRepo;
-    @Autowired private CapitalGainAuditRepository auditRepo;
-    @Autowired private TransactionRepository txnRepo;
-    @Autowired private NavService navService;
+    private final InvestorRepository investorRepo;
+    private final TaxLotRepository taxLotRepo;
+    private final CapitalGainAuditRepository auditRepo;
+    private final TransactionRepository txnRepo;
+    private final NavService navService;
+    private final HistoricalNavRepository historicalNavRepo;
 
     public DashboardSummaryDTO getInvestorSummary(String pan) {
         Investor investor = investorRepo.findById(pan)
@@ -45,9 +49,7 @@ public class DashboardService {
 
         List<TransactionDTO> totalCashFlow=new ArrayList<>();
         // Pre-fetch all audits for this investor once to avoid repetitive DB calls
-        List<CapitalGainAudit> allInvestorAudits = auditRepo.findAll().stream()
-            .filter(a -> a.getSellTransaction().getScheme().getFolio().getInvestor().getPan().equals(pan))
-            .collect(Collectors.toList());
+        List<CapitalGainAudit> allInvestorAudits = auditRepo.findAllBySellTransactionSchemeFolioInvestorPan(pan);
 
         // 1. Calculate the Breakdown per Scheme
         List<SchemePerformanceDTO> breakdown = investor.getFolios().stream()
@@ -138,7 +140,13 @@ public class DashboardService {
 
            List<TransactionDTO> cashFlows = scheme.getTransactions().stream()
                     .map(t -> {
-                        return new TransactionDTO(t.getAmount().negate(), t.getDate());
+                        // 🚀 PRECISION UPGRADE: Try to use Historical NAV for the exact date 
+                        // to ensure cash flows are SEBI-accurate if 'amount' was approximated
+                        BigDecimal preciseAmount = historicalNavRepo.findByAmfiCodeAndNavDate(scheme.getAmfiCode(), t.getDate())
+                            .map(h -> h.getNav().multiply(t.getUnits().abs()))
+                            .orElse(t.getAmount());
+                            
+                        return new TransactionDTO(preciseAmount.negate(), t.getDate());
                     })
                     .collect(Collectors.toList());
                                 
@@ -164,6 +172,7 @@ public class DashboardService {
                 return SchemePerformanceDTO.builder()
                     .schemeName(scheme.getName())
                     .isin(scheme.getIsin())
+                    .amfiCode(scheme.getAmfiCode())
                     .totalInvested(totalInvested)
                     .soldAmountCost(soldAmountCost)
                     .currentInvested(currentInvested)
