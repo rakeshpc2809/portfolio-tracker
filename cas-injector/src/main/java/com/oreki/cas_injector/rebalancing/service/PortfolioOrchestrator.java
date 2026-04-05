@@ -18,6 +18,7 @@ import com.oreki.cas_injector.convictionmetrics.dto.MarketMetrics;
 import com.oreki.cas_injector.convictionmetrics.service.ConvictionScoringService;
 import com.oreki.cas_injector.core.GoogleSheetService;
 import com.oreki.cas_injector.core.dto.AggregatedHolding;
+import com.oreki.cas_injector.core.dto.SchemeDetailsDTO;
 import com.oreki.cas_injector.core.model.Scheme;
 import com.oreki.cas_injector.core.repository.SchemeRepository;
 import com.oreki.cas_injector.core.service.SystemicRiskMonitorService;
@@ -151,6 +152,15 @@ if ("EXIT".equalsIgnoreCase(rawSignal.action()) || "DROPPED".equalsIgnoreCase(ta
                  justifications.add(String.format("💡 Tax Opportunity: You have a ₹%,.0f short-term loss. Consider harvesting.", Math.abs(holding.getStcgAmount())));
                  draftSignals.add(createSignal(rawSignal, "HOLD", "0", justifications));
             }
+            // 🚀 REBALANCE REDIRECT: Capture TRIM proceeds
+            else if ("TRIM".equalsIgnoreCase(rawSignal.action())) {
+                double trimAmount = Double.parseDouble(rawSignal.amount().replace(",", ""));
+                if (trimAmount > 0) {
+                    justifications.add(String.format("⚖️ Rebalance Redirect: Redirecting ₹%,.0f TRIM proceeds to underweight high-conviction funds.", trimAmount));
+                    totalDeployableCash += trimAmount;
+                }
+                draftSignals.add(createSignal(rawSignal, rawSignal.action(), rawSignal.amount(), justifications));
+            }
             else {
                 draftSignals.add(createSignal(rawSignal, rawSignal.action(), rawSignal.amount(), justifications));
             }
@@ -176,6 +186,14 @@ if ("EXIT".equalsIgnoreCase(rawSignal.action()) || "DROPPED".equalsIgnoreCase(ta
             if (!"BUY".equalsIgnoreCase(sig.action())) return sig;
 
             List<String> justs = new ArrayList<>(sig.justifications());
+            
+            // 🚀 COOLDOWN LOGIC: Check for recent BUY transactions (21-day window)
+            long daysSinceLastBuy = ChronoUnit.DAYS.between(sig.lastBuyDate(), LocalDate.now());
+            if (daysSinceLastBuy < 21) {
+                justs.add(String.format("❄️ Cooldown Active: Last buy was %d days ago (21-day limit). Skipping further BUY signals to prevent concentration risk.", daysSinceLastBuy));
+                return createSignal(sig, "HOLD", "0", justs);
+            }
+
             double baseDeficit = Double.parseDouble(sig.amount().replace(",", ""));
             double scoreMult = Math.max(0.2, sig.convictionScore() / 100.0);
             double riskAdjustedDemand = baseDeficit * scoreMult;
@@ -186,8 +204,6 @@ if ("EXIT".equalsIgnoreCase(rawSignal.action()) || "DROPPED".equalsIgnoreCase(ta
                 double shareOfPool = riskAdjustedDemand / finalDemand;
                 allocatedAmount = finalCashPool * shareOfPool;
                 
-                // 🐛 THE FIX: Strictly cap the allocation at the Risk-Adjusted Demand. 
-                // Never dump excess cash into a weak fund just because the cash is available.
                 allocatedAmount = Math.min(allocatedAmount, riskAdjustedDemand);
                 
             } else if (finalCashPool <= 0) {
@@ -260,11 +276,14 @@ if ("EXIT".equalsIgnoreCase(rawSignal.action()) || "DROPPED".equalsIgnoreCase(ta
         Map<Scheme, List<TaxLot>> groupedLots = lots.stream().collect(Collectors.groupingBy(TaxLot::getScheme));
         return groupedLots.entrySet().stream().map(entry -> {
             Scheme scheme = entry.getKey();
-            double liveNav = amfiService.getLatestSchemeDetails(scheme.getAmfiCode()) != null ? amfiService.getLatestSchemeDetails(scheme.getAmfiCode()).getNav().doubleValue() : 0.0;
+            
+            // 🚀 EFFICIENCY FIX: Call NavService only once per scheme
+            SchemeDetailsDTO details = amfiService.getLatestSchemeDetails(scheme.getAmfiCode());
+            double liveNav = (details != null && details.getNav() != null) ? details.getNav().doubleValue() : 0.0;
 
          double units = 0, cost = 0, val = 0, ltcgGains = 0, stcgGains = 0;
             double ltcgVal = 0, stcgVal = 0;
-            int minDaysToLtcg = 365; // Start high and find the minimum
+            int minDaysToLtcg = 365; 
             LocalDate oldest = LocalDate.now();
 
             for (TaxLot lot : entry.getValue()) {
@@ -278,9 +297,8 @@ if ("EXIT".equalsIgnoreCase(rawSignal.action()) || "DROPPED".equalsIgnoreCase(ta
                 long age = ChronoUnit.DAYS.between(lot.getBuyDate(), LocalDate.now());
                 double gain = lVal - lCost;
                 
-                // Asset Category Logic
                 String cat = (scheme.getAssetCategory() != null) ? scheme.getAssetCategory().toUpperCase() : "EQUITY";
-                boolean isLtcg = (age > 365); // Simplified for Equity/ELSS
+                boolean isLtcg = (age > 365); 
 
                 if (isLtcg) {
                     ltcgVal += lVal;
@@ -288,30 +306,27 @@ if ("EXIT".equalsIgnoreCase(rawSignal.action()) || "DROPPED".equalsIgnoreCase(ta
                 } else {
                     stcgVal += lVal;
                     stcgGains += Math.max(0, gain);
-                    // 🚀 FIX: Calculate days remaining for this specific lot
                     int daysLeft = 365 - (int) age;
                     if (daysLeft < minDaysToLtcg) minDaysToLtcg = daysLeft;
                 }
             }
             
-            // If there are no STCG lots, days to next should be 0
             int finalDaysToNext = (stcgVal > 0) ? minDaysToLtcg : 0;
 
-            // 🚀 MATCH THE 13-ARGUMENT CONSTRUCTOR EXACTLY
             return new AggregatedHolding(
-                scheme.getName(),       // 1
-                units,                  // 2
-                val,                    // 3
-                cost,                   // 4
-                ltcgVal,                // 5
-                ltcgGains,              // 6
-                stcgVal,                // 7
-                stcgGains,              // 8
-                finalDaysToNext,        // 9 (Calculated!)
-                (int)ChronoUnit.DAYS.between(oldest, LocalDate.now()), // 10
-                scheme.getAssetCategory(), // 11
-                "ACTIVE",               // 12
-                scheme.getIsin()        // 13
+                scheme.getName(),       
+                units,                  
+                val,                    
+                cost,                   
+                ltcgVal,                
+                ltcgGains,              
+                stcgVal,                
+                stcgGains,              
+                finalDaysToNext,        
+                (int)ChronoUnit.DAYS.between(oldest, LocalDate.now()), 
+                scheme.getAssetCategory(), 
+                "ACTIVE",               
+                scheme.getIsin()        
             );
         }).collect(Collectors.toList());
     }

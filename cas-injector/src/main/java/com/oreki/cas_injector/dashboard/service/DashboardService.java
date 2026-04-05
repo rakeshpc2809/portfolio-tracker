@@ -6,6 +6,7 @@ import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
@@ -48,14 +49,18 @@ public class DashboardService {
             .orElseThrow(() -> new RuntimeException("Investor not found"));
 
         List<TransactionDTO> totalCashFlow=new ArrayList<>();
-        // Pre-fetch all audits for this investor once to avoid repetitive DB calls
+        
+        // 🚀 EFFICIENCY FIX: Pre-group audits by Scheme ID to avoid O(n*m) scan inside the loop
         List<CapitalGainAudit> allInvestorAudits = auditRepo.findAllBySellTransactionSchemeFolioInvestorPan(pan);
+        Map<Long, List<CapitalGainAudit>> auditsBySchemeId = allInvestorAudits.stream()
+            .collect(Collectors.groupingBy(a -> a.getSellTransaction().getScheme().getId()));
 
         // 1. Calculate the Breakdown per Scheme
         List<SchemePerformanceDTO> breakdown = investor.getFolios().stream()
             .flatMap(f -> f.getSchemes().stream())
             .map(scheme -> {
                 List<TaxLot> allLots = scheme.getTaxLots();
+                List<CapitalGainAudit> schemeAudits = auditsBySchemeId.getOrDefault(scheme.getId(), List.of());
 
                 // A. TOTAL INVESTED (Historical Gross)
                 BigDecimal totalInvested = scheme.getTransactions().stream()
@@ -66,8 +71,7 @@ public class DashboardService {
                     .reduce(BigDecimal.ZERO, BigDecimal::add);
 
                 // B. SOLD AMOUNT (Cost basis of exited units)
-                BigDecimal soldAmountCost = allInvestorAudits.stream()
-                    .filter(a -> a.getSellTransaction().getScheme().getId().equals(scheme.getId()))
+                BigDecimal soldAmountCost = schemeAudits.stream()
                     .map(audit -> audit.getUnitsMatched().multiply(audit.getTaxLot().getCostBasisPerUnit()))
                     .map(CommonUtils.SCALE_MONEY)
                     .reduce(BigDecimal.ZERO, BigDecimal::add);
@@ -80,8 +84,7 @@ public class DashboardService {
                     .reduce(BigDecimal.ZERO, BigDecimal::add);
 
                 // D. REALIZED GAIN (Profit/Loss booked)
-                BigDecimal schemeGain = allInvestorAudits.stream()
-                    .filter(a -> a.getSellTransaction().getScheme().getId().equals(scheme.getId()))
+                BigDecimal schemeGain = schemeAudits.stream()
                     .map(CapitalGainAudit::getRealizedGain)
                     .map(CommonUtils.SCALE_MONEY)
                     .reduce(BigDecimal.ZERO, BigDecimal::add);
@@ -91,7 +94,7 @@ public class DashboardService {
                     .filter(t -> "BUY".equalsIgnoreCase(t.getTransactionType()) || 
                     "SELL".equalsIgnoreCase(t.getTransactionType())).count();
 
-                // F. CURRENT VALUE (Placeholder for now)
+                // F. CURRENT VALUE
                 SchemeDetailsDTO schemeDetails = navService.getLatestSchemeDetails(scheme.getAmfiCode());
 
                 // 2. Extract the NAV for your valuation math
@@ -103,20 +106,15 @@ public class DashboardService {
                 // 4. Enhanced Bucket Logic for 2026
                 String bucket;
                 if (amfiCategory.contains("ARBITRAGE")) {
-                    // Rationale: Taxed as Equity (12.5% LTCG after 1yr). 
-                    // Best "Safe" place for rebalancing dry powder.
                     bucket = "SAFE_REBALANCER_EQUITY_TAX"; 
                 } 
                 else if (amfiCategory.contains("GOLD") || schemeDetails.getSchemeName().toUpperCase().contains("GOLD")) {
                     bucket = "GOLD_HEDGE_24M";
                 }
                 else if (amfiCategory.contains("EQUITY") || amfiCategory.contains("INDEX") || amfiCategory.contains("FLEXI") || amfiCategory.contains("GROWTH")) {
-                    // Rationale: Standard 12-month LTCG threshold.
                     bucket = "AGGRESSIVE_GROWTH";
                 } 
                 else if (amfiCategory.contains("TERM") || amfiCategory.contains("LIQUID") || amfiCategory.contains("DEBT")) {
-                    // Rationale: Post-April 2023 Debt is slab-taxed forever. 
-                    // Only use for ultra-short term (under 3 months).
                     bucket = "DEBT_SLAB_TAXED";
                 } 
                 else {
@@ -140,8 +138,6 @@ public class DashboardService {
 
            List<TransactionDTO> cashFlows = scheme.getTransactions().stream()
                     .map(t -> {
-                        // 🚀 PRECISION UPGRADE: Try to use Historical NAV for the exact date 
-                        // to ensure cash flows are SEBI-accurate if 'amount' was approximated
                         BigDecimal preciseAmount = historicalNavRepo.findByAmfiCodeAndNavDate(scheme.getAmfiCode(), t.getDate())
                             .map(h -> h.getNav().multiply(t.getUnits().abs()))
                             .orElse(t.getAmount());
@@ -161,10 +157,6 @@ public class DashboardService {
                     cashFlows.add(new TransactionDTO(currentValue, LocalDate.now()));
                 }
               
-                // System.out.println("--- XIRR Debug: " + scheme.getName() + " ---");
-                // cashFlows.forEach(tx -> System.out.println(tx.getDate() + " | Amount: " + tx.getAmount()));
-                // System.out.println("------------------------------------");
-                
                 BigDecimal xirrValue = CommonUtils.SOLVE_XIRR.apply(cashFlows);
                 String displayXirr = CommonUtils.SCALE_MONEY.apply(xirrValue).toString() + "%";
 
@@ -215,7 +207,7 @@ public class DashboardService {
             .reduce(BigDecimal.ZERO, BigDecimal::add);
 
         BigDecimal totalLTCG = allInvestorAudits.stream()
-    .filter(a -> a.getTaxCategory().contains("LTCG")) // Catches EQUITY_LTCG, GOLD_LTCG, etc.
+    .filter(a -> a.getTaxCategory().contains("LTCG")) 
     .map(CapitalGainAudit::getRealizedGain)
     .reduce(BigDecimal.ZERO, BigDecimal::add);
 
@@ -228,11 +220,10 @@ BigDecimal totalSTCG = allInvestorAudits.stream()
          ? aggregateUnrealizedGain.divide(aggregateTotalInvested, 4, RoundingMode.HALF_UP)
         .multiply(new BigDecimal("100")): BigDecimal.ZERO;
 
-        // Format it using your SCALE_MONZY function
         String overallReturn = CommonUtils.SCALE_MONEY.apply(portfolioPerformance) + "%";
 
         BigDecimal totalPortfolioValue = breakdown.stream()
-            .map(SchemePerformanceDTO::getCurrentValue) // Assuming this is your calculated market value
+            .map(SchemePerformanceDTO::getCurrentValue) 
             .reduce(BigDecimal.ZERO, BigDecimal::add);
 
         totalCashFlow.add(new TransactionDTO(totalPortfolioValue, LocalDate.now()));
@@ -248,13 +239,13 @@ BigDecimal totalSTCG = allInvestorAudits.stream()
             .investorName(investor.getName())
             .totalFolios(investor.getFolios().size())
             .totalSchemes(breakdown.size())
-            .totalTransactions(txnRepo.countActualTransactionsByPan(pan)) // Uses the DB query excluding stamp duty
+            .totalTransactions(txnRepo.countActualTransactionsByPan(pan)) 
             .totalInvestedAmount(aggregateTotalInvested)
             .currentInvestedAmount(aggregateCurrentInvested)
             .currentValueAmount(aggregateCurrentValue)
             .totalRealizedGain(aggregateRealizedGain)
             .totalUnrealizedGain(aggregateUnrealizedGain)
-            .openTaxLots(taxLotRepo.countByStatus("OPEN"))
+            .openTaxLots(taxLotRepo.countByStatusAndSchemeFolioInvestorPan("OPEN", pan))
             .totalSTCG(totalSTCG)
             .totalLTCG(totalLTCG)
             .schemeBreakdown(breakdown)

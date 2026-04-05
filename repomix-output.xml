@@ -6953,179 +6953,6 @@ export default function MetricWithTooltip({
 }
 </file>
 
-<file path="portfolio-dashboard/src/components/views/FundDetailView.tsx">
-import { motion } from 'framer-motion';
-import { X, Zap, Info } from 'lucide-react';
-import { convictionColor, buildPlainEnglishReason } from '../../utils/formatters';
-import * as Dialog from '@radix-ui/react-dialog';
-import MetricWithTooltip from '../ui/MetricWithTooltip';
-import CurrencyValue from '../ui/CurrencyValue';
-
-export default function FundDetailView({ 
-  fund, 
-  isOpen, 
-  onClose,
-  isPrivate
-}: { 
-  fund: any; 
-  isOpen: boolean; 
-  onClose: () => void; 
-  isPrivate: boolean;
-}) {
-  if (!fund) return null;
-
-  const components = [
-    { label: 'Yield', score: (fund.convictionScore || 0) * 0.8, weight: '20%', tooltip: 'Your personal CAGR from tax lots.' },
-    { label: 'Risk', score: (fund.sortinoRatio || 0) * 40, weight: '25%', tooltip: 'Sortino ratio - return relative to downside risk.' },
-    { label: 'Value', score: (1 - (fund.navPercentile3yr || 0)) * 100, weight: '25%', tooltip: 'NAV position + drawdown from ATH.' },
-    { label: 'Pain', score: (1 - Math.abs((fund.maxDrawdown || 0) / 100)) * 100, weight: '15%', tooltip: 'Max drawdown resilience.' },
-    { label: 'Friction', score: 85, weight: '15%', tooltip: 'Tax drag simulation results.' },
-  ];
-
-  return (
-    <Dialog.Root open={isOpen} onOpenChange={onClose}>
-      <Dialog.Portal>
-        <Dialog.Overlay asChild>
-          <motion.div 
-            initial={{ opacity: 0 }} 
-            animate={{ opacity: 1 }} 
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100]" 
-          />
-        </Dialog.Overlay>
-        <Dialog.Content asChild>
-          <motion.div 
-            initial={{ x: '100%' }} 
-            animate={{ x: 0 }} 
-            exit={{ x: '100%' }}
-            transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-            className="fixed right-0 top-0 bottom-0 w-full max-w-2xl bg-surface border-l border-white/5 z-[101] shadow-2xl overflow-y-auto focus:outline-none"
-          >
-            <div className="p-8 space-y-10">
-              <header className="flex items-start justify-between">
-                <div className="space-y-4">
-                  <div className="flex flex-wrap items-center gap-3">
-                    <span className="px-2 py-0.5 bg-white/5 border border-white/10 rounded text-[10px] font-medium text-secondary uppercase tracking-widest">
-                      {fund.category}
-                    </span>
-                    <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-widest ${
-                      fund.action === 'BUY' ? 'text-buy bg-buy/10' : 
-                      fund.action === 'EXIT' ? 'text-exit bg-exit/10' : 'text-hold bg-hold/10'
-                    }`}>
-                      {fund.action}
-                    </span>
-                  </div>
-                  <h2 className="text-2xl font-medium text-primary tracking-tight leading-tight max-w-md">{fund.schemeName}</h2>
-                </div>
-                <div className="flex items-center gap-6">
-                  <div className="text-right">
-                    <p className="text-[10px] uppercase tracking-[0.2em] text-muted mb-1">Conviction</p>
-                    <p className="text-3xl font-medium tabular-nums text-primary">{fund.convictionScore}</p>
-                  </div>
-                  <Dialog.Close asChild>
-                    <button className="p-2 hover:bg-white/5 rounded-full transition-colors text-muted hover:text-primary">
-                      <X size={20} />
-                    </button>
-                  </Dialog.Close>
-                </div>
-              </header>
-
-              <section className="bg-surface-elevated border border-white/5 p-6 rounded-xl space-y-6">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-primary text-xs font-medium uppercase tracking-widest">Valuation Visual</h3>
-                  <span className="text-muted text-[10px] font-medium">3-Year Range</span>
-                </div>
-                
-                <div className="space-y-8">
-                  <div className="relative pt-2">
-                    <div className="h-1 w-full bg-white/5 rounded-full" />
-                    <div className="absolute top-0 left-0 h-5 w-px bg-white/20" />
-                    <div className="absolute top-0 right-0 h-5 w-px bg-white/20" />
-                    <span className="absolute -top-4 left-0 text-[9px] font-bold text-muted uppercase tracking-widest">3yr Low</span>
-                    <span className="absolute -top-4 right-0 text-[9px] font-bold text-muted uppercase tracking-widest">3yr High</span>
-                    <motion.div 
-                      initial={{ left: 0 }}
-                      animate={{ left: `${(fund.navPercentile3yr || 0) * 100}%` }}
-                      transition={{ duration: 1, delay: 0.2 }}
-                      className="absolute top-1/2 -translate-y-1/2 w-3 h-3 bg-accent rounded-full shadow-[0_0_15px_rgba(129,140,248,0.5)] border-2 border-surface"
-                    />
-                  </div>
-                  
-                  <div className="grid grid-cols-2 gap-8">
-                    <div>
-                      <p className="text-muted text-[10px] font-medium uppercase tracking-widest mb-1">Positioning</p>
-                      <p className="text-sm text-primary font-medium">
-                        At {Math.round((fund.navPercentile3yr || 0) * 100)}% of its range
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-muted text-[10px] font-medium uppercase tracking-widest mb-1">ATH Drawdown</p>
-                      <p className="text-sm text-exit font-medium font-mono">
-                        {((fund.drawdownFromAth || 0) * 100).toFixed(1)}% from peak
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              </section>
-
-              <section className="space-y-4">
-                <h3 className="text-muted text-[10px] font-medium uppercase tracking-widest flex items-center gap-2">
-                  <Zap size={12} className="text-warning" /> Scoring Engine Diagnostics
-                </h3>
-                <div className="space-y-3">
-                  {components.map((c) => (
-                    <div key={c.label} className="bg-white/[0.02] border border-white/5 p-4 rounded-lg flex items-center gap-6">
-                      <div className="w-20">
-                        <p className="text-[10px] font-bold text-secondary uppercase tracking-widest">{c.label}</p>
-                        <p className="text-[9px] text-muted font-medium">{c.weight} weight</p>
-                      </div>
-                      <div className="flex-1 h-1.5 bg-white/5 rounded-full overflow-hidden">
-                        <motion.div 
-                          initial={{ width: 0 }}
-                          animate={{ width: `${c.score}%` }}
-                          transition={{ duration: 0.8, delay: 0.3 }}
-                          className={`h-full ${convictionColor(c.score)}`} 
-                        />
-                      </div>
-                      <div className="flex items-center gap-3">
-                        <span className="text-xs font-medium tabular-nums text-primary">{Math.round(c.score)}</span>
-                        <MetricWithTooltip label="" value="" tooltip={c.tooltip} />
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </section>
-
-              <section className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                <div className="bg-surface-elevated p-5 rounded-xl border border-white/5">
-                  <MetricWithTooltip label="Current Value" value={<CurrencyValue isPrivate={isPrivate} value={fund.currentValue} />} tooltip="Market value of your active units." />
-                </div>
-                <div className="bg-surface-elevated p-5 rounded-xl border border-white/5">
-                  <MetricWithTooltip label="Personal XIRR" value={fund.xirr} valueClass={parseFloat(fund.xirr) >= 0 ? "text-buy" : "text-exit"} tooltip="Your personalized annualized return." />
-                </div>
-                <div className="bg-surface-elevated p-5 rounded-xl border border-white/5">
-                  <MetricWithTooltip label="Unrealised P&L" value={<CurrencyValue isPrivate={isPrivate} value={fund.unrealizedGain} />} valueClass={fund.unrealizedGain >= 0 ? "text-buy" : "text-exit"} tooltip="Current paper profit/loss." />
-                </div>
-              </section>
-
-              <section className="bg-accent/5 border border-accent/10 p-6 rounded-xl">
-                <div className="flex items-center gap-3 mb-4 text-accent">
-                  <Info size={16} />
-                  <h3 className="text-[10px] font-bold uppercase tracking-widest">System Verdict</h3>
-                </div>
-                <p className="text-[13px] text-secondary leading-relaxed italic">
-                  "{buildPlainEnglishReason(fund)} This asset is being monitored for rebalancing opportunities based on its {(fund.sortinoRatio || 0).toFixed(2)} Sortino ratio and current {((fund.actualPercentage || 0) - (fund.plannedPercentage || 0)).toFixed(1)}% allocation drift."
-                </p>
-              </section>
-            </div>
-          </motion.div>
-        </Dialog.Content>
-      </Dialog.Portal>
-    </Dialog.Root>
-  );
-}
-</file>
-
 <file path="portfolio-dashboard/src/components/views/FundsListView.tsx">
 import { useState } from 'react';
 import { Search, ChevronRight } from 'lucide-react';
@@ -7238,792 +7065,6 @@ export default function FundsListView({
     </div>
   );
 }
-</file>
-
-<file path="portfolio-dashboard/src/components/views/PortfolioView.tsx">
-import { 
-  ResponsiveContainer, XAxis, YAxis, Tooltip as RechartsTooltip, 
-  BarChart, Bar, Cell, CartesianGrid
-} from "recharts";
-import { HeartPulse } from 'lucide-react';
-import MetricWithTooltip from '../ui/MetricWithTooltip';
-import CurrencyValue from '../ui/CurrencyValue';
-
-const BUCKET_COLORS: Record<string, string> = {
-  AGGRESSIVE_GROWTH: "#818cf8",
-  SAFE_REBALANCER_EQUITY_TAX: "#34d399",
-  GOLD_HEDGE_24M: "#fbbf24",
-  DEBT_SLAB_TAXED: "#f87171",
-  OTHERS_CHECK_ISIN: "#94a3b8"
-};
-
-export default function PortfolioView({ 
-  portfolioData, 
-  isPrivate 
-}: { 
-  portfolioData: any; 
-  isPrivate: boolean;
-}) {
-  const breakdown = portfolioData.schemeBreakdown || [];
-  
-  const avgConviction = breakdown.reduce((acc: number, s: any) => acc + (s.convictionScore || 0), 0) / (breakdown.length || 1);
-  const totalValue = portfolioData.currentValueAmount || 0;
-  const weightedCVaR = breakdown.reduce((acc: number, s: any) => {
-    const weight = (s.currentValue || 0) / (totalValue || 1);
-    return acc + (s.cvar5 || 0) * weight;
-  }, 0);
-
-  const totalLTCG = portfolioData.totalLTCG || 0;
-  const totalSTCG = portfolioData.totalSTCG || 0;
-  const taxEfficiency = totalLTCG / (totalLTCG + totalSTCG || 1);
-
-  const bucketMap: Record<string, number> = {};
-  breakdown.forEach((s: any) => {
-    bucketMap[s.bucket] = (bucketMap[s.bucket] || 0) + (s.currentValue || 0);
-  });
-  const bucketData = Object.entries(bucketMap).map(([name, value]) => ({
-    name: name.replace(/_/g, ' '),
-    value: (value / totalValue) * 100,
-    color: BUCKET_COLORS[name] || "#94a3b8"
-  })).sort((a: any, b: any) => b.value - a.value);
-
-  const xirrData = breakdown
-    .filter((s: any) => (s.currentValue || 0) > 0)
-    .map((s: any) => ({
-      name: s.schemeName.substring(0, 20),
-      Personal: parseFloat(s.xirr || '0'),
-      Benchmark: s.category?.includes("MIDCAP") ? 18 : 14
-    }))
-    .sort((a: any, b: any) => b.Personal - a.Personal);
-
-  return (
-    <div className="space-y-10 pb-32">
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="bg-surface border border-white/5 p-6 rounded-xl">
-          <MetricWithTooltip 
-            label="Portfolio Value" 
-            value={<CurrencyValue isPrivate={isPrivate} value={totalValue} />}
-            tooltip="The current market value of all active holdings."
-          />
-        </div>
-        <div className="bg-surface border border-white/5 p-6 rounded-xl">
-          <MetricWithTooltip 
-            label="System XIRR" 
-            value={portfolioData.overallXirr} 
-            valueClass={parseFloat(portfolioData.overallXirr) >= 0 ? "text-buy" : "text-exit"}
-            tooltip="Internal Rate of Return accounting for the timing of all cash flows."
-          />
-        </div>
-        <div className="bg-surface border border-white/5 p-6 rounded-xl">
-          <MetricWithTooltip 
-            label="Unrealised P&L" 
-            value={<CurrencyValue isPrivate={isPrivate} value={portfolioData.totalUnrealizedGain} />}
-            valueClass={portfolioData.totalUnrealizedGain >= 0 ? "text-buy" : "text-exit"}
-            tooltip="Current profit or loss from holdings you haven't sold yet."
-          />
-        </div>
-        <div className="bg-surface border border-white/5 p-6 rounded-xl">
-          <MetricWithTooltip 
-            label="Tax Exposure (STCG)" 
-            value={<CurrencyValue isPrivate={isPrivate} value={totalSTCG} />}
-            valueClass="text-warning"
-            tooltip="Estimated tax if you sold all units held for less than 1 year today."
-          />
-        </div>
-      </div>
-
-      <section className="bg-surface border border-white/5 p-8 rounded-xl">
-        <div className="flex items-center justify-between mb-8">
-          <h3 className="text-primary text-sm font-medium tracking-tight">Allocation by Strategy Bucket</h3>
-          <span className="text-muted text-[10px] uppercase tracking-widest">Target vs Actual</span>
-        </div>
-        <div className="h-48 w-full">
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={bucketData} layout="vertical" margin={{ left: 0, right: 40 }}>
-              <XAxis type="number" hide />
-              <YAxis 
-                dataKey="name" 
-                type="category" 
-                axisLine={false} 
-                tickLine={false} 
-                width={150}
-                tick={{ fill: 'rgba(241,245,249,0.5)', fontSize: 10, fontWeight: 500 }}
-              />
-              {!isPrivate && (
-                <RechartsTooltip 
-                  cursor={{ fill: 'rgba(255,255,255,0.02)' }}
-                  contentStyle={{ backgroundColor: '#0f0f18', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px' }}
-                />
-              )}
-              <Bar dataKey="value" radius={[0, 4, 4, 0]} barSize={12}>
-                {bucketData.map((entry, index) => (
-                  <Cell key={`cell-${index}`} fill={entry.color} />
-                ))}
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-      </section>
-
-      <section>
-        <h3 className="text-muted text-[10px] font-medium uppercase tracking-widest mb-4 flex items-center gap-2">
-          <HeartPulse size={12} className="text-accent" /> Vital Signs
-        </h3>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div className="bg-surface border border-white/5 p-6 rounded-xl space-y-4">
-            <MetricWithTooltip 
-              label="Portfolio CVaR" 
-              value={`${weightedCVaR.toFixed(2)}%`}
-              tooltip="Expected loss on the worst 5% of trading days. Closer to zero is safer."
-            />
-            <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden">
-              <div 
-                className="h-full bg-accent transition-all duration-500" 
-                style={{ width: `${Math.min(100, Math.abs(weightedCVaR) * 10)}%` }} 
-              />
-            </div>
-          </div>
-          <div className="bg-surface border border-white/5 p-6 rounded-xl space-y-4">
-            <MetricWithTooltip 
-              label="Tax Efficiency" 
-              value={`${(taxEfficiency * 100).toFixed(1)}%`}
-              tooltip="Percentage of your total gains that are Long-Term (LTCG). Higher is better."
-            />
-            <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden">
-              <div 
-                className="h-full bg-buy transition-all duration-500" 
-                style={{ width: `${taxEfficiency * 100}%` }} 
-              />
-            </div>
-          </div>
-          <div className="bg-surface border border-white/5 p-6 rounded-xl space-y-4">
-            <MetricWithTooltip 
-              label="Average Conviction" 
-              value={Math.round(avgConviction)}
-              tooltip="Mean conviction score across all funds. Reflects system trust in current allocation."
-            />
-            <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden">
-              <div 
-                className={`h-full transition-all duration-500 ${avgConviction > 60 ? 'bg-buy' : 'bg-warning'}`} 
-                style={{ width: `${avgConviction}%` }} 
-              />
-            </div>
-          </div>
-          <div className="bg-surface border border-white/5 p-6 rounded-xl space-y-4">
-            <MetricWithTooltip 
-              label="Unrealised Gain %" 
-              value={`${((portfolioData.totalUnrealizedGain / (portfolioData.totalInvestedAmount || 1)) * 100).toFixed(1)}%`}
-              tooltip="Absolute return on currently active capital."
-            />
-            <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden">
-              <div 
-                className="h-full bg-buy transition-all duration-500" 
-                style={{ width: `${Math.min(100, (portfolioData.totalUnrealizedGain / (portfolioData.totalInvestedAmount || 1)) * 100)}%` }} 
-              />
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <section className="bg-surface border border-white/5 p-8 rounded-xl">
-        <div className="flex items-center justify-between mb-8">
-          <h3 className="text-primary text-sm font-medium tracking-tight">XIRR performance · vs category avg</h3>
-          <span className="text-muted text-[10px] uppercase tracking-widest">Tabular View Available in Ledger</span>
-        </div>
-        <div className="h-96 w-full">
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={xirrData} layout="vertical" margin={{ left: 20, right: 40 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.03)" horizontal={true} vertical={false} />
-              <XAxis type="number" axisLine={false} tickLine={false} tick={{ fill: 'rgba(241,245,249,0.3)', fontSize: 10 }} unit="%" />
-              <YAxis 
-                dataKey="name" 
-                type="category" 
-                axisLine={false} 
-                tickLine={false} 
-                width={150}
-                tick={{ fill: 'rgba(241,245,249,0.7)', fontSize: 11, fontWeight: 500 }}
-              />
-              {!isPrivate && (
-                <RechartsTooltip 
-                  cursor={{ fill: 'rgba(255,255,255,0.02)' }}
-                  contentStyle={{ backgroundColor: '#0f0f18', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px' }}
-                />
-              )}
-              <Bar dataKey="Personal" fill="#818cf8" radius={[0, 2, 2, 0]} barSize={10} />
-              <Bar dataKey="Benchmark" fill="rgba(255,255,255,0.05)" radius={[0, 2, 2, 0]} barSize={10} />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-      </section>
-    </div>
-  );
-}
-</file>
-
-<file path="portfolio-dashboard/src/components/views/RebalanceView.tsx">
-import { 
-  ResponsiveContainer, XAxis, YAxis, Tooltip, 
-  BarChart, Bar, Cell, CartesianGrid, ReferenceLine
-} from "recharts";
-import CurrencyValue from '../ui/CurrencyValue';
-
-export default function RebalanceView({ 
-  portfolioData, 
-  sipAmount, 
-  setSipAmount,
-  isPrivate 
-}: { 
-  portfolioData: any;
-  sipAmount: number;
-  setSipAmount: (val: number) => void;
-  isPrivate: boolean;
-}) {
-  const data = (portfolioData.schemeBreakdown || [])
-    .filter((s: any) => s.plannedPercentage > 0 || s.allocationPercentage > 0)
-    .map((s: any) => {
-      const drift = (s.allocationPercentage || 0) - (s.plannedPercentage || 0);
-      return {
-        ...s,
-        name: s.schemeName.substring(0, 20),
-        drift: parseFloat(drift.toFixed(2)),
-        color: drift > 1 ? "#f87171" : drift < -1 ? "#34d399" : "#94a3b8"
-      };
-    })
-    .sort((a: any, b: any) => b.drift - a.drift);
-
-  const totalDrift = data.reduce((acc: number, s: any) => acc + Math.abs(s.drift), 0);
-  const needsAttention = data.filter((s: any) => Math.abs(s.drift) > 1).length;
-
-  return (
-    <div className="space-y-10 pb-32">
-      <header>
-        <h2 className="text-muted text-[10px] font-medium uppercase tracking-[0.2em] mb-1">Target alignment</h2>
-        <p className="text-xl font-medium text-primary tracking-tight">Allocation drift · actual vs target</p>
-      </header>
-
-      {/* DRIFT CHART */}
-      <section className="bg-surface border border-white/5 p-8 rounded-xl">
-        <div className="h-80 w-full">
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={data} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.03)" vertical={false} />
-              <XAxis 
-                dataKey="name" 
-                axisLine={false} 
-                tickLine={false} 
-                tick={{ fill: 'rgba(241,245,249,0.3)', fontSize: 10 }}
-              />
-              <YAxis 
-                axisLine={false} 
-                tickLine={false} 
-                tick={{ fill: 'rgba(241,245,249,0.3)', fontSize: 10 }}
-                unit="%"
-              />
-              {!isPrivate && (
-                <Tooltip 
-                  cursor={{ fill: 'rgba(255,255,255,0.02)' }}
-                  contentStyle={{ backgroundColor: '#0f0f18', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px' }}
-                />
-              )}
-              <ReferenceLine y={0} stroke="rgba(255,255,255,0.1)" />
-              <Bar dataKey="drift" radius={[4, 4, 0, 0]} barSize={30}>
-                {data.map((entry: any, index: number) => (
-                  <Cell key={`cell-${index}`} fill={entry.color} />
-                ))}
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-        <div className="mt-8 pt-8 border-t border-white/5 flex items-center gap-6">
-          <div className="flex items-center gap-2">
-            <div className="w-3 h-3 rounded-sm bg-exit" />
-            <span className="text-[10px] uppercase tracking-widest text-muted">Overweight</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="w-3 h-3 rounded-sm bg-buy" />
-            <span className="text-[10px] uppercase tracking-widest text-muted">Underweight</span>
-          </div>
-          <div className="ml-auto text-secondary text-[11px] font-medium">
-            Total drift: <span className="text-primary">{totalDrift.toFixed(1)}%</span> across your portfolio. {needsAttention} funds need rebalancing.
-          </div>
-        </div>
-      </section>
-
-      {/* DETAILS TABLE */}
-      <section className="bg-surface border border-white/5 rounded-xl overflow-hidden">
-        <table className="w-full text-left">
-          <thead className="bg-white/[0.02] text-muted text-[10px] uppercase tracking-widest border-b border-white/5">
-            <tr>
-              <th className="px-6 py-4 font-medium">Fund Name</th>
-              <th className="px-6 py-4 font-medium text-right">Target %</th>
-              <th className="px-6 py-4 font-medium text-right">Actual %</th>
-              <th className="px-6 py-4 font-medium text-right">Drift</th>
-              <th className="px-6 py-4 font-medium text-right">Action</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-white/5">
-            {data.map((s: any) => (
-              <tr key={s.schemeName} className="hover:bg-white/[0.01] transition-colors group">
-                <td className="px-6 py-4 text-[13px] text-primary truncate max-w-md">{s.schemeName}</td>
-                <td className="px-6 py-4 text-right text-[13px] text-secondary tabular-nums">{(s.plannedPercentage || 0).toFixed(1)}%</td>
-                <td className="px-6 py-4 text-right text-[13px] text-secondary tabular-nums">{(s.allocationPercentage || 0).toFixed(1)}%</td>
-                <td className={`px-6 py-4 text-right text-[13px] font-medium tabular-nums ${
-                  s.drift > 1 ? 'text-exit' : s.drift < -1 ? 'text-buy' : 'text-hold'
-                }`}>
-                  {s.drift > 0 ? '+' : ''}{s.drift}%
-                </td>
-                <td className="px-6 py-4 text-right">
-                  <span className={`text-[10px] font-bold uppercase tracking-widest ${
-                    s.action === 'BUY' ? 'text-buy' : 
-                    s.action === 'EXIT' ? 'text-exit' : 'text-muted'
-                  }`}>
-                    {s.action}
-                  </span>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </section>
-
-      {/* SIP SIMULATOR */}
-      <section className="bg-accent/5 border border-accent/10 p-8 rounded-xl flex flex-col md:flex-row items-center gap-10">
-        <div className="flex-1 space-y-4">
-          <div className="flex justify-between items-center">
-            <h3 className="text-primary text-sm font-medium tracking-tight">SIP Correction Simulator</h3>
-            <CurrencyValue isPrivate={isPrivate} value={sipAmount} className="text-primary tabular-nums font-medium" />
-          </div>
-          <input 
-            type="range" min="0" max="200000" step="1000" 
-            value={sipAmount} 
-            onChange={(e) => setSipAmount(parseInt(e.target.value) || 0)}
-            className="w-full h-1 bg-white/10 rounded-lg appearance-none cursor-pointer accent-accent"
-          />
-          <p className="text-muted text-[11px] leading-relaxed">
-            Increasing your SIP will automatically prioritize underweight funds with the highest conviction scores, 
-            naturally pulling your portfolio back to its target alignment over time without incurring exit taxes.
-          </p>
-        </div>
-        <div className="shrink-0 flex flex-col items-center justify-center p-6 bg-surface-elevated border border-white/5 rounded-2xl w-48 text-center">
-          <p className="text-muted text-[10px] uppercase tracking-widest mb-2">Alignment ETA</p>
-          <p className="text-2xl font-medium text-primary">3.5 <span className="text-xs text-muted">mo</span></p>
-          <p className="text-[10px] text-buy font-bold mt-2 uppercase tracking-tighter">Healthy Recovery</p>
-        </div>
-      </section>
-    </div>
-  );
-}
-</file>
-
-<file path="portfolio-dashboard/src/components/views/TaxView.tsx">
-import { formatCurrency } from '../../utils/formatters';
-import * as Progress from '@radix-ui/react-progress';
-import { ShieldAlert, Info, TrendingDown, Receipt } from 'lucide-react';
-import MetricWithTooltip from '../ui/MetricWithTooltip';
-import CurrencyValue from '../ui/CurrencyValue';
-
-export default function TaxView({ 
-  portfolioData,
-  isPrivate 
-}: { 
-  portfolioData: any;
-  isPrivate: boolean;
-}) {
-  const ltcgLimit = 125000;
-  const realizedLTCG = portfolioData.totalLTCG || 0;
-  const ltcgPercent = Math.min(100, (realizedLTCG / ltcgLimit) * 100);
-  
-  const stcgFunds = (portfolioData.schemeBreakdown || [])
-    .filter((s: any) => s.stcgValue > 0)
-    .map((s: any) => ({
-      name: s.schemeName,
-      stcg: s.stcgValue,
-      tax: s.stcgValue * 0.20,
-      days: s.daysToNextLtcg || 0
-    }));
-
-  return (
-    <div className="space-y-10 pb-32">
-      <header>
-        <h2 className="text-muted text-[10px] font-medium uppercase tracking-[0.2em] mb-1">Fiscal optimization</h2>
-        <p className="text-xl font-medium text-primary tracking-tight">Tax position · FY 2025-26</p>
-      </header>
-
-      {/* SECTION A: LTCG PROGRESS */}
-      <section className="bg-surface border border-white/5 p-8 rounded-xl space-y-6">
-        <div className="flex justify-between items-end">
-          <div>
-            <h3 className="text-primary text-sm font-medium mb-1">Annual LTCG Headroom</h3>
-            <p className="text-muted text-[11px]">₹1.25L tax-free limit for equity gains.</p>
-          </div>
-          <div className="text-right">
-            <CurrencyValue isPrivate={isPrivate} value={realizedLTCG} className="text-primary font-medium tabular-nums" />
-            <span className="text-muted text-xs tabular-nums"> / {formatCurrency(ltcgLimit)}</span>
-          </div>
-        </div>
-        
-        <div className="relative pt-2">
-          <Progress.Root 
-            className="relative overflow-hidden bg-white/5 rounded-full w-full h-2" 
-            value={ltcgPercent}
-          >
-            <Progress.Indicator 
-              className={`w-full h-full transition-transform duration-500 ease-[cubic-bezier(0.65,0,0.35,1)] ${
-                ltcgPercent > 80 ? 'bg-warning' : 'bg-buy'
-              }`}
-              style={{ transform: `translateX(-${100 - ltcgPercent}%)` }}
-            />
-          </Progress.Root>
-        </div>
-        
-        <div className="text-[11px] text-secondary leading-relaxed flex items-center gap-2">
-          <Info size={14} className="text-accent" />
-          {realizedLTCG < ltcgLimit 
-            ? <span>You can harvest <CurrencyValue isPrivate={isPrivate} value={ltcgLimit - realizedLTCG} /> more in LTCG gains tax-free this year.</span>
-            : `You have exceeded the tax-free limit. Further LTCG will be taxed at 12.5%.`
-          }
-        </div>
-      </section>
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-        {/* SECTION B: STCG EXPOSURE */}
-        <section className="space-y-4">
-          <h3 className="text-muted text-[10px] font-medium uppercase tracking-widest flex items-center gap-2">
-            <ShieldAlert size={12} className="text-exit" /> STCG Lock List
-          </h3>
-          <div className="bg-surface border border-white/5 rounded-xl overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="w-full text-left">
-                <thead className="bg-white/[0.02] text-muted text-[10px] uppercase tracking-widest border-b border-white/5">
-                  <tr>
-                    <th className="px-6 py-4 font-medium">Fund</th>
-                    <th className="px-6 py-4 font-medium text-right">Potential Tax</th>
-                    <th className="px-6 py-4 font-medium text-right">Wait Time</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-white/5">
-                  {stcgFunds.map((f: any) => (
-                    <tr key={f.name} className="hover:bg-white/[0.01]">
-                      <td className="px-6 py-4 text-[12px] text-primary truncate max-w-[180px]">{f.name}</td>
-                      <td className="px-6 py-4 text-right text-[12px] text-exit tabular-nums">
-                        <CurrencyValue isPrivate={isPrivate} value={f.tax} />
-                      </td>
-                      <td className="px-6 py-4 text-right text-[12px] text-secondary tabular-nums">
-                        {f.days} <span className="text-[10px] text-muted uppercase">days</span>
-                      </td>
-                    </tr>
-                  ))}
-                  {stcgFunds.length === 0 && (
-                    <tr>
-                      <td colSpan={3} className="px-6 py-8 text-center text-muted text-xs italic">
-                        No short-term gains detected in current holdings.
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </section>
-
-        {/* SECTION C: TLH OPPORTUNITIES */}
-        <section className="space-y-4">
-          <h3 className="text-muted text-[10px] font-medium uppercase tracking-widest flex items-center gap-2">
-            <TrendingDown size={12} className="text-buy" /> Harvesting Ops
-          </h3>
-          <div className="bg-surface border border-white/5 rounded-xl p-6 min-h-[200px] flex flex-col justify-center">
-            <div className="text-center space-y-3">
-              <Receipt size={32} className="text-muted mx-auto opacity-20" />
-              <p className="text-muted text-xs font-medium">No tax-loss harvesting opportunities identified today.</p>
-              <p className="text-[10px] text-muted uppercase tracking-widest leading-relaxed max-w-[240px] mx-auto">
-                The system monitors your FIFO lots for -5% drops exceeding ₹1,000 in absolute loss.
-              </p>
-            </div>
-          </div>
-        </section>
-      </div>
-
-      {/* SECTION D: YEAR SUMMARY */}
-      <section className="bg-white/[0.02] border border-white/5 p-8 rounded-xl">
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-8">
-          <MetricWithTooltip label="Realised LTCG" value={<CurrencyValue isPrivate={isPrivate} value={portfolioData.totalLTCG} />} tooltip="Total long-term capital gains already booked this financial year." />
-          <MetricWithTooltip label="Realised STCG" value={<CurrencyValue isPrivate={isPrivate} value={portfolioData.totalSTCG} />} tooltip="Total short-term capital gains already booked this financial year." />
-          <MetricWithTooltip label="Est. Tax Paid" value={<CurrencyValue isPrivate={isPrivate} value={portfolioData.totalSTCG * 0.20 + Math.max(0, portfolioData.totalLTCG - 125000) * 0.125} />} tooltip="Rough estimate of taxes owed on realized gains." />
-          <MetricWithTooltip label="Headroom" value={<CurrencyValue isPrivate={isPrivate} value={Math.max(0, ltcgLimit - realizedLTCG)} />} valueClass="text-buy" tooltip="Remaining tax-free LTCG limit for this year." />
-        </div>
-      </section>
-    </div>
-  );
-}
-</file>
-
-<file path="portfolio-dashboard/src/components/views/TodayBriefView.tsx">
-import { motion } from 'framer-motion';
-import { Zap, Info, ShieldAlert } from 'lucide-react';
-import { buildPlainEnglishReason } from '../../utils/formatters';
-import ConvictionBadge from '../ui/ConvictionBadge';
-import MetricWithTooltip from '../ui/MetricWithTooltip';
-import CurrencyValue from '../ui/CurrencyValue';
-
-export default function TodayBriefView({ 
-  portfolioData, 
-  sipAmount, 
-  setSipAmount, 
-  lumpsum, 
-  setLumpsum,
-  onFundClick,
-  isPrivate
-}: { 
-  portfolioData: any;
-  sipAmount: number;
-  setSipAmount: (val: number) => void;
-  lumpsum: number;
-  setLumpsum: (val: number) => void;
-  onFundClick: (schemeName: string) => void;
-  isPrivate: boolean;
-}) {
-  const dateStr = new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
-  
-  const actionSignals = (portfolioData.schemeBreakdown || []).filter((s: any) => s.action === 'BUY' || s.action === 'EXIT');
-  const holdCount = (portfolioData.schemeBreakdown || []).filter((s: any) => s.action === 'HOLD').length;
-
-  const exitProceeds = (portfolioData.schemeBreakdown || [])
-    .filter((s: any) => s.action === 'EXIT')
-    .reduce((acc: number, s: any) => acc + (s.signalAmount || 0), 0);
-
-  const totalWarChest = sipAmount + lumpsum + exitProceeds;
-
-  const buySignals = (portfolioData.schemeBreakdown || []).filter((s: any) => s.action === 'BUY');
-  const apiTotalBuyRequest = buySignals.reduce((acc: number, s: any) => acc + (s.signalAmount || 0), 0);
-
-  const scaledBuySignals = buySignals.map((s: any) => {
-    const weight = (s.signalAmount || 0) / (apiTotalBuyRequest || 1);
-    return {
-      ...s,
-      displayAmount: weight * totalWarChest
-    };
-  });
-
-  const container = {
-    hidden: { opacity: 0 },
-    show: {
-      opacity: 1,
-      transition: { staggerChildren: 0.05 }
-    }
-  };
-
-  const item = {
-    hidden: { opacity: 0, y: 10 },
-    show: { opacity: 1, y: 0 }
-  };
-
-  return (
-    <div className="space-y-10 pb-32">
-      <header>
-        <h2 className="text-muted text-[10px] font-medium uppercase tracking-[0.2em] mb-1">Portfolio intelligence</h2>
-        <p className="text-xl font-medium text-primary tracking-tight">Today's brief · {dateStr}</p>
-      </header>
-
-      {/* ACTION CARDS */}
-      <section>
-        <h3 className="text-muted text-[10px] font-medium uppercase tracking-widest mb-4 flex items-center gap-2">
-          <Zap size={12} className="text-warning" /> Priority Actions
-        </h3>
-        <motion.div 
-          variants={container}
-          initial="hidden"
-          animate="show"
-          className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"
-        >
-          {actionSignals.map((signal: any) => (
-            <motion.div 
-              key={signal.schemeName}
-              variants={item}
-              onClick={() => onFundClick(signal.schemeName)}
-              className={`p-5 rounded-xl border transition-all cursor-pointer group hover:bg-white/[0.02] ${
-                signal.action === 'BUY' 
-                  ? 'border-buy/10 bg-buy/[0.02] hover:border-buy/20' 
-                  : 'border-exit/10 bg-exit/[0.02] hover:border-exit/20'
-              }`}
-            >
-              <div className="flex items-center justify-between mb-4">
-                <span className={`text-[10px] font-bold uppercase tracking-widest ${signal.action === 'BUY' ? 'text-buy' : 'text-exit'}`}>
-                  {signal.action}
-                </span>
-                <ConvictionBadge score={signal.convictionScore} />
-              </div>
-              <p className="text-[13px] font-medium text-primary mb-1 truncate group-hover:text-white transition-colors">{signal.schemeName}</p>
-              <div className={`text-2xl font-medium tabular-nums mb-4 ${signal.action === 'BUY' ? 'text-buy' : 'text-exit'}`}>
-                <CurrencyValue 
-                  isPrivate={isPrivate} 
-                  value={signal.action === 'BUY' 
-                    ? scaledBuySignals.find((b: any) => b.schemeName === signal.schemeName)?.displayAmount 
-                    : signal.signalAmount
-                  } 
-                />
-              </div>
-              <p className="text-[11px] text-secondary leading-relaxed line-clamp-2">
-                {buildPlainEnglishReason(signal)}
-              </p>
-            </motion.div>
-          ))}
-          
-          {actionSignals.length === 0 && (
-            <div className="col-span-full py-12 flex flex-col items-center justify-center bg-surface border border-white/5 rounded-xl">
-              <Info className="text-muted mb-3" size={24} />
-              <p className="text-secondary text-xs font-medium">No urgent actions identified for today.</p>
-            </div>
-          )}
-        </motion.div>
-      </section>
-
-      {/* SIP CALCULATOR */}
-      <section className="bg-surface border border-white/5 rounded-xl overflow-hidden">
-        <div className="p-6 border-b border-white/5 flex flex-col md:flex-row md:items-center justify-between gap-6">
-          <div>
-            <h3 className="text-primary text-sm font-medium mb-1 tracking-tight">SIP Deployment Calculator</h3>
-            <p className="text-muted text-[11px]">Proportional distribution based on conviction and target drift.</p>
-          </div>
-          <div className="flex flex-wrap items-center gap-8">
-            <div className="space-y-2 min-w-[200px]">
-              <div className="flex justify-between items-center text-[10px] uppercase tracking-widest text-muted">
-                <span>Monthly SIP</span>
-                <CurrencyValue isPrivate={isPrivate} value={sipAmount} className="text-primary tabular-nums font-medium" />
-              </div>
-              <input 
-                type="range" min="0" max="200000" step="1000" 
-                value={sipAmount} 
-                onChange={(e) => setSipAmount(parseInt(e.target.value) || 0)}
-                className="w-full h-1 bg-white/10 rounded-lg appearance-none cursor-pointer accent-accent"
-              />
-            </div>
-            <div className="space-y-2">
-              <label className="block text-[10px] uppercase tracking-widest text-muted">Extra Lumpsum</label>
-              <input 
-                type="number" 
-                value={lumpsum || ''} 
-                onChange={(e) => setLumpsum(parseInt(e.target.value) || 0)}
-                placeholder="₹0"
-                className="bg-surface-elevated border border-white/10 rounded-md px-3 py-1.5 text-sm text-primary tabular-nums focus:outline-none focus:border-accent/50 transition-colors w-32"
-              />
-            </div>
-          </div>
-        </div>
-
-        <div className="overflow-x-auto">
-          <table className="w-full text-left">
-            <thead className="bg-white/[0.02] text-muted text-[10px] uppercase tracking-widest border-b border-white/5">
-              <tr>
-                <th className="px-6 py-4 font-medium">Fund name</th>
-                <th className="px-6 py-4 font-medium text-right">Conviction</th>
-                <th className="px-6 py-4 font-medium text-right">Planned %</th>
-                <th className="px-6 py-4 font-medium text-right">Deploy amount</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-white/5">
-              {scaledBuySignals.map((signal: any) => (
-                <tr key={signal.schemeName} className="hover:bg-white/[0.01] transition-colors group">
-                  <td className="px-6 py-4">
-                    <button 
-                      onClick={() => onFundClick(signal.schemeName)}
-                      className="text-[13px] text-primary hover:text-accent transition-colors truncate max-w-xs block text-left"
-                    >
-                      {signal.schemeName}
-                    </button>
-                  </td>
-                  <td className="px-6 py-4 text-right">
-                    <div className="flex justify-end">
-                      <MetricWithTooltip 
-                        label="" 
-                        value={<ConvictionBadge score={signal.convictionScore} />} 
-                        tooltip="A 0–100 score combining your personal return, fund risk profile, and current valuation. Higher = stronger case to hold or buy more."
-                      />
-                    </div>
-                  </td>
-                  <td className="px-6 py-4 text-right text-[13px] text-secondary tabular-nums">
-                    {signal.plannedPercentage}%
-                  </td>
-                  <td className="px-6 py-4 text-right text-[13px] text-buy font-medium tabular-nums">
-                    <CurrencyValue isPrivate={isPrivate} value={signal.displayAmount} />
-                  </td>
-                </tr>
-              ))}
-              {scaledBuySignals.length === 0 && (
-                <tr>
-                  <td colSpan={4} className="px-6 py-8 text-center text-muted text-xs italic">
-                    All funds are currently within target allocation or marked for exit.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      </section>
-
-      <footer className="flex items-center gap-3 px-6 py-4 bg-white/[0.02] border border-white/5 rounded-xl text-secondary">
-        <ShieldAlert size={14} className="text-hold" />
-        <p className="text-[11px] font-medium uppercase tracking-widest">
-          {holdCount} funds on hold · Weights within tolerance
-        </p>
-      </footer>
-    </div>
-  );
-}
-</file>
-
-<file path="portfolio-dashboard/src/services/api.ts">
-import { normalizeCategory } from '../utils/formatters';
-
-const BASE_URL = '/api';
-const API_KEY = 'dev-secret-key'; // In production, this should be an environment variable
-
-const authenticatedFetch = (url: string, options: RequestInit = {}) => {
-  return fetch(url, {
-    ...options,
-    headers: {
-      ...options.headers,
-      'X-API-KEY': API_KEY,
-    },
-  });
-};
-
-export const fetchMasterPortfolio = async (investorPan: string) => {
-  try {
-    const response = await authenticatedFetch(`${BASE_URL}/dashboard/full/${investorPan}`);
-    if (!response.ok) throw new Error("Portfolio synchronization failed");
-    
-    const dashboard = await response.json();
-
-    const mergedData = (dashboard.schemeBreakdown || []).map((item: any) => {
-      return {
-        ...item,
-        cleanCategory: normalizeCategory(item.category),
-        shortName: item.schemeName ? item.schemeName.substring(0, 25) + "..." : "Unknown Fund",
-        deviation: (parseFloat(item.allocationPercentage || 0) - parseFloat(item.plannedPercentage || 0)).toFixed(2)
-      };
-    }).sort((a: any, b: any) => b.convictionScore - a.convictionScore);
-
-    return { ...dashboard, schemeBreakdown: mergedData };
-  } catch (error) {
-    console.error("API Error:", error);
-    throw error;
-  }
-};
-
-
-export const fetchTransactions = async (
-  pan: string, 
-  page: number = 0, 
-  type: string = "ALL", 
-  size: number = 20
-) => {
-  const typeParam = type !== "ALL" ? `&type=${type}` : "";
-  const response = await authenticatedFetch(
-    `${BASE_URL}/transactions?pan=${pan}${typeParam}&page=${page}&size=${size}&sort=date,desc`
-  );
-  if (!response.ok) throw new Error("Ledger synchronization failed");
-  return response.json();
-};
 </file>
 
 <file path="portfolio-dashboard/src/utils/formatters.ts">
@@ -8819,6 +7860,69 @@ if __name__ == "__main__":
     daily_fetch()
 </file>
 
+<file path="portfolio-dashboard/src/services/api.ts">
+import { normalizeCategory } from '../utils/formatters';
+
+const BASE_URL = '/api';
+const API_KEY = 'dev-secret-key'; // In production, this should be an environment variable
+
+const authenticatedFetch = (url: string, options: RequestInit = {}) => {
+  return fetch(url, {
+    ...options,
+    headers: {
+      ...options.headers,
+      'X-API-KEY': API_KEY,
+    },
+  });
+};
+
+export const fetchMasterPortfolio = async (investorPan: string) => {
+  try {
+    const response = await authenticatedFetch(`${BASE_URL}/dashboard/full/${investorPan}`);
+    if (!response.ok) throw new Error("Portfolio synchronization failed");
+    
+    const dashboard = await response.json();
+
+    const mergedData = (dashboard.schemeBreakdown || []).map((item: any) => {
+      return {
+        ...item,
+        cleanCategory: normalizeCategory(item.category),
+        shortName: item.schemeName ? item.schemeName.substring(0, 25) + "..." : "Unknown Fund",
+        deviation: (parseFloat(item.allocationPercentage || 0) - parseFloat(item.plannedPercentage || 0)).toFixed(2)
+      };
+    }).sort((a: any, b: any) => b.convictionScore - a.convictionScore);
+
+    return { ...dashboard, schemeBreakdown: mergedData };
+  } catch (error) {
+    console.error("API Error:", error);
+    throw error;
+  }
+};
+
+
+export const fetchTransactions = async (
+  pan: string, 
+  page: number = 0, 
+  type: string = "ALL", 
+  size: number = 20
+) => {
+  const typeParam = type !== "ALL" ? `&type=${type}` : "";
+  const response = await authenticatedFetch(
+    `${BASE_URL}/transactions?pan=${pan}${typeParam}&page=${page}&size=${size}&sort=date,desc`
+  );
+  if (!response.ok) throw new Error("Ledger synchronization failed");
+  return response.json();
+};
+
+export const fetchTlhOpportunities = async (pan: string) => {
+  const response = await authenticatedFetch(
+    `${BASE_URL}/portfolio/${pan}/tax-loss-harvesting`
+  );
+  if (!response.ok) return [];
+  return response.json();
+};
+</file>
+
 <file path="docker-compose.yml">
 # Create a .env file to override these defaults in production
 # .env should contain:
@@ -9360,6 +8464,1040 @@ public class RebalanceEngine {
 }
 </file>
 
+<file path="portfolio-dashboard/src/components/views/FundDetailView.tsx">
+import { motion } from 'framer-motion';
+import { X, Zap, Info } from 'lucide-react';
+import { convictionColor, buildPlainEnglishReason } from '../../utils/formatters';
+import * as Dialog from '@radix-ui/react-dialog';
+import * as Tooltip from '@radix-ui/react-tooltip';
+import MetricWithTooltip from '../ui/MetricWithTooltip';
+import CurrencyValue from '../ui/CurrencyValue';
+
+export default function FundDetailView({ 
+  fund, 
+  isOpen, 
+  onClose,
+  isPrivate
+}: { 
+  fund: any; 
+  isOpen: boolean; 
+  onClose: () => void; 
+  isPrivate: boolean;
+}) {
+  if (!fund) return null;
+
+  const components = [
+    { label: 'Yield', score: (fund.convictionScore || 0) * 0.8, weight: '20%', tooltip: 'Your personal CAGR from tax lots.' },
+    { label: 'Risk', score: (fund.sortinoRatio || 0) * 40, weight: '25%', tooltip: 'Sortino ratio - return relative to downside risk.' },
+    { label: 'Value', score: (1 - (fund.navPercentile3yr || 0)) * 100, weight: '25%', tooltip: 'NAV position + drawdown from ATH.' },
+    { label: 'Pain', score: (1 - Math.abs((fund.maxDrawdown || 0) / 100)) * 100, weight: '15%', tooltip: 'Max drawdown resilience.' },
+    { label: 'Friction', score: 85, weight: '15%', tooltip: 'Tax drag simulation results.' },
+  ];
+
+  return (
+    <Dialog.Root open={isOpen} onOpenChange={onClose}>
+      <Dialog.Portal>
+        <Dialog.Overlay asChild>
+          <motion.div 
+            initial={{ opacity: 0 }} 
+            animate={{ opacity: 1 }} 
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100]" 
+          />
+        </Dialog.Overlay>
+        <Dialog.Content asChild>
+          <motion.div 
+            initial={{ x: '100%' }} 
+            animate={{ x: 0 }} 
+            exit={{ x: '100%' }}
+            transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+            className="fixed right-0 top-0 bottom-0 w-full max-w-2xl bg-surface border-l border-white/5 z-[101] shadow-2xl overflow-y-auto focus:outline-none"
+          >
+            <div className="p-8 space-y-10">
+              <header className="flex items-start justify-between">
+                <div className="space-y-4">
+                  <div className="flex flex-wrap items-center gap-3">
+                    <span className="px-2 py-0.5 bg-white/5 border border-white/10 rounded text-[10px] font-medium text-secondary uppercase tracking-widest">
+                      {fund.category}
+                    </span>
+                    <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-widest ${
+                      fund.action === 'BUY' ? 'text-buy bg-buy/10' : 
+                      fund.action === 'EXIT' ? 'text-exit bg-exit/10' : 'text-hold bg-hold/10'
+                    }`}>
+                      {fund.action}
+                    </span>
+                  </div>
+                  <h2 className="text-2xl font-medium text-primary tracking-tight leading-tight max-w-md">{fund.schemeName}</h2>
+                </div>
+                <div className="flex items-center gap-6">
+                  <div className="text-right">
+                    <p className="text-[10px] uppercase tracking-[0.2em] text-muted mb-1">Conviction</p>
+                    <p className="text-3xl font-medium tabular-nums text-primary">{fund.convictionScore}</p>
+                  </div>
+                  <Dialog.Close asChild>
+                    <button className="p-2 hover:bg-white/5 rounded-full transition-colors text-muted hover:text-primary">
+                      <X size={20} />
+                    </button>
+                  </Dialog.Close>
+                </div>
+              </header>
+
+              <section className="bg-surface-elevated border border-white/5 p-6 rounded-xl space-y-6">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-primary text-xs font-medium uppercase tracking-widest">Valuation Visual</h3>
+                  <span className="text-muted text-[10px] font-medium">3-Year Range</span>
+                </div>
+                
+                <div className="space-y-8">
+                  <div className="relative h-1 w-full bg-white/5 rounded-full my-4">
+                    {/* end markers */}
+                    <div className="absolute top-0 left-0 h-3 w-px bg-white/20 -translate-y-1" />
+                    <div className="absolute top-0 right-0 h-3 w-px bg-white/20 -translate-y-1" />
+                    
+                    <span className="absolute -top-6 left-0 text-[9px] font-bold text-muted uppercase tracking-widest">3yr Low</span>
+                    <span className="absolute -top-6 right-0 text-[9px] font-bold text-muted uppercase tracking-widest">3yr High</span>
+                    
+                    {/* animated dot — using style with clamping */}
+                    <div 
+                      className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-3 h-3 bg-accent rounded-full border-2 border-[#14141f] transition-all duration-1000 shadow-[0_0_15px_rgba(129,140,248,0.5)]"
+                      style={{ left: `${Math.min(98, Math.max(2, (fund.navPercentile3yr || 0) * 100))}%` }}
+                    />
+                  </div>
+                  
+                  <div className="grid grid-cols-2 gap-8 pt-4">
+                    <div>
+                      <p className="text-muted text-[10px] font-medium uppercase tracking-widest mb-1">Positioning</p>
+                      <p className="text-sm text-primary font-medium">
+                        At {Math.round((fund.navPercentile3yr || 0) * 100)}% of its range
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-muted text-[10px] font-medium uppercase tracking-widest mb-1">ATH Drawdown</p>
+                      <p className="text-sm text-exit font-medium font-mono">
+                        {((fund.drawdownFromAth || 0) * 100).toFixed(1)}% from peak
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </section>
+
+              <section className="space-y-4">
+                <h3 className="text-muted text-[10px] font-medium uppercase tracking-widest flex items-center gap-2">
+                  <Zap size={12} className="text-warning" /> Scoring Engine Diagnostics
+                </h3>
+                <div className="space-y-3">
+                  {components.map((c) => (
+                    <div key={c.label} className="bg-white/[0.02] border border-white/5 p-4 rounded-lg flex items-center gap-6">
+                      <div className="w-20">
+                        <p className="text-[10px] font-bold text-secondary uppercase tracking-widest">{c.label}</p>
+                        <p className="text-[9px] text-muted font-medium">{c.weight} weight</p>
+                      </div>
+                      <div className="flex-1 h-1.5 bg-white/5 rounded-full overflow-hidden">
+                        <motion.div 
+                          initial={{ width: 0 }}
+                          animate={{ width: `${c.score}%` }}
+                          transition={{ duration: 0.8, delay: 0.3 }}
+                          style={{ background: convictionColor(c.score) }}
+                          className="h-full rounded-full transition-all"
+                        />
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <span className="text-xs font-medium tabular-nums text-primary">{Math.round(c.score)}</span>
+                        <Tooltip.Provider delayDuration={200}>
+                          <Tooltip.Root>
+                            <Tooltip.Trigger asChild>
+                              <Info size={13} className="text-muted cursor-help hover:text-secondary transition-colors" />
+                            </Tooltip.Trigger>
+                            <Tooltip.Portal>
+                              <Tooltip.Content className="bg-[#1a1a2e] border border-white/10 text-slate-300 text-[11px] rounded-lg px-3 py-2 max-w-[200px] leading-relaxed z-[200]">
+                                {c.tooltip}
+                                <Tooltip.Arrow className="fill-[#1a1a2e]" />
+                              </Tooltip.Content>
+                            </Tooltip.Portal>
+                          </Tooltip.Root>
+                        </Tooltip.Provider>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </section>
+
+              <section className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                <div className="bg-surface-elevated p-5 rounded-xl border border-white/5">
+                  <MetricWithTooltip label="Current Value" value={<CurrencyValue isPrivate={isPrivate} value={fund.currentValue} />} tooltip="Market value of your active units." />
+                </div>
+                <div className="bg-surface-elevated p-5 rounded-xl border border-white/5">
+                  <MetricWithTooltip label="Personal XIRR" value={fund.xirr} valueClass={parseFloat(fund.xirr) >= 0 ? "text-buy" : "text-exit"} tooltip="Your personalized annualized return." />
+                </div>
+                <div className="bg-surface-elevated p-5 rounded-xl border border-white/5">
+                  <MetricWithTooltip label="Unrealised P&L" value={<CurrencyValue isPrivate={isPrivate} value={fund.unrealizedGain} />} valueClass={fund.unrealizedGain >= 0 ? "text-buy" : "text-exit"} tooltip="Current paper profit/loss." />
+                </div>
+              </section>
+
+              <section className="bg-accent/5 border border-accent/10 p-6 rounded-xl">
+                <div className="flex items-center gap-3 mb-4 text-accent">
+                  <Info size={16} />
+                  <h3 className="text-[10px] font-bold uppercase tracking-widest">System Verdict</h3>
+                </div>
+                <p className="text-[13px] text-secondary leading-relaxed italic">
+                  "{buildPlainEnglishReason(fund)} This asset is being monitored for rebalancing opportunities based on its {(fund.sortinoRatio || 0).toFixed(2)} Sortino ratio and current {((fund.actualPercentage || 0) - (fund.plannedPercentage || 0)).toFixed(1)}% allocation drift."
+                </p>
+              </section>
+            </div>
+          </motion.div>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
+  );
+}
+</file>
+
+<file path="portfolio-dashboard/src/components/views/PortfolioView.tsx">
+import { motion } from 'framer-motion';
+import { 
+  ResponsiveContainer, XAxis, YAxis, Tooltip as RechartsTooltip, 
+  BarChart, Bar, Cell, CartesianGrid, PieChart, Pie
+} from "recharts";
+import { HeartPulse } from 'lucide-react';
+import MetricWithTooltip from '../ui/MetricWithTooltip';
+import CurrencyValue from '../ui/CurrencyValue';
+
+const BUCKET_COLORS: Record<string, string> = {
+  AGGRESSIVE_GROWTH: "#818cf8",
+  SAFE_REBALANCER_EQUITY_TAX: "#34d399",
+  GOLD_HEDGE_24M: "#fbbf24",
+  DEBT_SLAB_TAXED: "#f87171",
+  OTHERS_CHECK_ISIN: "#94a3b8"
+};
+
+export default function PortfolioView({ 
+  portfolioData, 
+  isPrivate 
+}: { 
+  portfolioData: any; 
+  isPrivate: boolean;
+}) {
+  const breakdown = portfolioData.schemeBreakdown || [];
+  
+  const avgConviction = breakdown.reduce((acc: number, s: any) => acc + (s.convictionScore || 0), 0) / (breakdown.length || 1);
+  const totalValue = portfolioData.currentValueAmount || 0;
+  const weightedCVaR = breakdown.reduce((acc: number, s: any) => {
+    const weight = (s.currentValue || 0) / (totalValue || 1);
+    return acc + (s.cvar5 || 0) * weight;
+  }, 0);
+
+  const totalLTCG = portfolioData.totalLTCG || 0;
+  const totalSTCG = portfolioData.totalSTCG || 0;
+  const taxEfficiency = totalLTCG / (totalLTCG + totalSTCG || 1);
+
+  const bucketMap: Record<string, number> = {};
+  breakdown.forEach((s: any) => {
+    bucketMap[s.bucket] = (bucketMap[s.bucket] || 0) + (s.currentValue || 0);
+  });
+  const bucketData = Object.entries(bucketMap).map(([name, value]) => ({
+    name: name.replace(/_/g, ' '),
+    value: (value / totalValue) * 100,
+    color: BUCKET_COLORS[name] || "#94a3b8"
+  })).sort((a, b) => b.value - a.value);
+
+  const xirrData = breakdown
+    .filter((s: any) => (s.currentValue || 0) > 0)
+    .map((s: any) => ({
+      name: s.schemeName.substring(0, 20),
+      Personal: parseFloat(s.xirr || '0'),
+      Benchmark: s.category?.includes("MIDCAP") ? 18 : 14
+    }))
+    .sort((a: any, b: any) => b.Personal - a.Personal);
+
+  return (
+    <div className="space-y-10 pb-32">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="bg-surface border border-white/5 p-6 rounded-xl">
+          <MetricWithTooltip 
+            label="Portfolio Value" 
+            value={<CurrencyValue isPrivate={isPrivate} value={totalValue} />}
+            tooltip="The current market value of all active holdings."
+          />
+        </div>
+        <div className="bg-surface border border-white/5 p-6 rounded-xl">
+          <MetricWithTooltip 
+            label="System XIRR" 
+            value={portfolioData.overallXirr} 
+            valueClass={parseFloat(portfolioData.overallXirr) >= 0 ? "text-buy" : "text-exit"}
+            tooltip="Internal Rate of Return accounting for the timing of all cash flows."
+          />
+        </div>
+        <div className="bg-surface border border-white/5 p-6 rounded-xl">
+          <MetricWithTooltip 
+            label="Unrealised P&L" 
+            value={<CurrencyValue isPrivate={isPrivate} value={portfolioData.totalUnrealizedGain} />}
+            valueClass={portfolioData.totalUnrealizedGain >= 0 ? "text-buy" : "text-exit"}
+            tooltip="Current profit or loss from holdings you haven't sold yet."
+          />
+        </div>
+        <div className="bg-surface border border-white/5 p-6 rounded-xl">
+          <MetricWithTooltip 
+            label="Tax Exposure (STCG)" 
+            value={<CurrencyValue isPrivate={isPrivate} value={totalSTCG} />}
+            valueClass="text-warning"
+            tooltip="Estimated tax if you sold all units held for less than 1 year today."
+          />
+        </div>
+      </div>
+
+      <section className="bg-surface border border-white/5 p-8 rounded-xl">
+        <div className="flex items-center justify-between mb-8">
+          <h3 className="text-primary text-sm font-medium tracking-tight">Allocation by Strategy Bucket</h3>
+          <span className="text-muted text-[10px] uppercase tracking-widest">Target vs Actual</span>
+        </div>
+        
+        <div className="flex flex-col lg:flex-row items-center gap-12">
+          {/* Donut chart */}
+          <div className="w-full lg:w-64 h-64 shrink-0">
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart>
+                <Pie
+                  data={bucketData}
+                  cx="50%"
+                  cy="50%"
+                  innerRadius={60}
+                  outerRadius={90}
+                  paddingAngle={3}
+                  dataKey="value"
+                  stroke="none"
+                >
+                  {bucketData.map((entry, index) => (
+                    <Cell key={`cell-${index}`} fill={entry.color} />
+                  ))}
+                </Pie>
+                {!isPrivate && (
+                  <RechartsTooltip
+                    formatter={(value: any) => [`${parseFloat(value).toFixed(1)}%`, '']}
+                    contentStyle={{ backgroundColor: '#0f0f18', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px' }}
+                  />
+                )}
+              </PieChart>
+            </ResponsiveContainer>
+          </div>
+
+          {/* Bucket bars with custom legend */}
+          <div className="flex-1 space-y-5 w-full">
+            {bucketData.map((b) => (
+              <div key={b.name} className="space-y-1.5">
+                <div className="flex justify-between items-end">
+                  <span className="text-[10px] font-bold text-muted uppercase tracking-widest">{b.name}</span>
+                  <span className="text-[11px] font-medium tabular-nums" style={{ color: b.color }}>{b.value.toFixed(1)}%</span>
+                </div>
+                <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden">
+                  <motion.div 
+                    initial={{ width: 0 }}
+                    animate={{ width: `${b.value}%` }}
+                    transition={{ duration: 1, ease: "easeOut" }}
+                    className="h-full rounded-full" 
+                    style={{ background: b.color }} 
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <h3 className="text-muted text-[10px] font-medium uppercase tracking-widest mb-4 flex items-center gap-2">
+          <HeartPulse size={12} className="text-accent" /> Vital Signs
+        </h3>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="bg-surface border border-white/5 p-6 rounded-xl space-y-4">
+            <MetricWithTooltip 
+              label="Portfolio CVaR" 
+              value={`${weightedCVaR.toFixed(2)}%`}
+              tooltip="Expected loss on the worst 5% of trading days. Closer to zero is safer."
+            />
+            <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden">
+              <div 
+                className="h-full bg-accent transition-all duration-500" 
+                style={{ width: `${Math.min(100, Math.abs(weightedCVaR) * 10)}%` }} 
+              />
+            </div>
+          </div>
+          <div className="bg-surface border border-white/5 p-6 rounded-xl space-y-4">
+            <MetricWithTooltip 
+              label="Tax Efficiency" 
+              value={`${(taxEfficiency * 100).toFixed(1)}%`}
+              tooltip="Percentage of your total gains that are Long-Term (LTCG). Higher is better."
+            />
+            <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden">
+              <div 
+                className="h-full bg-buy transition-all duration-500" 
+                style={{ width: `${taxEfficiency * 100}%` }} 
+              />
+            </div>
+          </div>
+          <div className="bg-surface border border-white/5 p-6 rounded-xl space-y-4">
+            <MetricWithTooltip 
+              label="Average Conviction" 
+              value={Math.round(avgConviction)}
+              tooltip="Mean conviction score across all funds. Reflects system trust in current allocation."
+            />
+            <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden">
+              <div 
+                className={`h-full transition-all duration-500 ${avgConviction > 60 ? 'bg-buy' : 'bg-warning'}`} 
+                style={{ width: `${avgConviction}%` }} 
+              />
+            </div>
+          </div>
+          <div className="bg-surface border border-white/5 p-6 rounded-xl space-y-4">
+            <MetricWithTooltip 
+              label="Unrealised Gain %" 
+              value={`${((portfolioData.totalUnrealizedGain / (portfolioData.totalInvestedAmount || 1)) * 100).toFixed(1)}%`}
+              tooltip="Absolute return on currently active capital."
+            />
+            <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden">
+              <div 
+                className="h-full bg-buy transition-all duration-500" 
+                style={{ width: `${Math.min(100, (portfolioData.totalUnrealizedGain / (portfolioData.totalInvestedAmount || 1)) * 100)}%` }} 
+              />
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section className="bg-surface border border-white/5 p-8 rounded-xl">
+        <div className="flex items-center justify-between mb-8">
+          <h3 className="text-primary text-sm font-medium tracking-tight">XIRR performance · vs category avg</h3>
+          <span className="text-muted text-[10px] uppercase tracking-widest">Tabular View Available in Ledger</span>
+        </div>
+        <div className="h-96 w-full">
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={xirrData} layout="vertical" margin={{ left: 20, right: 40 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.03)" horizontal={true} vertical={false} />
+              <XAxis type="number" axisLine={false} tickLine={false} tick={{ fill: 'rgba(241,245,249,0.3)', fontSize: 10 }} unit="%" />
+              <YAxis 
+                dataKey="name" 
+                type="category" 
+                axisLine={false} 
+                tickLine={false} 
+                width={150}
+                tick={{ fill: 'rgba(241,245,249,0.7)', fontSize: 11, fontWeight: 500 }}
+              />
+              {!isPrivate && (
+                <RechartsTooltip 
+                  cursor={{ fill: 'rgba(255,255,255,0.02)' }}
+                  contentStyle={{ backgroundColor: '#0f0f18', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px' }}
+                />
+              )}
+              <Bar dataKey="Personal" fill="#818cf8" radius={[0, 2, 2, 0]} barSize={10} />
+              <Bar dataKey="Benchmark" fill="rgba(255,255,255,0.05)" radius={[0, 2, 2, 0]} barSize={10} />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      </section>
+    </div>
+  );
+}
+</file>
+
+<file path="portfolio-dashboard/src/components/views/RebalanceView.tsx">
+import { 
+  ResponsiveContainer, XAxis, YAxis, Tooltip, 
+  BarChart, Bar, Cell, CartesianGrid, ReferenceLine
+} from "recharts";
+import CurrencyValue from '../ui/CurrencyValue';
+
+export default function RebalanceView({ 
+  portfolioData, 
+  sipAmount, 
+  setSipAmount,
+  isPrivate 
+}: { 
+  portfolioData: any; 
+  sipAmount: number; 
+  setSipAmount: (val: number) => void;
+  isPrivate: boolean;
+}) {
+  const data = (portfolioData.schemeBreakdown || [])
+    .filter((s: any) => (s.plannedPercentage || 0) > 0 || (s.allocationPercentage || 0) > 0)
+    .map((s: any) => {
+      const drift = (s.allocationPercentage || 0) - (s.plannedPercentage || 0);
+      return {
+        ...s,
+        name: s.schemeName.substring(0, 20),
+        drift: parseFloat(drift.toFixed(2)),
+        color: drift > 1 ? "#f87171" : drift < -1 ? "#34d399" : "#94a3b8"
+      };
+    })
+    .sort((a: any, b: any) => b.drift - a.drift);
+
+  const totalDrift = data.reduce((acc: number, s: any) => acc + Math.abs(s.drift), 0);
+  const needsAttention = data.filter((s: any) => Math.abs(s.drift) > 1).length;
+
+  // 🧮 Dynamic SIP allocation logic
+  const totalDeficit = data
+    .filter((s: any) => s.drift < -1)  // underweight funds only
+    .reduce((acc: number, s: any) => acc + Math.abs(s.drift), 0);
+
+  const buyFunds = data.filter((x: any) => x.action === 'BUY');
+  const totalConviction = buyFunds.reduce((a: number, x: any) => a + (x.convictionScore || 1), 0);
+
+  const sipAllocation = buyFunds
+    .map((s: any) => {
+      const weight = (s.convictionScore || 1) / (totalConviction || 1);
+      return {
+        name: s.schemeName.substring(0, 28),
+        amount: Math.round(sipAmount * weight),
+        conviction: s.convictionScore,
+      };
+    })
+    .filter((s: any) => s.amount > 0)
+    .sort((a: any, b: any) => b.amount - a.amount);
+
+  // Estimated months to fix drift assuming sipAmount deployed monthly
+  const portfolioValue = portfolioData.currentValueAmount || 1;
+  const monthlyDriftReduction = (sipAmount / portfolioValue) * 100;
+  const etaMonths = monthlyDriftReduction > 0 
+    ? Math.ceil(totalDeficit / monthlyDriftReduction) 
+    : null;
+
+  return (
+    <div className="space-y-10 pb-32">
+      <header>
+        <h2 className="text-muted text-[10px] font-medium uppercase tracking-[0.2em] mb-1">Target alignment</h2>
+        <p className="text-xl font-medium text-primary tracking-tight">Allocation drift · actual vs target</p>
+      </header>
+
+      {/* DRIFT CHART */}
+      <section className="bg-surface border border-white/5 p-8 rounded-xl">
+        <div className="h-80 w-full">
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={data} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.03)" vertical={false} />
+              <XAxis 
+                dataKey="name" 
+                axisLine={false} 
+                tickLine={false} 
+                tick={{ fill: 'rgba(241,245,249,0.3)', fontSize: 10 }}
+              />
+              <YAxis 
+                axisLine={false} 
+                tickLine={false} 
+                tick={{ fill: 'rgba(241,245,249,0.3)', fontSize: 10 }}
+                unit="%"
+              />
+              {!isPrivate && (
+                <Tooltip 
+                  cursor={{ fill: 'rgba(255,255,255,0.02)' }}
+                  contentStyle={{ backgroundColor: '#0f0f18', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px' }}
+                />
+              )}
+              <ReferenceLine y={0} stroke="rgba(255,255,255,0.1)" />
+              <Bar dataKey="drift" radius={[4, 4, 0, 0]} barSize={30}>
+                {data.map((entry: any, index: number) => (
+                  <Cell key={`cell-${index}`} fill={entry.color} />
+                ))}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+        <div className="mt-8 pt-8 border-t border-white/5 flex items-center gap-6">
+          <div className="flex items-center gap-2">
+            <div className="w-3 h-3 rounded-sm bg-exit" />
+            <span className="text-[10px] uppercase tracking-widest text-muted">Overweight</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="w-3 h-3 rounded-sm bg-buy" />
+            <span className="text-[10px] uppercase tracking-widest text-muted">Underweight</span>
+          </div>
+          <div className="ml-auto text-secondary text-[11px] font-medium">
+            Total drift: <span className="text-primary">{totalDrift.toFixed(1)}%</span> across your portfolio. {needsAttention} funds need rebalancing.
+          </div>
+        </div>
+      </section>
+
+      {/* DETAILS TABLE */}
+      <section className="bg-surface border border-white/5 rounded-xl overflow-hidden">
+        <table className="w-full text-left">
+          <thead className="bg-white/[0.02] text-muted text-[10px] uppercase tracking-widest border-b border-white/5">
+            <tr>
+              <th className="px-6 py-4 font-medium">Fund Name</th>
+              <th className="px-6 py-4 font-medium text-right">Target %</th>
+              <th className="px-6 py-4 font-medium text-right">Actual %</th>
+              <th className="px-6 py-4 font-medium text-right">Drift</th>
+              <th className="px-6 py-4 font-medium text-right">Action</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-white/5">
+            {data.map((s: any) => (
+              <tr key={s.schemeName} className="hover:bg-white/[0.01] transition-colors group">
+                <td className="px-6 py-4 text-[13px] text-primary truncate max-w-md">{s.schemeName}</td>
+                <td className="px-6 py-4 text-right text-[13px] text-secondary tabular-nums">{(s.plannedPercentage || 0).toFixed(1)}%</td>
+                <td className="px-6 py-4 text-right text-[13px] text-secondary tabular-nums">{(s.allocationPercentage || 0).toFixed(1)}%</td>
+                <td className={`px-6 py-4 text-right text-[13px] font-medium tabular-nums ${
+                  s.drift > 1 ? 'text-exit' : s.drift < -1 ? 'text-buy' : 'text-hold'
+                }`}>
+                  {s.drift > 0 ? '+' : ''}{s.drift}%
+                </td>
+                <td className="px-6 py-4 text-right">
+                  <span className={`text-[10px] font-bold uppercase tracking-widest ${
+                    s.action === 'BUY' ? 'text-buy' : 
+                    s.action === 'EXIT' ? 'text-exit' : 'text-muted'
+                  }`}>
+                    {s.action}
+                  </span>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </section>
+
+      {/* SIP SIMULATOR */}
+      <section className="bg-accent/5 border border-accent/10 p-8 rounded-xl flex flex-col md:flex-row items-start gap-10">
+        <div className="flex-1 space-y-4">
+          <div className="flex justify-between items-center">
+            <h3 className="text-primary text-sm font-medium tracking-tight">SIP Correction Simulator</h3>
+            <CurrencyValue isPrivate={isPrivate} value={sipAmount} className="text-primary tabular-nums font-medium" />
+          </div>
+          <input 
+            type="range" min="0" max="200000" step="1000" 
+            value={sipAmount} 
+            onChange={(e) => setSipAmount(parseInt(e.target.value) || 0)}
+            className="w-full h-1 bg-white/10 rounded-lg appearance-none cursor-pointer accent-accent"
+          />
+          <p className="text-muted text-[11px] leading-relaxed">
+            Increasing your SIP will automatically prioritize underweight funds with the highest conviction scores, 
+            naturally pulling your portfolio back to its target alignment over time without incurring exit taxes.
+          </p>
+
+          <div className="space-y-2 mt-6 pt-6 border-t border-white/5">
+            <p className="text-[10px] text-muted uppercase tracking-widest mb-3">
+              This SIP of <CurrencyValue isPrivate={isPrivate} value={sipAmount} /> would be deployed as:
+            </p>
+            {sipAllocation.map((s: any) => (
+              <div key={s.name} className="flex items-center justify-between py-1.5">
+                <span className="text-[12px] text-secondary truncate flex-1">{s.name}</span>
+                <span className="text-[12px] text-buy tabular-nums font-medium ml-4">
+                  <CurrencyValue isPrivate={isPrivate} value={s.amount} />
+                </span>
+              </div>
+            ))}
+            {etaMonths && (
+              <p className="text-[11px] text-muted pt-3 border-t border-white/5 mt-3">
+                At this rate, portfolio drift normalises in approx. <span className="text-primary font-medium">{etaMonths} months</span>.
+              </p>
+            )}
+          </div>
+        </div>
+        
+        <div className="shrink-0 flex flex-col items-center justify-center p-6 bg-surface-elevated border border-white/5 rounded-2xl w-48 text-center sticky top-0">
+          <p className="text-muted text-[10px] uppercase tracking-widest mb-2">Portfolio Drift</p>
+          <p className="text-2xl font-medium text-primary">{(totalDrift || 0).toFixed(1)}%</p>
+          <p className={`text-[10px] font-bold mt-2 uppercase tracking-tighter ${totalDrift < 5 ? 'text-buy' : totalDrift < 10 ? 'text-warning' : 'text-exit'}`}>
+            {totalDrift < 5 ? 'Healthy Alignment' : totalDrift < 10 ? 'Moderate Drift' : 'High Variance'}
+          </p>
+        </div>
+      </section>
+    </div>
+  );
+}
+</file>
+
+<file path="portfolio-dashboard/src/components/views/TaxView.tsx">
+import { useEffect, useState } from 'react';
+import { formatCurrency } from '../../utils/formatters';
+import * as Progress from '@radix-ui/react-progress';
+import { ShieldAlert, Info, TrendingDown, Receipt } from 'lucide-react';
+import MetricWithTooltip from '../ui/MetricWithTooltip';
+import CurrencyValue from '../ui/CurrencyValue';
+import { fetchTlhOpportunities } from '../../services/api';
+
+export default function TaxView({ 
+  portfolioData,
+  isPrivate,
+  pan
+}: { 
+  portfolioData: any;
+  isPrivate: boolean;
+  pan: string;
+}) {
+  const [tlhOps, setTlhOps] = useState<any[]>([]);
+  const ltcgLimit = 125000;
+  const realizedLTCG = portfolioData.totalLTCG || 0;
+  const ltcgPercent = Math.min(100, (realizedLTCG / ltcgLimit) * 100);
+  
+  const stcgFunds = (portfolioData.schemeBreakdown || [])
+    .filter((s: any) => (s.stcgValue || 0) > 0)
+    .map((s: any) => ({
+      name: s.schemeName,
+      stcg: s.stcgValue,
+      tax: s.stcgValue * 0.20,
+      days: s.daysToNextLtcg || 0
+    }));
+
+  useEffect(() => {
+    fetchTlhOpportunities(pan)
+      .then(setTlhOps)
+      .catch(() => setTlhOps([]));
+  }, [pan]);
+
+  return (
+    <div className="space-y-10 pb-32">
+      <header>
+        <h2 className="text-muted text-[10px] font-medium uppercase tracking-[0.2em] mb-1">Fiscal optimization</h2>
+        <p className="text-xl font-medium text-primary tracking-tight">Tax position · FY 2025-26</p>
+      </header>
+
+      {/* SECTION A: LTCG PROGRESS */}
+      <section className="bg-surface border border-white/5 p-8 rounded-xl space-y-6">
+        <div className="flex justify-between items-end">
+          <div>
+            <h3 className="text-primary text-sm font-medium mb-1">Annual LTCG Headroom</h3>
+            <p className="text-muted text-[11px]">₹1.25L tax-free limit for equity gains.</p>
+          </div>
+          <div className="text-right">
+            <CurrencyValue isPrivate={isPrivate} value={realizedLTCG} className="text-primary font-medium tabular-nums" />
+            <span className="text-muted text-xs tabular-nums"> / {formatCurrency(ltcgLimit)}</span>
+          </div>
+        </div>
+        
+        <div className="relative pt-2">
+          <Progress.Root 
+            className="relative overflow-hidden bg-white/5 rounded-full w-full h-2" 
+            value={ltcgPercent}
+          >
+            <Progress.Indicator 
+              className={`w-full h-full transition-transform duration-500 ease-[cubic-bezier(0.65,0,0.35,1)] ${
+                ltcgPercent > 80 ? 'bg-warning' : 'bg-buy'
+              }`}
+              style={{ transform: `translateX(-${100 - ltcgPercent}%)` }}
+            />
+          </Progress.Root>
+        </div>
+        
+        <div className="text-[11px] text-secondary leading-relaxed flex items-center gap-2">
+          <Info size={14} className="text-accent" />
+          {realizedLTCG < ltcgLimit 
+            ? <span>You can harvest <CurrencyValue isPrivate={isPrivate} value={ltcgLimit - realizedLTCG} /> more in LTCG gains tax-free this year.</span>
+            : `You have exceeded the tax-free limit. Further LTCG will be taxed at 12.5%.`
+          }
+        </div>
+      </section>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+        {/* SECTION B: STCG EXPOSURE */}
+        <section className="space-y-4">
+          <h3 className="text-muted text-[10px] font-medium uppercase tracking-widest flex items-center gap-2">
+            <ShieldAlert size={12} className="text-exit" /> STCG Lock List
+          </h3>
+          <div className="bg-surface border border-white/5 rounded-xl overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left">
+                <thead className="bg-white/[0.02] text-muted text-[10px] uppercase tracking-widest border-b border-white/5">
+                  <tr>
+                    <th className="px-6 py-4 font-medium">Fund</th>
+                    <th className="px-6 py-4 font-medium text-right">Potential Tax</th>
+                    <th className="px-6 py-4 font-medium text-right">Wait Time</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-white/5">
+                  {stcgFunds.map((f: any) => (
+                    <tr key={f.name} className="hover:bg-white/[0.01]">
+                      <td className="px-6 py-4 text-[12px] text-primary truncate max-w-[180px]">{f.name}</td>
+                      <td className="px-6 py-4 text-right text-[12px] text-exit tabular-nums">
+                        <CurrencyValue isPrivate={isPrivate} value={f.tax} />
+                      </td>
+                      <td className="px-6 py-4 text-right text-[12px] text-secondary tabular-nums">
+                        {f.days} <span className="text-[10px] text-muted uppercase">days</span>
+                      </td>
+                    </tr>
+                  ))}
+                  {stcgFunds.length === 0 && (
+                    <tr>
+                      <td colSpan={3} className="px-6 py-8 text-center text-muted text-xs italic">
+                        No short-term gains detected in current holdings.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        {/* SECTION C: TLH OPPORTUNITIES */}
+        <section className="space-y-4">
+          <h3 className="text-muted text-[10px] font-medium uppercase tracking-widest flex items-center gap-2">
+            <TrendingDown size={12} className="text-buy" /> Harvesting Ops
+          </h3>
+          <div className="space-y-3">
+            {tlhOps.length > 0 ? (
+              tlhOps.map((op: any) => (
+                <div key={op.schemeName} className="bg-surface border border-white/5 rounded-xl p-5 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-[10px] text-muted uppercase tracking-widest mb-1">Sell</p>
+                      <p className="text-sm text-primary truncate max-w-[200px]">{op.schemeName}</p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-[10px] text-muted uppercase tracking-widest mb-1">Buy</p>
+                      <p className="text-sm text-buy truncate max-w-[200px]">{op.proxySchemeRecommendation}</p>
+                    </div>
+                  </div>
+                  <div className="flex justify-between pt-3 border-t border-white/5">
+                    <div>
+                      <p className="text-[10px] text-muted uppercase">Loss to harvest</p>
+                      <CurrencyValue isPrivate={isPrivate} value={Math.abs(op.estimatedCapitalLoss)} className="text-exit text-sm font-medium tabular-nums" />
+                    </div>
+                    <div className="text-right">
+                      <p className="text-[10px] text-muted uppercase">Est. tax saving</p>
+                      <CurrencyValue isPrivate={isPrivate} value={Math.abs(op.estimatedCapitalLoss) * 0.20} className="text-buy text-sm font-medium tabular-nums" />
+                    </div>
+                  </div>
+                </div>
+              ))
+            ) : (
+              <div className="bg-surface border border-white/5 rounded-xl p-6 min-h-[200px] flex flex-col justify-center">
+                <div className="text-center space-y-3">
+                  <Receipt size={32} className="text-muted mx-auto opacity-20" />
+                  <p className="text-muted text-xs font-medium">No tax-loss harvesting opportunities identified today.</p>
+                  <p className="text-[10px] text-muted uppercase tracking-widest leading-relaxed max-w-[240px] mx-auto">
+                    The system monitors your FIFO lots for -5% drops exceeding ₹1,000 in absolute loss.
+                  </p>
+                </div>
+              </div>
+            )}
+          </div>
+        </section>
+      </div>
+
+      {/* SECTION D: YEAR SUMMARY */}
+      <section className="bg-white/[0.02] border border-white/5 p-8 rounded-xl">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-8">
+          <MetricWithTooltip label="Realised LTCG" value={<CurrencyValue isPrivate={isPrivate} value={portfolioData.totalLTCG} />} tooltip="Total long-term capital gains already booked this financial year." />
+          <MetricWithTooltip label="Realised STCG" value={<CurrencyValue isPrivate={isPrivate} value={portfolioData.totalSTCG} />} tooltip="Total short-term capital gains already booked this financial year." />
+          <MetricWithTooltip label="Est. Tax Paid" value={<CurrencyValue isPrivate={isPrivate} value={(portfolioData.totalSTCG || 0) * 0.20 + Math.max(0, (portfolioData.totalLTCG || 0) - 125000) * 0.125} />} tooltip="Rough estimate of taxes owed on realized gains." />
+          <MetricWithTooltip label="Headroom" value={<CurrencyValue isPrivate={isPrivate} value={Math.max(0, ltcgLimit - realizedLTCG)} />} valueClass="text-buy" tooltip="Remaining tax-free LTCG limit for this year." />
+        </div>
+      </section>
+    </div>
+  );
+}
+</file>
+
+<file path="portfolio-dashboard/src/components/views/TodayBriefView.tsx">
+import { motion } from 'framer-motion';
+import { Zap, Info, ShieldAlert } from 'lucide-react';
+import { buildPlainEnglishReason } from '../../utils/formatters';
+import ConvictionBadge from '../ui/ConvictionBadge';
+import MetricWithTooltip from '../ui/MetricWithTooltip';
+import CurrencyValue from '../ui/CurrencyValue';
+
+export default function TodayBriefView({ 
+  portfolioData, 
+  sipAmount, 
+  setSipAmount, 
+  lumpsum, 
+  setLumpsum,
+  onFundClick,
+  isPrivate
+}: { 
+  portfolioData: any;
+  sipAmount: number;
+  setSipAmount: (val: number) => void;
+  lumpsum: number;
+  setLumpsum: (val: number) => void;
+  onFundClick: (schemeName: string) => void;
+  isPrivate: boolean;
+}) {
+  const dateStr = new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+  
+  const actionSignals = (portfolioData.schemeBreakdown || []).filter((s: any) => s.action === 'BUY' || s.action === 'EXIT');
+  const holdCount = (portfolioData.schemeBreakdown || []).filter((s: any) => s.action === 'HOLD').length;
+
+  const exitProceeds = (portfolioData.schemeBreakdown || [])
+    .filter((s: any) => s.action === 'EXIT')
+    .reduce((acc: number, s: any) => acc + (s.signalAmount || 0), 0);
+
+  const totalWarChest = sipAmount + lumpsum + exitProceeds;
+
+  const buySignals = (portfolioData.schemeBreakdown || []).filter((s: any) => s.action === 'BUY');
+  const totalConviction = buySignals.reduce((acc: number, s: any) => acc + (s.convictionScore || 1), 0);
+
+  const scaledBuySignals = buySignals.map((s: any) => {
+    const weight = (s.convictionScore || 1) / (totalConviction || 1);
+    return {
+      ...s,
+      displayAmount: weight * totalWarChest
+    };
+  });
+
+  const container = {
+    hidden: { opacity: 0 },
+    show: {
+      opacity: 1,
+      transition: { staggerChildren: 0.05 }
+    }
+  };
+
+  const item = {
+    hidden: { opacity: 0, y: 10 },
+    show: { opacity: 1, y: 0 }
+  };
+
+  return (
+    <div className="space-y-10 pb-32">
+      <header>
+        <h2 className="text-muted text-[10px] font-medium uppercase tracking-[0.2em] mb-1">Portfolio intelligence</h2>
+        <p className="text-xl font-medium text-primary tracking-tight">Today's brief · {dateStr}</p>
+      </header>
+
+      {/* ACTION CARDS */}
+      <section>
+        <h3 className="text-muted text-[10px] font-medium uppercase tracking-widest mb-4 flex items-center gap-2">
+          <Zap size={12} className="text-warning" /> Priority Actions
+        </h3>
+        <motion.div 
+          variants={container}
+          initial="hidden"
+          animate="show"
+          className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"
+        >
+          {actionSignals.map((signal: any) => (
+            <motion.div 
+              key={signal.schemeName}
+              variants={item}
+              onClick={() => onFundClick(signal.schemeName)}
+              className={`p-5 rounded-xl border transition-all cursor-pointer group hover:bg-white/[0.02] ${
+                signal.action === 'BUY' 
+                  ? 'border-buy/10 bg-buy/[0.02] hover:border-buy/20' 
+                  : 'border-exit/10 bg-exit/[0.02] hover:border-exit/20'
+              }`}
+            >
+              <div className="flex items-center justify-between mb-4">
+                <span className={`text-[10px] font-bold uppercase tracking-widest ${signal.action === 'BUY' ? 'text-buy' : 'text-exit'}`}>
+                  {signal.action}
+                </span>
+                <ConvictionBadge score={signal.convictionScore} />
+              </div>
+              <p className="text-[13px] font-medium text-primary mb-1 truncate group-hover:text-white transition-colors">{signal.schemeName}</p>
+              <div className={`text-2xl font-medium tabular-nums mb-4 ${signal.action === 'BUY' ? 'text-buy' : 'text-exit'}`}>
+                <CurrencyValue 
+                  isPrivate={isPrivate} 
+                  value={signal.action === 'BUY' 
+                    ? (scaledBuySignals.find((b: any) => b.schemeName === signal.schemeName)?.displayAmount ?? 0)
+                    : signal.signalAmount
+                  } 
+                />
+              </div>
+              <p className="text-[11px] text-secondary leading-relaxed line-clamp-2">
+                {buildPlainEnglishReason(signal)}
+              </p>
+            </motion.div>
+          ))}
+          
+          {actionSignals.length === 0 && (
+            <div className="col-span-full py-12 flex flex-col items-center justify-center bg-surface border border-white/5 rounded-xl">
+              <Info className="text-muted mb-3" size={24} />
+              <p className="text-secondary text-xs font-medium">No urgent actions identified for today.</p>
+            </div>
+          )}
+        </motion.div>
+      </section>
+
+      {/* SIP CALCULATOR */}
+      <section className="bg-surface border border-white/5 rounded-xl overflow-hidden">
+        <div className="p-6 border-b border-white/5 flex flex-col md:flex-row md:items-center justify-between gap-6">
+          <div>
+            <h3 className="text-primary text-sm font-medium mb-1 tracking-tight">SIP Deployment Calculator</h3>
+            <p className="text-muted text-[11px]">Proportional distribution based on conviction and target drift.</p>
+          </div>
+          <div className="flex flex-wrap items-center gap-8">
+            <div className="space-y-2 min-w-[200px]">
+              <div className="flex justify-between items-center text-[10px] uppercase tracking-widest text-muted">
+                <span>Monthly SIP</span>
+                <CurrencyValue isPrivate={isPrivate} value={sipAmount} className="text-primary tabular-nums font-medium" />
+              </div>
+              <input 
+                type="range" min="0" max="200000" step="1000" 
+                value={sipAmount} 
+                onChange={(e) => setSipAmount(parseInt(e.target.value) || 0)}
+                className="w-full h-1 bg-white/10 rounded-lg appearance-none cursor-pointer accent-accent"
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="block text-[10px] uppercase tracking-widest text-muted">Extra Lumpsum</label>
+              <input 
+                type="number" 
+                value={lumpsum || ''} 
+                onChange={(e) => setLumpsum(parseInt(e.target.value) || 0)}
+                placeholder="₹0"
+                className="bg-surface-elevated border border-white/10 rounded-md px-3 py-1.5 text-sm text-primary tabular-nums focus:outline-none focus:border-indigo-500/50 transition-colors w-32"
+              />
+            </div>
+          </div>
+        </div>
+
+        <div className="overflow-x-auto">
+          <table className="w-full text-left">
+            <thead className="bg-white/[0.02] text-muted text-[10px] uppercase tracking-widest border-b border-white/5">
+              <tr>
+                <th className="px-6 py-4 font-medium">Fund name</th>
+                <th className="px-6 py-4 font-medium text-right">Conviction</th>
+                <th className="px-6 py-4 font-medium text-right">Planned %</th>
+                <th className="px-6 py-4 font-medium text-right">Deploy amount</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-white/5">
+              {scaledBuySignals.map((signal: any) => (
+                <tr key={signal.schemeName} className="hover:bg-white/[0.01] transition-colors group">
+                  <td className="px-6 py-4">
+                    <button 
+                      onClick={() => onFundClick(signal.schemeName)}
+                      className="text-[13px] text-primary hover:text-accent transition-colors truncate max-w-xs block text-left"
+                    >
+                      {signal.schemeName}
+                    </button>
+                  </td>
+                  <td className="px-6 py-4 text-right">
+                    <div className="flex justify-end">
+                      <MetricWithTooltip 
+                        label="" 
+                        value={<ConvictionBadge score={signal.convictionScore} />} 
+                        tooltip="A 0–100 score combining your personal return, fund risk profile, and current valuation. Higher = stronger case to hold or buy more."
+                      />
+                    </div>
+                  </td>
+                  <td className="px-6 py-4 text-right text-[13px] text-secondary tabular-nums">
+                    {signal.plannedPercentage}%
+                  </td>
+                  <td className="px-6 py-4 text-right text-[13px] text-buy font-medium tabular-nums">
+                    <CurrencyValue isPrivate={isPrivate} value={signal.displayAmount} />
+                  </td>
+                </tr>
+              ))}
+              {scaledBuySignals.length === 0 && (
+                <tr>
+                  <td colSpan={4} className="px-6 py-8 text-center text-muted text-xs italic">
+                    All funds are currently within target allocation or marked for exit.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <footer className="flex items-center gap-3 px-6 py-4 bg-white/[0.02] border border-white/5 rounded-xl text-secondary">
+        <ShieldAlert size={14} className="text-hold" />
+        <p className="text-[11px] font-medium uppercase tracking-widest">
+          {holdCount} funds on hold · Weights within tolerance
+        </p>
+      </footer>
+    </div>
+  );
+}
+</file>
+
 <file path="portfolio-dashboard/src/components/layout/Dashboard.tsx">
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -9513,7 +9651,7 @@ export default function Dashboard({ portfolioData }: { portfolioData: any }) {
             )}
             
             {activeTab === 'tax' && (
-              <TaxView portfolioData={portfolioData} isPrivate={isPrivate} />
+              <TaxView portfolioData={portfolioData} isPrivate={isPrivate} pan={investorPan} />
             )}
             
             {activeTab === 'ledger' && (

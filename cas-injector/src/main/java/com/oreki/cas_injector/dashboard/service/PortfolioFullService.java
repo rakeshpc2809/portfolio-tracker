@@ -25,15 +25,14 @@ public class PortfolioFullService {
     private final PortfolioOrchestrator orchestrator;
     private final JdbcTemplate jdbcTemplate;
 
-    public DashboardSummaryDTO getFullPortfolio(String pan) {
-        log.info("📊 Fetching Unified Portfolio Payload for {}", pan);
+    public DashboardSummaryDTO getFullPortfolio(String pan, double monthlySip, double lumpsum) {
+        log.info("📊 Fetching Unified Portfolio Payload for {} (SIP: {}, Lumpsum: {})", pan, monthlySip, lumpsum);
         
         // 1. Get Base Dashboard (Schemes, NAVs, Gains)
         DashboardSummaryDTO summary = dashboardService.getInvestorSummary(pan);
         
         // 2. Get Tactical Signals (Planned vs Actual Allocations)
-        // Now amfiCode is directly available in TacticalSignal
-        Map<String, TacticalSignal> signals = orchestrator.generateDailySignals(pan, 75000, 0).stream()
+        Map<String, TacticalSignal> signals = orchestrator.generateDailySignals(pan, monthlySip, lumpsum).stream()
             .collect(Collectors.toMap(TacticalSignal::amfiCode, s -> s, (s1, s2) -> s1));
             
         // 3. Get Conviction Metrics (Sortino, Score, MDD, NAV Signals)
