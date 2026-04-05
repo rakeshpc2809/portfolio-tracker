@@ -2,167 +2,174 @@ import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   LayoutDashboard, 
-  Target, 
+  TrendingUp, 
   Zap, 
-  Database, 
-  Activity, 
-  Lock, 
+  ArrowLeftRight, 
+  Receipt,
+  ShieldCheck,
+  Lock,
   Unlock,
-  Receipt
+  PieChart
 } from 'lucide-react';
-import { formatCurrency } from '../../utils/formatters';
+import * as Switch from '@radix-ui/react-switch';
+import { formatCurrencyShort } from '../../utils/formatters';
 
 // Views
-import OverviewTab from '../views/OverviewTab';
-import DeviationTab from '../views/DeviationTab';
-import HoldingsTab from '../views/HoldingsTab';
-import TacticalPanel from '../views/TacticalPanel';
-import TransactionsTab from '../views/TransactionTab';
-import ErrorBoundary from '../ui/ErrorBoundary';
-import { OverviewSkeleton } from '../ui/Skeleton';
+import TodayBriefView from '../views/TodayBriefView';
+import PortfolioView from '../views/PortfolioView';
+import RebalanceView from '../views/RebalanceView';
+import TaxView from '../views/TaxView';
+import LedgerView from '../views/LedgerView';
+import FundDetailView from '../views/FundDetailView';
+import FundsListView from '../views/FundsListView';
 
 export default function Dashboard({ portfolioData }: { portfolioData: any }) {
-  const [activeTab, setActiveTab] = useState('overview');
+  const [activeTab, setActiveTab] = useState('today');
   const [isPrivate, setIsPrivate] = useState(false);
+  const [selectedFundName, setSelectedFundName] = useState<string | null>(null);
+  const [sipAmount, setSipAmount] = useState(75000);
+  const [lumpsum, setLumpsum] = useState(0);
+
   const investorPan = "CFXPR4533R";
 
   const tabs = [
-    { id: 'overview', label: 'Intelligence', icon: <LayoutDashboard size={14}/> },
+    { id: 'today', label: 'Today', icon: <Zap size={14}/> },
+    { id: 'portfolio', label: 'Portfolio', icon: <LayoutDashboard size={14}/> },
+    { id: 'funds', label: 'Each Fund', icon: <PieChart size={14}/> },
+    { id: 'rebalance', label: 'Rebalance', icon: <ArrowLeftRight size={14}/> },
+    { id: 'tax', label: 'Tax', icon: <ShieldCheck size={14}/> },
     { id: 'ledger', label: 'Ledger', icon: <Receipt size={14}/> },
-    { id: 'deviation', label: 'Alignment', icon: <Target size={14}/> },
-    { id: 'holdings', label: 'Matrix', icon: <Database size={14}/> },
-    { id: 'tactical', label: 'Tactical', icon: <Zap size={14}/> },
   ];
 
-  // Helper to mask sensitive data
-  const maskValue = (value: string | number) => isPrivate ? "••••••••" : value;
+  const selectedFund = portfolioData?.schemeBreakdown?.find((s: any) => s.schemeName === selectedFundName);
 
-  if (!portfolioData) {
-    return (
-      <div className="min-h-screen bg-[#020202] text-zinc-100 font-sans p-6 max-w-7xl mx-auto">
-        <OverviewSkeleton />
-      </div>
-    );
-  }
+  const mask = (val: string) => isPrivate ? "••••" : val;
+
+  const stats = [
+    { label: 'Value', value: formatCurrencyShort(portfolioData.currentValueAmount) },
+    { label: 'XIRR', value: portfolioData.overallXirr, color: parseFloat(portfolioData.overallXirr) >= 0 ? 'text-emerald-400' : 'text-red-400' },
+    { label: 'P&L', value: (portfolioData.totalUnrealizedGain >= 0 ? '+' : '') + formatCurrencyShort(portfolioData.totalUnrealizedGain), color: portfolioData.totalUnrealizedGain >= 0 ? 'text-emerald-400' : 'text-red-400' },
+    { label: 'Tax', value: formatCurrencyShort(portfolioData.totalSTCG), color: 'text-amber-400' },
+  ];
 
   return (
-    <div className="min-h-screen bg-[#020202] text-zinc-100 font-sans selection:bg-blue-500/30">
-      {/* 🌌 ATMOSPHERIC BACKGROUND */}
-      <div className="fixed inset-0 overflow-hidden pointer-events-none">
-        <div className="absolute -top-[25%] -left-[10%] w-[70%] h-[70%] bg-blue-500/10 blur-[120px] rounded-full" />
-        <div className="absolute -bottom-[25%] -right-[10%] w-[60%] h-[60%] bg-purple-500/5 blur-[120px] rounded-full" />
-      </div>
+    <div className="min-h-screen bg-[#09090f] text-primary font-sans selection:bg-indigo-500/30">
+      <div className="fixed inset-0 pointer-events-none opacity-40" 
+           style={{ background: 'radial-gradient(ellipse 80% 50% at 20% 0%, rgba(129,140,248,0.08) 0%, transparent 60%)' }} 
+      />
 
-      {/* 📟 TELEMETRY HEADER */}
-      <header className="sticky top-0 z-50 border-b border-white/5 bg-black/20 backdrop-blur-md px-8 py-4 flex justify-between items-center">
-        <div className="flex items-center gap-6">
-          <div className="flex flex-col">
-            <h1 className="text-[10px] font-black uppercase tracking-[0.4em] text-zinc-500">Quantum Portfolio OS</h1>
-            <p className="text-sm font-black italic tracking-tighter text-white">
-              {isPrivate ? "SENSITIVE_REDACTED" : (portfolioData.investorName || "RAKESH P C")}
-            </p>
+      <header className="sticky top-0 z-[90] border-b border-white/5 bg-[#09090f]/80 backdrop-blur-md px-8 py-4 flex justify-between items-center">
+        <div className="flex items-center gap-10">
+          <div className="flex items-center gap-2">
+            <div className="w-6 h-6 bg-indigo-500 rounded-md flex items-center justify-center">
+              <TrendingUp size={14} className="text-white" />
+            </div>
+            <h1 className="text-[10px] font-bold uppercase tracking-[0.2em] text-indigo-400">Portfolio OS</h1>
           </div>
-          <div className="h-8 w-px bg-zinc-800 hidden sm:block" />
-          <div className="hidden sm:flex flex-col">
-            <p className="text-[8px] font-black text-zinc-500 uppercase tracking-widest">System XIRR</p>
-            <p className={`text-xs font-black ${parseFloat(portfolioData.overallXirr) < 0 ? 'text-rose-500' : 'text-emerald-500'}`}>
-              {maskValue(portfolioData.overallXirr)}
-            </p>
+
+          <div className="hidden lg:flex items-center gap-8 border-l border-white/5 pl-8">
+            {stats.map(s => (
+              <div key={s.label} className="space-y-0.5">
+                <p className="text-[9px] uppercase tracking-widest text-muted">{s.label}</p>
+                <p className={`text-sm font-medium tabular-nums ${s.color || 'text-primary'}`}>{mask(s.value)}</p>
+              </div>
+            ))}
           </div>
         </div>
 
-        <div className="flex items-center gap-8">
-          <div className="text-right">
-             <p className="text-[8px] font-black text-zinc-600 uppercase tracking-widest">Total Capital Value</p>
-             <p className="text-xl font-black text-white tracking-tighter">
-               {isPrivate ? "₹ ••••••••" : formatCurrency(portfolioData.currentValueAmount)}
-             </p>
-          </div>
-          <div className="flex items-center gap-3 bg-zinc-900/50 border border-zinc-800 px-4 py-2 rounded-2xl">
-             <div className="flex flex-col items-end">
-               <span className="text-[7px] font-black uppercase text-zinc-500">Tax Lots</span>
-               <span className="text-xs font-black text-blue-400">{portfolioData.openTaxLots}</span>
-             </div>
-             <Activity size={14} className="text-blue-500 animate-pulse"/>
+        <div className="flex items-center gap-6">
+          <div className="flex items-center gap-3 bg-white/[0.03] border border-white/5 px-3 py-1.5 rounded-lg">
+            <span className="text-[9px] font-bold uppercase tracking-widest text-muted">{isPrivate ? 'Hidden' : 'Visible'}</span>
+            <Switch.Root 
+              checked={isPrivate} 
+              onCheckedChange={setIsPrivate}
+              className="w-8 h-4 bg-white/10 rounded-full relative data-[state=checked]:bg-indigo-500 outline-none cursor-pointer transition-colors"
+            >
+              <Switch.Thumb className="block w-3 h-3 bg-white rounded-full transition-transform duration-150 translate-x-0.5 will-change-transform data-[state=checked]:translate-x-[18px]" />
+            </Switch.Root>
+            {isPrivate ? <Lock size={12} className="text-muted" /> : <Unlock size={12} className="text-muted" />}
           </div>
         </div>
       </header>
 
-      {/* 🏗️ MAIN WORKSPACE */}
-      <main className="relative z-10 p-6 pb-32 max-w-7xl mx-auto">
-        <ErrorBoundary>
-          <AnimatePresence mode="wait">
-            <motion.div
-              key={activeTab}
-              initial={{ opacity: 0, y: 20, filter: "blur(10px)" }}
-              animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
-              exit={{ opacity: 0, y: -20, filter: "blur(10px)" }}
-              transition={{ duration: 0.4, ease: [0.23, 1, 0.32, 1] }}
-            >
-              {activeTab === 'overview' && (
-                <OverviewTab 
-                  data={portfolioData.schemeBreakdown} 
-                  portfolioSummary={portfolioData} 
-                />
-              )}
-              
-              {activeTab === 'ledger' && (
-                <TransactionsTab investorPan={investorPan} />
-              )}
-
-              {activeTab === 'deviation' && <DeviationTab data={portfolioData.schemeBreakdown} />}
-              
-              {activeTab === 'holdings' && <HoldingsTab data={portfolioData.schemeBreakdown} />}
-              
-              {activeTab === 'tactical' && (
-                <TacticalPanel 
-                  signals={portfolioData.schemeBreakdown} 
-                  totalPortfolioValue={portfolioData.currentValueAmount} 
-                />
-              )}
-            </motion.div>
-          </AnimatePresence>
-        </ErrorBoundary>
-      </main>
-
-      {/* 🕹️ FLOATING COMMAND DOCK */}
-      <nav className="fixed bottom-8 left-1/2 -translate-x-1/2 z-[100]">
-        <div className="flex items-center gap-1 p-1.5 bg-zinc-900/80 backdrop-blur-2xl border border-white/10 rounded-[2rem] shadow-[0_20px_50px_rgba(0,0,0,0.5)]">
+      <main className="relative z-10 p-8 max-w-7xl mx-auto">
+        <nav className="flex flex-wrap items-center gap-1 mb-12 p-1 bg-white/[0.02] border border-white/5 rounded-xl w-fit">
           {tabs.map((tab) => (
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
-              className="relative px-6 py-2.5 rounded-full transition-all duration-500 group"
+              className={`flex items-center gap-2 px-5 py-2 rounded-lg text-[11px] font-bold uppercase tracking-wider transition-all duration-150 ${
+                activeTab === tab.id ? 'bg-indigo-500/10 text-indigo-400' : 'text-muted hover:text-secondary'
+              }`}
             >
-              {activeTab === tab.id && (
-                <motion.div 
-                  layoutId="activeTab"
-                  className="absolute inset-0 bg-white shadow-[0_0_20px_rgba(255,255,255,0.2)] rounded-full"
-                  transition={{ type: "spring", bounce: 0.2, duration: 0.6 }}
-                />
-              )}
-              <div className={`relative z-10 flex items-center gap-2 text-[10px] font-black uppercase tracking-widest transition-colors duration-300 ${
-                activeTab === tab.id ? 'text-black' : 'text-zinc-500 group-hover:text-zinc-300'
-              }`}>
-                {tab.icon}
-                <span className="hidden sm:inline">{tab.label}</span>
-              </div>
+              {tab.icon}
+              {tab.label}
             </button>
           ))}
-        </div>
-      </nav>
+        </nav>
 
-      {/* 🔒 PRIVACY OVERLAY TOGGLE */}
-      <button 
-        onClick={() => setIsPrivate(!isPrivate)}
-        className="fixed bottom-8 right-8 p-4 bg-zinc-900/50 border border-zinc-800 rounded-full hover:bg-zinc-800 transition-all group z-[101]"
-      >
-         {isPrivate ? (
-           <Lock size={16} className="text-blue-500" />
-         ) : (
-           <Unlock size={16} className="text-zinc-600 group-hover:text-white transition-colors" />
-         )}
-      </button>
+        <AnimatePresence mode="wait">
+          <motion.div
+            key={activeTab}
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            transition={{ duration: 0.2, ease: "easeOut" }}
+          >
+            {activeTab === 'today' && (
+              <TodayBriefView 
+                portfolioData={portfolioData}
+                sipAmount={sipAmount}
+                setSipAmount={setSipAmount}
+                lumpsum={lumpsum}
+                setLumpsum={setLumpsum}
+                onFundClick={setSelectedFundName}
+                isPrivate={isPrivate}
+              />
+            )}
+            
+            {activeTab === 'portfolio' && (
+              <PortfolioView portfolioData={portfolioData} isPrivate={isPrivate} />
+            )}
+
+            {activeTab === 'funds' && (
+              <FundsListView 
+                portfolioData={portfolioData} 
+                onFundClick={setSelectedFundName}
+                isPrivate={isPrivate}
+              />
+            )}
+
+            {activeTab === 'rebalance' && (
+              <RebalanceView 
+                portfolioData={portfolioData}
+                sipAmount={sipAmount}
+                setSipAmount={setSipAmount}
+                isPrivate={isPrivate}
+              />
+            )}
+            
+            {activeTab === 'tax' && (
+              <TaxView portfolioData={portfolioData} isPrivate={isPrivate} />
+            )}
+            
+            {activeTab === 'ledger' && (
+              <LedgerView investorPan={investorPan} isPrivate={isPrivate} />
+            )}
+          </motion.div>
+        </AnimatePresence>
+      </main>
+
+      <AnimatePresence>
+        {selectedFundName && (
+          <FundDetailView 
+            fund={selectedFund}
+            isOpen={!!selectedFundName}
+            onClose={() => setSelectedFundName(null)}
+            isPrivate={isPrivate}
+          />
+        )}
+      </AnimatePresence>
     </div>
   );
 }
