@@ -206,15 +206,17 @@ public class DashboardService {
             .map(CommonUtils.SCALE_MONEY)
             .reduce(BigDecimal.ZERO, BigDecimal::add);
 
-        BigDecimal totalLTCG = allInvestorAudits.stream()
-    .filter(a -> a.getTaxCategory().contains("LTCG")) 
-    .map(CapitalGainAudit::getRealizedGain)
-    .reduce(BigDecimal.ZERO, BigDecimal::add);
+        LocalDate fyStart = CommonUtils.getCurrentFyStart();
 
-BigDecimal totalSTCG = allInvestorAudits.stream()
-    .filter(a -> a.getTaxCategory().contains("STCG") || a.getTaxCategory().contains("SLAB"))
-    .map(CapitalGainAudit::getRealizedGain)
-    .reduce(BigDecimal.ZERO, BigDecimal::add);
+        BigDecimal totalLTCG = allInvestorAudits.stream()
+            .filter(a -> a.getTaxCategory().contains("LTCG") && !a.getSellTransaction().getDate().isBefore(fyStart)) 
+            .map(CapitalGainAudit::getRealizedGain)
+            .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+        BigDecimal totalSTCG = allInvestorAudits.stream()
+            .filter(a -> (a.getTaxCategory().contains("STCG") || a.getTaxCategory().contains("SLAB")) && !a.getSellTransaction().getDate().isBefore(fyStart))
+            .map(CapitalGainAudit::getRealizedGain)
+            .reduce(BigDecimal.ZERO, BigDecimal::add);
 
         BigDecimal portfolioPerformance = aggregateTotalInvested.compareTo(BigDecimal.ZERO) > 0 
          ? aggregateUnrealizedGain.divide(aggregateTotalInvested, 4, RoundingMode.HALF_UP)

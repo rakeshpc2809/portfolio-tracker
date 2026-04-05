@@ -105,6 +105,15 @@ public static final Function<List<TransactionDTO>, BigDecimal> SOLVE_XIRR = txs 
         ? FundStatus.ACTIVE 
         : FundStatus.REDEEMED;
 
+    public static LocalDate getCurrentFyStart() {
+        LocalDate today = LocalDate.now();
+        int year = today.getYear();
+        if (today.getMonthValue() < 4) {
+            year--;
+        }
+        return LocalDate.of(year, 4, 1);
+    }
+
     private static long getDays(LocalDate buy, LocalDate sell) {
         return ChronoUnit.DAYS.between(buy, sell);
     }

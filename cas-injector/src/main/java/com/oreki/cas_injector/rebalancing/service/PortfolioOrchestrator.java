@@ -24,6 +24,7 @@ import com.oreki.cas_injector.core.dto.SchemeDetailsDTO;
 import com.oreki.cas_injector.core.model.Scheme;
 import com.oreki.cas_injector.core.repository.SchemeRepository;
 import com.oreki.cas_injector.core.service.SystemicRiskMonitorService;
+import com.oreki.cas_injector.core.utils.CommonUtils;
 import com.oreki.cas_injector.rebalancing.dto.SipLineItem;
 import com.oreki.cas_injector.rebalancing.dto.StrategyTarget;
 import com.oreki.cas_injector.rebalancing.dto.TacticalSignal;
@@ -150,6 +151,7 @@ public class PortfolioOrchestrator {
         List<AggregatedHolding> holdings = aggregateLots(allLots);
         
         // Find realized LTCG so far this FY
+        LocalDate fyStart = CommonUtils.getCurrentFyStart();
         String ltcgSql = """
             SELECT COALESCE(SUM(a.realized_gain), 0) 
             FROM capital_gain_audit a
@@ -157,10 +159,10 @@ public class PortfolioOrchestrator {
             JOIN scheme s ON t.scheme_id = s.id
             JOIN folio f ON s.folio_id = f.id
             WHERE a.tax_category LIKE '%LTCG%' 
-            AND t.transaction_date >= '2025-04-01'
+            AND t.transaction_date >= ?
             AND f.investor_pan = ?
             """;
-        double realizedLtcg = jdbcTemplate.queryForObject(ltcgSql, Double.class, pan);
+        double realizedLtcg = jdbcTemplate.queryForObject(ltcgSql, Double.class, fyStart, pan);
         double ltcgHeadroom = Math.max(0, 125000 - realizedLtcg);
 
         List<TacticalSignal> exitPlan = new ArrayList<>();
