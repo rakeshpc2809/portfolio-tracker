@@ -144,7 +144,7 @@ export default function TodayBriefView({
                 value={lumpsum || ''} 
                 onChange={(e) => setLumpsum(parseInt(e.target.value) || 0)}
                 placeholder="₹0"
-                className="bg-surface-elevated border border-white/10 rounded-md px-3 py-1.5 text-sm text-primary tabular-nums focus:outline-none focus:border-accent/50 transition-colors w-32"
+                className="bg-surface-elevated border border-white/10 rounded-md px-3 py-1.5 text-sm text-primary tabular-nums focus:outline-none focus:border-indigo-500/50 transition-colors w-32"
               />
             </div>
           </div>

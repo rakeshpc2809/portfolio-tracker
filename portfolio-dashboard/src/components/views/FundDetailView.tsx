@@ -2,6 +2,7 @@ import { motion } from 'framer-motion';
 import { X, Zap, Info } from 'lucide-react';
 import { convictionColor, buildPlainEnglishReason } from '../../utils/formatters';
 import * as Dialog from '@radix-ui/react-dialog';
+import * as Tooltip from '@radix-ui/react-tooltip';
 import MetricWithTooltip from '../ui/MetricWithTooltip';
 import CurrencyValue from '../ui/CurrencyValue';
 
@@ -128,12 +129,25 @@ export default function FundDetailView({
                           initial={{ width: 0 }}
                           animate={{ width: `${c.score}%` }}
                           transition={{ duration: 0.8, delay: 0.3 }}
-                          className={`h-full ${convictionColor(c.score)}`} 
+                          style={{ background: convictionColor(c.score) }}
+                          className="h-full rounded-full transition-all"
                         />
                       </div>
                       <div className="flex items-center gap-3">
                         <span className="text-xs font-medium tabular-nums text-primary">{Math.round(c.score)}</span>
-                        <MetricWithTooltip label="" value="" tooltip={c.tooltip} />
+                        <Tooltip.Provider delayDuration={200}>
+                          <Tooltip.Root>
+                            <Tooltip.Trigger asChild>
+                              <Info size={13} className="text-muted cursor-help hover:text-secondary transition-colors" />
+                            </Tooltip.Trigger>
+                            <Tooltip.Portal>
+                              <Tooltip.Content className="bg-[#1a1a2e] border border-white/10 text-slate-300 text-[11px] rounded-lg px-3 py-2 max-w-[200px] leading-relaxed z-[200]">
+                                {c.tooltip}
+                                <Tooltip.Arrow className="fill-[#1a1a2e]" />
+                              </Tooltip.Content>
+                            </Tooltip.Portal>
+                          </Tooltip.Root>
+                        </Tooltip.Provider>
                       </div>
                     </div>
                   ))}

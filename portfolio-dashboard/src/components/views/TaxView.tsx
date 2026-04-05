@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { formatCurrency } from '../../utils/formatters';
 import * as Progress from '@radix-ui/react-progress';
 import { ShieldAlert, Info, TrendingDown, Receipt } from 'lucide-react';
@@ -21,7 +21,7 @@ export default function TaxView({
   const ltcgPercent = Math.min(100, (realizedLTCG / ltcgLimit) * 100);
   
   const stcgFunds = (portfolioData.schemeBreakdown || [])
-    .filter((s: any) => s.stcgValue > 0)
+    .filter((s: any) => (s.stcgValue || 0) > 0)
     .map((s: any) => ({
       name: s.schemeName,
       stcg: s.stcgValue,
@@ -170,7 +170,7 @@ export default function TaxView({
         <div className="grid grid-cols-2 md:grid-cols-4 gap-8">
           <MetricWithTooltip label="Realised LTCG" value={<CurrencyValue isPrivate={isPrivate} value={portfolioData.totalLTCG} />} tooltip="Total long-term capital gains already booked this financial year." />
           <MetricWithTooltip label="Realised STCG" value={<CurrencyValue isPrivate={isPrivate} value={portfolioData.totalSTCG} />} tooltip="Total short-term capital gains already booked this financial year." />
-          <MetricWithTooltip label="Est. Tax Paid" value={<CurrencyValue isPrivate={isPrivate} value={portfolioData.totalSTCG * 0.20 + Math.max(0, portfolioData.totalLTCG - 125000) * 0.125} />} tooltip="Rough estimate of taxes owed on realized gains." />
+          <MetricWithTooltip label="Est. Tax Paid" value={<CurrencyValue isPrivate={isPrivate} value={(portfolioData.totalSTCG || 0) * 0.20 + Math.max(0, (portfolioData.totalLTCG || 0) - 125000) * 0.125} />} tooltip="Rough estimate of taxes owed on realized gains." />
           <MetricWithTooltip label="Headroom" value={<CurrencyValue isPrivate={isPrivate} value={Math.max(0, ltcgLimit - realizedLTCG)} />} valueClass="text-buy" tooltip="Remaining tax-free LTCG limit for this year." />
         </div>
       </section>

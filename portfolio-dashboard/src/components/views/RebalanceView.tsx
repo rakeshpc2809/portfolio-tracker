@@ -190,7 +190,7 @@ export default function RebalanceView({
         
         <div className="shrink-0 flex flex-col items-center justify-center p-6 bg-surface-elevated border border-white/5 rounded-2xl w-48 text-center sticky top-0">
           <p className="text-muted text-[10px] uppercase tracking-widest mb-2">Portfolio Drift</p>
-          <p className="text-2xl font-medium text-primary">{totalDrift.toFixed(1)}%</p>
+          <p className="text-2xl font-medium text-primary">{(totalDrift || 0).toFixed(1)}%</p>
           <p className={`text-[10px] font-bold mt-2 uppercase tracking-tighter ${totalDrift < 5 ? 'text-buy' : totalDrift < 10 ? 'text-warning' : 'text-exit'}`}>
             {totalDrift < 5 ? 'Healthy Alignment' : totalDrift < 10 ? 'Moderate Drift' : 'High Variance'}
           </p>
