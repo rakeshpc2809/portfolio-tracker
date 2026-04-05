@@ -32,17 +32,14 @@ public class PortfolioFullService {
         DashboardSummaryDTO summary = dashboardService.getInvestorSummary(pan);
         
         // 2. Get Tactical Signals (Planned vs Actual Allocations)
-        // Note: generateDailySignals is the correct method name in PortfolioOrchestrator
         Map<String, TacticalSignal> signals = orchestrator.generateDailySignals(pan, 75000, 0).stream()
             .collect(Collectors.toMap(sig -> {
-                // Find amfiCode via Repository as it's not in the Signal record directly
-                // (This is a bit inefficient but needed for the join)
                 return jdbcTemplate.queryForObject("SELECT amfi_code FROM scheme WHERE name = ?", String.class, sig.schemeName());
             }, s -> s, (s1, s2) -> s1));
             
-        // 3. Get Conviction Metrics (Sortino, Score, MDD, PE/PB, Z-Score)
+        // 3. Get Conviction Metrics (Sortino, Score, MDD, NAV Signals)
         String metricsSql = "SELECT amfi_code, conviction_score, sortino_ratio, max_drawdown, " +
-                           "pe_ratio, pb_ratio, z_score, coverage_pct, valuation_status " +
+                           "nav_percentile_3yr, drawdown_from_ath, return_z_score " +
                            "FROM fund_conviction_metrics " +
                            "WHERE calculation_date = (SELECT MAX(calculation_date) FROM fund_conviction_metrics)";
         
@@ -58,7 +55,7 @@ public class PortfolioFullService {
             if (signal != null) {
                 scheme.setPlannedPercentage(signal.plannedPercentage());
                 scheme.setAllocationPercentage(signal.actualPercentage());
-                scheme.setSignalType(signal.action()); // Mapping 'action' to signalType if needed
+                scheme.setSignalType(signal.action());
                 scheme.setAction(signal.action());
                 scheme.setSignalAmount(new java.math.BigDecimal(signal.amount().replace(",", "")));
                 scheme.setJustifications(signal.justifications());
@@ -78,11 +75,9 @@ public class PortfolioFullService {
                 scheme.setConvictionScore(getSafeInt(fundMetrics.get("conviction_score")));
                 scheme.setSortinoRatio(getSafeDouble(fundMetrics.get("sortino_ratio")));
                 scheme.setMaxDrawdown(getSafeDouble(fundMetrics.get("max_drawdown")));
-                scheme.setPeRatio(getSafeDouble(fundMetrics.get("pe_ratio")));
-                scheme.setPbRatio(getSafeDouble(fundMetrics.get("pb_ratio")));
-                scheme.setZScore(getSafeDouble(fundMetrics.get("z_score")));
-                scheme.setCoveragePct(getSafeDouble(fundMetrics.get("coverage_pct")));
-                scheme.setValuationStatus((String) fundMetrics.get("valuation_status"));
+                scheme.setNavPercentile3yr(getSafeDouble(fundMetrics.get("nav_percentile_3yr")));
+                scheme.setDrawdownFromAth(getSafeDouble(fundMetrics.get("drawdown_from_ath")));
+                scheme.setReturnZScore(getSafeDouble(fundMetrics.get("return_z_score")));
             }
         });
 

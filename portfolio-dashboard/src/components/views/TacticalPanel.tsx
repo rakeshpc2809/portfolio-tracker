@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { 
   TrendingUp, ShieldAlert, CheckCircle2, ChevronRight, 
   Info, ArrowRight, Wallet, Zap, Receipt,
-  AlertTriangle, Snowflake, Clock
+  Snowflake, Clock
 } from 'lucide-react';
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, 
@@ -20,13 +20,11 @@ interface TacticalSignal {
   convictionScore: number;
   sortinoRatio: number;
   maxDrawdown: number;
-  peRatio: number;
-  pbRatio: number;
-  zScore: number;
-  coveragePct: number;
+  navPercentile3yr: number;
+  drawdownFromAth: number;
+  returnZScore: number;
   lastBuyDate: string; 
   justifications: string[];
-  valuationStatus: string;
 }
 
 interface TacticalPanelProps {
@@ -64,14 +62,11 @@ const TacticalPanel: React.FC<TacticalPanelProps> = ({
       const diffDays = (new Date().getTime() - lastBuy.getTime()) / (1000 * 3600 * 24);
       const isOnCooldown = diffDays < 21;
 
-      // 🚀 C. CONFIDENCE LOGIC
-      const isLowConfidence = s.coveragePct > 0 && s.coveragePct < 85;
-
       // EXITS: Do not scale. Keep backend amount.
-      if (s.action === 'EXIT') return { ...s, displayAmount: s.signalAmount, isOnCooldown, isLowConfidence }; 
+      if (s.action === 'EXIT') return { ...s, displayAmount: s.signalAmount, isOnCooldown }; 
       
       // HOLDS: Force to 0.
-      if (s.action === 'HOLD') return { ...s, displayAmount: 0, isOnCooldown, isLowConfidence };
+      if (s.action === 'HOLD') return { ...s, displayAmount: 0, isOnCooldown };
 
       // BUYS: These are the only ones that "breathe" with the slider
       if (s.action === 'BUY') {
@@ -81,9 +76,9 @@ const TacticalPanel: React.FC<TacticalPanelProps> = ({
         // If on cooldown, effectively force amount to 0 for display
         const liveScaledAmount = isOnCooldown ? 0 : (weight * currentWarChest);
         
-        return { ...s, displayAmount: liveScaledAmount, isOnCooldown, isLowConfidence };
+        return { ...s, displayAmount: liveScaledAmount, isOnCooldown };
       }
-      return { ...s, displayAmount: 0, isOnCooldown, isLowConfidence };
+      return { ...s, displayAmount: 0, isOnCooldown };
     });
 
     // 5. SORT: Actionable (High Amount) -> Non-actionable
@@ -215,7 +210,6 @@ const TacticalPanel: React.FC<TacticalPanelProps> = ({
                 <div>
                   <div className="flex items-center gap-2">
                     <p className="text-xs font-black text-zinc-100 group-hover:text-white transition-colors">{signal.schemeName.split(' - ')[0]}</p>
-                    {signal.isLowConfidence && <AlertTriangle size={12} className="text-amber-500" />}
                     {signal.isOnCooldown && <span className="text-[8px] font-black text-blue-400 uppercase tracking-tighter bg-blue-500/10 px-1 rounded">Cooldown</span>}
                   </div>
                   <p className="text-[9px] text-zinc-500 font-bold uppercase tracking-widest mt-0.5">SCORE: {signal.convictionScore}</p>
@@ -263,27 +257,21 @@ const TacticalPanel: React.FC<TacticalPanelProps> = ({
                     <p className="text-sm font-black text-rose-400">{Math.abs(activeScheme.maxDrawdown || 0).toFixed(1)}%</p>
                   </div>
                   <div className="px-3 py-1.5 bg-zinc-950 rounded border border-zinc-800">
-                    <p className="text-[8px] text-zinc-500 font-black uppercase tracking-widest">PE Ratio</p>
+                    <p className="text-[8px] text-zinc-500 font-black uppercase tracking-widest">NAV PCTL</p>
                     <p className="text-sm font-black text-amber-400">
-                      {activeScheme.peRatio > 0 ? activeScheme.peRatio.toFixed(1) : 'N/A'}
+                      {((activeScheme.navPercentile3yr || 0) * 100).toFixed(0)}%
                     </p>
                   </div>
                   <div className="px-3 py-1.5 bg-zinc-950 rounded border border-zinc-800">
-                    <p className="text-[8px] text-zinc-500 font-black uppercase tracking-widest">Valuation</p>
+                    <p className="text-[8px] text-zinc-500 font-black uppercase tracking-widest">Z-Score</p>
                     <p className={`text-sm font-black ${
-                      (activeScheme.valuationStatus?.includes('CHEAP') || activeScheme.valuationStatus?.includes('VALUE')) ? 'text-emerald-400' : 
-                      (activeScheme.valuationStatus?.includes('EXPENSIVE') || activeScheme.valuationStatus?.includes('PREMIUM')) ? 'text-rose-400' : 'text-zinc-400'
+                      (activeScheme.returnZScore || 0) < -1 ? 'text-emerald-400' : 
+                      (activeScheme.returnZScore || 0) > 1 ? 'text-rose-400' : 'text-zinc-400'
                     }`}>
-                      {activeScheme.valuationStatus || 'N/A'}
+                      {(activeScheme.returnZScore || 0).toFixed(1)}
                     </p>
                   </div>
                 </div>
-
-                {activeScheme.valuationStatus?.includes('(REL)') && (
-                  <p className="text-[9px] text-zinc-500 font-bold mb-6 italic">
-                    * Showing Relative Valuation. Z-Score will activate after 10 days of history.
-                  </p>
-                )}
 
                 <div className="flex flex-wrap gap-2 mb-8">
                   <div className="flex items-center gap-1.5 text-[10px] text-zinc-400 font-bold bg-zinc-950 px-2 py-1 rounded border border-zinc-800">
@@ -291,8 +279,8 @@ const TacticalPanel: React.FC<TacticalPanelProps> = ({
                     Last Buy: {activeScheme.lastBuyDate !== '1970-01-01' ? new Date(activeScheme.lastBuyDate).toLocaleDateString() : 'Never'}
                   </div>
                   <div className="flex items-center gap-1.5 text-[10px] text-zinc-400 font-bold bg-zinc-950 px-2 py-1 rounded border border-zinc-800">
-                    <Info size={10} />
-                    Coverage: {activeScheme.coveragePct.toFixed(1)}%
+                    <TrendingUp size={10} />
+                    ATH Drop: {(Math.abs(activeScheme.drawdownFromAth || 0) * 100).toFixed(1)}%
                   </div>
                 </div>
                 <div className="space-y-4">

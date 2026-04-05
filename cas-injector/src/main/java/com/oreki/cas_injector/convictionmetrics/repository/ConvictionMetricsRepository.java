@@ -15,6 +15,19 @@ public class ConvictionMetricsRepository {
     private final JdbcTemplate jdbcTemplate;
 
     /**
+     * Ensures the new NAV signal columns exist in the database.
+     */
+    public void ensureColumnsExist() {
+        String sql = """
+            ALTER TABLE fund_conviction_metrics
+            ADD COLUMN IF NOT EXISTS nav_percentile_3yr DOUBLE PRECISION,
+            ADD COLUMN IF NOT EXISTS drawdown_from_ath   DOUBLE PRECISION,
+            ADD COLUMN IF NOT EXISTS return_z_score      DOUBLE PRECISION;
+        """;
+        jdbcTemplate.execute(sql);
+    }
+
+    /**
      * Executes the native PostgreSQL Window Functions
      * to calculate quantitative metrics for every fund.
      */
@@ -106,18 +119,73 @@ public class ConvictionMetricsRepository {
     }
 
     /**
+     * Calculates and updates NAV-based signals (percentile, ath drawdown, return z-score).
+     */
+    public int updateNavSignals() {
+        String sql = """
+            WITH nav_stats AS (
+                SELECT
+                    amfi_code,
+                    MAX(nav) FILTER (WHERE nav_date >= CURRENT_DATE - INTERVAL '3 years') AS max_3yr,
+                    MIN(nav) FILTER (WHERE nav_date >= CURRENT_DATE - INTERVAL '3 years') AS min_3yr,
+                    MAX(nav) AS ath_nav,
+                    (SELECT nav FROM fund_history h2
+                     WHERE h2.amfi_code = h.amfi_code
+                     ORDER BY nav_date DESC LIMIT 1) AS current_nav
+                FROM fund_history h
+                GROUP BY amfi_code
+            ),
+            percentile_and_ath AS (
+                SELECT amfi_code,
+                    CASE WHEN (max_3yr - min_3yr) > 0
+                        THEN (current_nav - min_3yr) / (max_3yr - min_3yr)
+                        ELSE 0.5 END AS nav_percentile_3yr,
+                    (current_nav - ath_nav) / NULLIF(ath_nav, 0) AS drawdown_from_ath
+                FROM nav_stats
+            ),
+            rolling_1yr_returns AS (
+                SELECT amfi_code, nav_date,
+                    (nav / NULLIF(LAG(nav, 252) OVER (PARTITION BY amfi_code ORDER BY nav_date), 0) - 1)
+                        AS return_1yr
+                FROM fund_history
+                WHERE nav_date >= CURRENT_DATE - INTERVAL '4 years'
+            ),
+            return_z AS (
+                SELECT amfi_code,
+                    AVG(return_1yr) AS mean_1yr,
+                    STDDEV(return_1yr) AS std_1yr,
+                    (SELECT return_1yr FROM rolling_1yr_returns r2
+                     WHERE r2.amfi_code = r.amfi_code AND return_1yr IS NOT NULL
+                     ORDER BY nav_date DESC LIMIT 1) AS latest_1yr
+                FROM rolling_1yr_returns r
+                WHERE return_1yr IS NOT NULL
+                GROUP BY amfi_code
+            )
+            UPDATE fund_conviction_metrics fcm
+            SET
+                nav_percentile_3yr    = p.nav_percentile_3yr,
+                drawdown_from_ath     = p.drawdown_from_ath,
+                return_z_score        = CASE WHEN rz.std_1yr > 0
+                                            THEN (rz.latest_1yr - rz.mean_1yr) / rz.std_1yr
+                                            ELSE 0 END
+            FROM percentile_and_ath p
+            LEFT JOIN return_z rz ON p.amfi_code = rz.amfi_code
+            WHERE fcm.amfi_code = p.amfi_code
+              AND fcm.calculation_date = (SELECT MAX(calculation_date) FROM fund_conviction_metrics);
+        """;
+        return jdbcTemplate.update(sql);
+    }
+
+    /**
      * Fetches details required for scoring for a specific investor.
      */
     public List<Map<String, Object>> findMetricsForScoring(String investorPan) {
         String fetchSql = """
            SELECT m.amfi_code, m.sortino_ratio, m.max_drawdown, m.calculation_date,
-                  f.pe_ratio as fund_pe, f.pb_ratio as fund_pb, f.coverage_pct,
-                  s.benchmark_index, idx.pe as bench_pe, idx.pb as bench_pb
+                  m.nav_percentile_3yr, m.drawdown_from_ath, m.return_z_score,
+                  s.asset_category
            FROM fund_conviction_metrics m
            JOIN scheme s ON m.amfi_code = s.amfi_code
-           LEFT JOIN fund_metrics f ON s.amfi_code = f.scheme_code 
-                AND f.fetch_date = (SELECT MAX(fetch_date) FROM fund_metrics)
-           LEFT JOIN index_fundamentals idx ON s.benchmark_index = idx.index_name
            WHERE m.calculation_date = (SELECT MAX(calculation_date) FROM fund_conviction_metrics)
            AND m.amfi_code IN (
                SELECT s2.amfi_code 
@@ -130,17 +198,16 @@ public class ConvictionMetricsRepository {
     }
 
     /**
-     * Updates the calculated conviction scores.
+     * Updates the calculated conviction score.
      */
-    public void updateConvictionScore(int finalScore, double fundPe, double fundPb, double zScore, 
-                                     double coveragePct, String valStatus, String amfiCode) {
+    public void updateFinalConvictionScore(int finalScore, String amfiCode) {
         String updateSql = """
             UPDATE fund_conviction_metrics 
-            SET conviction_score = ?, pe_ratio = ?, pb_ratio = ?, z_score = ?, coverage_pct = ?, valuation_status = ?
+            SET conviction_score = ?
             WHERE amfi_code = ? 
             AND calculation_date = (SELECT MAX(calculation_date) FROM fund_conviction_metrics)
         """;
-        jdbcTemplate.update(updateSql, finalScore, fundPe, fundPb, zScore, coveragePct, valStatus, amfiCode);
+        jdbcTemplate.update(updateSql, finalScore, amfiCode);
     }
 
     /**

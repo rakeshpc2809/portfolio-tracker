@@ -14,11 +14,9 @@ public record TacticalSignal(
     int convictionScore,
     double sortinoRatio,
     double maxDrawdown,
-    double peRatio,
-    double pbRatio,
-    double zScore,
-    double coveragePct,
+    double navPercentile3yr,
+    double drawdownFromAth,
+    double returnZScore,
     LocalDate lastBuyDate,
-    String valuationStatus, // 🚀 NEW
     List<String> justifications
 ) {}

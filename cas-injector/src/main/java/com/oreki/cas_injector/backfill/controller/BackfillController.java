@@ -11,32 +11,18 @@ import com.oreki.cas_injector.backfill.service.HistoricalBackfillerService;
 import com.oreki.cas_injector.convictionmetrics.service.ConvictionScoringService;
 import com.oreki.cas_injector.convictionmetrics.service.QuantitativeEngineService;
 
+import lombok.RequiredArgsConstructor;
+
 
 
 @RestController
 @RequestMapping("/admin")
+@RequiredArgsConstructor
 public class BackfillController {
 
     private final HistoricalBackfillerService backfillerService;
     private final QuantitativeEngineService quantitativeEngineService;
     private final ConvictionScoringService convictionScoringService;
-    private final com.oreki.cas_injector.convictionmetrics.service.MarketClimateService marketClimateService;
-
-    public BackfillController(HistoricalBackfillerService backfillerService,
-                             QuantitativeEngineService quantitativeEngineService,
-                             ConvictionScoringService convictionScoringService,
-                             com.oreki.cas_injector.convictionmetrics.service.MarketClimateService marketClimateService) {
-        this.backfillerService = backfillerService;
-        this.quantitativeEngineService=quantitativeEngineService;
-        this.convictionScoringService=convictionScoringService;
-        this.marketClimateService = marketClimateService;
-    }
-
-    @PostMapping("/sync-market-climate")
-    public ResponseEntity<String> syncMarketClimate() {
-        marketClimateService.syncMarketClimateData();
-        return ResponseEntity.ok("Market climate sync triggered! Check logs for details.");
-    }
 
     @PostMapping("/trigger-historical-backfill")
     public ResponseEntity<String> triggerBackfill() {

@@ -8,10 +8,8 @@ public record MarketMetrics(
     double cvar5,
     double winRate,
     double maxDrawdown,
-    double peRatio,
-    double pbRatio,
-    double zScore,
-    double coveragePct,
-    LocalDate lastBuyDate,
-    String valuationStatus // 🚀 NEW: Human-readable status (CHEAP, EXPENSIVE, etc.)
+    double navPercentile3yr,
+    double drawdownFromAth,
+    double returnZScore,
+    LocalDate lastBuyDate
 ) {}

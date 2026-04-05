@@ -48,12 +48,15 @@ public class SchemePerformanceDTO {
 
     private String benchmarkIndex;
 
-    // Conviction & Risk Metrics
+    // Conviction & Risk Metrics (Updated for NAV Signals)
     private int convictionScore;
     private double sortinoRatio;
     private double maxDrawdown;
     private double allocationPercentage;
     private double plannedPercentage;
+    private double navPercentile3yr;
+    private double drawdownFromAth;
+    private double returnZScore;
     
     // Tactical Signal Details
     private String signalType;
@@ -61,9 +64,4 @@ public class SchemePerformanceDTO {
     private BigDecimal signalAmount;
     private List<String> justifications;
     private LocalDate lastBuyDate;
-    private double peRatio;
-    private double pbRatio;
-    private double zScore;
-    private double coveragePct;
-    private String valuationStatus;
 }

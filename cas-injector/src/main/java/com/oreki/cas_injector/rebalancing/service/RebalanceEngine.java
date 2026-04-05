@@ -17,7 +17,7 @@ public class RebalanceEngine {
 
     public TacticalSignal evaluate(AggregatedHolding holding, 
                                    StrategyTarget target, 
-                                   MarketMetrics metrics, // Kept for future V2 expansion
+                                   MarketMetrics metrics, 
                                    double totalPortfolioValue) {
         
         double targetPct = target.targetPortfolioPct(); 
@@ -82,11 +82,6 @@ public class RebalanceEngine {
             justifications.add("Strategic: Weight is within the ±2.5% target tolerance.");
         }
 
-        // 🚀 C. CONFIDENCE RATING
-        if (metrics.coveragePct() > 0 && metrics.coveragePct() < 85.0) {
-            justifications.add(String.format("⚠️ Low Confidence: Only %.1f%% of holdings were identified for valuation. Signal may be less accurate.", metrics.coveragePct()));
-        }
-
         // Format to string to prevent scientific notation (e.g., "10500.50")
         String formattedAmount = String.format(Locale.US, "%.2f", Math.abs(diffAmount));
 
@@ -98,27 +93,18 @@ public class RebalanceEngine {
             round(actualPct),
             round(sipPct),
             status,
-            calculateStrategicScore(action, status),
+            metrics.convictionScore(),
             metrics.sortinoRatio(),    
             metrics.maxDrawdown(), 
-            metrics.peRatio(),
-            metrics.pbRatio(),
-            metrics.zScore(),      
-            metrics.coveragePct(), 
+            metrics.navPercentile3yr(),
+            metrics.drawdownFromAth(),
+            metrics.returnZScore(),      
             metrics.lastBuyDate(), 
-            metrics.valuationStatus(), // 🚀 PASS TO SIGNAL
             justifications
         );
     }
 
     private double round(double value) {
         return Math.round(value * 100.0) / 100.0;
-    }
-
-    private int calculateStrategicScore(String action, String status) {
-        if ("EXIT".equals(action)) return 90; 
-        if ("BUY".equals(action) && "ACCUMULATOR".equals(status)) return 75; 
-        if ("TRIM".equals(action)) return 60; 
-        return 50; // Neutral HOLD
     }
 }

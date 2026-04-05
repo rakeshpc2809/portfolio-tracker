@@ -110,7 +110,7 @@ public class PortfolioOrchestrator {
             // Fetch Metrics
             Scheme scheme = schemeRepository.findByNameIgnoreCase(holding.getSchemeName()).orElse(null);
             String amfiCode = scheme != null ? scheme.getAmfiCode() : "";
-            MarketMetrics metrics = liveMetricsMap.getOrDefault(amfiCode, new MarketMetrics(0,0,0,0,0,0,0,0,0, LocalDate.of(1970,1,1), "N/A"));
+            MarketMetrics metrics = liveMetricsMap.getOrDefault(amfiCode, new MarketMetrics(0,0,0,0,0,0.5,0,0, LocalDate.of(1970,1,1)));
             
             // Run Base V1 Engine
             TacticalSignal rawSignal = engine.evaluate(holding, target, metrics, totalPortfolioValue);
@@ -206,14 +206,14 @@ if ("EXIT".equalsIgnoreCase(rawSignal.action()) || "DROPPED".equalsIgnoreCase(ta
     }
 
     private TacticalSignal createSignal(TacticalSignal s, String action, String amt, List<String> justs) {
-        return new TacticalSignal(s.schemeName(), action, amt, s.plannedPercentage(), s.actualPercentage(), s.sipPercentage(), s.fundStatus(), s.convictionScore(), s.sortinoRatio(), s.maxDrawdown(), s.peRatio(), s.pbRatio(), s.zScore(), s.coveragePct(), s.lastBuyDate(), s.valuationStatus(), justs);
+        return new TacticalSignal(s.schemeName(), action, amt, s.plannedPercentage(), s.actualPercentage(), s.sipPercentage(), s.fundStatus(), s.convictionScore(), s.sortinoRatio(), s.maxDrawdown(), s.navPercentile3yr(), s.drawdownFromAth(), s.returnZScore(), s.lastBuyDate(), justs);
     }
 
    private Map<String, MarketMetrics> fetchLiveMetricsMap(String pan) {
-        // 1. Fetch Conviction Metrics
+        // 1. Fetch Conviction Metrics (NAV Signals replaces PE/PB)
         String sql = """
             SELECT m.amfi_code, m.sortino_ratio, m.cvar_5, m.win_rate, m.max_drawdown, 
-                   m.conviction_score, m.pe_ratio, m.pb_ratio, m.z_score, m.coverage_pct, m.valuation_status
+                   m.conviction_score, m.nav_percentile_3yr, m.drawdown_from_ath, m.return_z_score
             FROM fund_conviction_metrics m
             JOIN scheme s ON m.amfi_code = s.amfi_code 
             JOIN folio f ON s.folio_id = f.id
@@ -247,12 +247,10 @@ if ("EXIT".equalsIgnoreCase(rawSignal.action()) || "DROPPED".equalsIgnoreCase(ta
                 r.get("cvar_5") != null ? ((Number)r.get("cvar_5")).doubleValue() : 0.0,
                 r.get("win_rate") != null ? ((Number)r.get("win_rate")).doubleValue() : 0.0,
                 r.get("max_drawdown") != null ? ((Number)r.get("max_drawdown")).doubleValue() : 0.0,
-                r.get("pe_ratio") != null ? ((Number)r.get("pe_ratio")).doubleValue() : 0.0,
-                r.get("pb_ratio") != null ? ((Number)r.get("pb_ratio")).doubleValue() : 0.0,
-                r.get("z_score") != null ? ((Number)r.get("z_score")).doubleValue() : 0.0,
-                r.get("coverage_pct") != null ? ((Number)r.get("coverage_pct")).doubleValue() : 0.0,
-                lastBuyDates.getOrDefault(amfi, LocalDate.of(1970, 1, 1)),
-                (String) r.get("valuation_status")
+                r.get("nav_percentile_3yr") != null ? ((Number)r.get("nav_percentile_3yr")).doubleValue() : 0.5,
+                r.get("drawdown_from_ath") != null ? ((Number)r.get("drawdown_from_ath")).doubleValue() : 0.0,
+                r.get("return_z_score") != null ? ((Number)r.get("return_z_score")).doubleValue() : 0.0,
+                lastBuyDates.getOrDefault(amfi, LocalDate.of(1970, 1, 1))
             ));
         }
         return map;
