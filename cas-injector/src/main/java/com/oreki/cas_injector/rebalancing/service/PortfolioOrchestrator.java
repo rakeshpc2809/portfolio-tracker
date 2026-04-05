@@ -113,7 +113,7 @@ public class PortfolioOrchestrator {
             MarketMetrics metrics = liveMetricsMap.getOrDefault(amfiCode, new MarketMetrics(0,0,0,0,0,0.5,0,0, LocalDate.of(1970,1,1)));
             
             // Run Base V1 Engine
-            TacticalSignal rawSignal = engine.evaluate(holding, target, metrics, totalPortfolioValue);
+            TacticalSignal rawSignal = engine.evaluate(holding, target, metrics, totalPortfolioValue, amfiCode);
             List<String> justifications = new ArrayList<>(rawSignal.justifications());
             
             // 🛡️ OFFENSIVE TAX STRATEGY & EXITS
@@ -206,7 +206,7 @@ if ("EXIT".equalsIgnoreCase(rawSignal.action()) || "DROPPED".equalsIgnoreCase(ta
     }
 
     private TacticalSignal createSignal(TacticalSignal s, String action, String amt, List<String> justs) {
-        return new TacticalSignal(s.schemeName(), action, amt, s.plannedPercentage(), s.actualPercentage(), s.sipPercentage(), s.fundStatus(), s.convictionScore(), s.sortinoRatio(), s.maxDrawdown(), s.navPercentile3yr(), s.drawdownFromAth(), s.returnZScore(), s.lastBuyDate(), justs);
+        return new TacticalSignal(s.schemeName(), s.amfiCode(), action, amt, s.plannedPercentage(), s.actualPercentage(), s.sipPercentage(), s.fundStatus(), s.convictionScore(), s.sortinoRatio(), s.maxDrawdown(), s.navPercentile3yr(), s.drawdownFromAth(), s.returnZScore(), s.lastBuyDate(), justs);
     }
 
    private Map<String, MarketMetrics> fetchLiveMetricsMap(String pan) {

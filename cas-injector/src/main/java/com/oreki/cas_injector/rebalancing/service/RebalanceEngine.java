@@ -18,7 +18,8 @@ public class RebalanceEngine {
     public TacticalSignal evaluate(AggregatedHolding holding, 
                                    StrategyTarget target, 
                                    MarketMetrics metrics, 
-                                   double totalPortfolioValue) {
+                                   double totalPortfolioValue,
+                                   String amfiCode) {
         
         double targetPct = target.targetPortfolioPct(); 
         double sipPct = target.sipPct();
@@ -87,6 +88,7 @@ public class RebalanceEngine {
 
         return new TacticalSignal(
             holding.getSchemeName(),
+            amfiCode,
             action,
             formattedAmount,
             round(targetPct),

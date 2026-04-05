@@ -32,10 +32,9 @@ public class PortfolioFullService {
         DashboardSummaryDTO summary = dashboardService.getInvestorSummary(pan);
         
         // 2. Get Tactical Signals (Planned vs Actual Allocations)
+        // Now amfiCode is directly available in TacticalSignal
         Map<String, TacticalSignal> signals = orchestrator.generateDailySignals(pan, 75000, 0).stream()
-            .collect(Collectors.toMap(sig -> {
-                return jdbcTemplate.queryForObject("SELECT amfi_code FROM scheme WHERE name = ?", String.class, sig.schemeName());
-            }, s -> s, (s1, s2) -> s1));
+            .collect(Collectors.toMap(TacticalSignal::amfiCode, s -> s, (s1, s2) -> s1));
             
         // 3. Get Conviction Metrics (Sortino, Score, MDD, NAV Signals)
         String metricsSql = "SELECT amfi_code, conviction_score, sortino_ratio, max_drawdown, " +

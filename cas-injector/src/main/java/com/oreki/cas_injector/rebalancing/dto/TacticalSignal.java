@@ -5,6 +5,7 @@ import java.util.List;
 
 public record TacticalSignal(
     String schemeName,
+    String amfiCode,
     String action,
     String amount,
     double plannedPercentage,
