@@ -1,16 +1,21 @@
+import React, { useEffect, useState } from 'react';
 import { formatCurrency } from '../../utils/formatters';
 import * as Progress from '@radix-ui/react-progress';
 import { ShieldAlert, Info, TrendingDown, Receipt } from 'lucide-react';
 import MetricWithTooltip from '../ui/MetricWithTooltip';
 import CurrencyValue from '../ui/CurrencyValue';
+import { fetchTlhOpportunities } from '../../services/api';
 
 export default function TaxView({ 
   portfolioData,
-  isPrivate 
+  isPrivate,
+  pan
 }: { 
   portfolioData: any;
   isPrivate: boolean;
+  pan: string;
 }) {
+  const [tlhOps, setTlhOps] = useState<any[]>([]);
   const ltcgLimit = 125000;
   const realizedLTCG = portfolioData.totalLTCG || 0;
   const ltcgPercent = Math.min(100, (realizedLTCG / ltcgLimit) * 100);
@@ -23,6 +28,12 @@ export default function TaxView({
       tax: s.stcgValue * 0.20,
       days: s.daysToNextLtcg || 0
     }));
+
+  useEffect(() => {
+    fetchTlhOpportunities(pan)
+      .then(setTlhOps)
+      .catch(() => setTlhOps([]));
+  }, [pan]);
 
   return (
     <div className="space-y-10 pb-32">
@@ -113,14 +124,43 @@ export default function TaxView({
           <h3 className="text-muted text-[10px] font-medium uppercase tracking-widest flex items-center gap-2">
             <TrendingDown size={12} className="text-buy" /> Harvesting Ops
           </h3>
-          <div className="bg-surface border border-white/5 rounded-xl p-6 min-h-[200px] flex flex-col justify-center">
-            <div className="text-center space-y-3">
-              <Receipt size={32} className="text-muted mx-auto opacity-20" />
-              <p className="text-muted text-xs font-medium">No tax-loss harvesting opportunities identified today.</p>
-              <p className="text-[10px] text-muted uppercase tracking-widest leading-relaxed max-w-[240px] mx-auto">
-                The system monitors your FIFO lots for -5% drops exceeding ₹1,000 in absolute loss.
-              </p>
-            </div>
+          <div className="space-y-3">
+            {tlhOps.length > 0 ? (
+              tlhOps.map((op: any) => (
+                <div key={op.schemeName} className="bg-surface border border-white/5 rounded-xl p-5 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-[10px] text-muted uppercase tracking-widest mb-1">Sell</p>
+                      <p className="text-sm text-primary truncate max-w-[200px]">{op.schemeName}</p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-[10px] text-muted uppercase tracking-widest mb-1">Buy</p>
+                      <p className="text-sm text-buy truncate max-w-[200px]">{op.proxySchemeRecommendation}</p>
+                    </div>
+                  </div>
+                  <div className="flex justify-between pt-3 border-t border-white/5">
+                    <div>
+                      <p className="text-[10px] text-muted uppercase">Loss to harvest</p>
+                      <CurrencyValue isPrivate={isPrivate} value={Math.abs(op.estimatedCapitalLoss)} className="text-exit text-sm font-medium tabular-nums" />
+                    </div>
+                    <div className="text-right">
+                      <p className="text-[10px] text-muted uppercase">Est. tax saving</p>
+                      <CurrencyValue isPrivate={isPrivate} value={Math.abs(op.estimatedCapitalLoss) * 0.20} className="text-buy text-sm font-medium tabular-nums" />
+                    </div>
+                  </div>
+                </div>
+              ))
+            ) : (
+              <div className="bg-surface border border-white/5 rounded-xl p-6 min-h-[200px] flex flex-col justify-center">
+                <div className="text-center space-y-3">
+                  <Receipt size={32} className="text-muted mx-auto opacity-20" />
+                  <p className="text-muted text-xs font-medium">No tax-loss harvesting opportunities identified today.</p>
+                  <p className="text-[10px] text-muted uppercase tracking-widest leading-relaxed max-w-[240px] mx-auto">
+                    The system monitors your FIFO lots for -5% drops exceeding ₹1,000 in absolute loss.
+                  </p>
+                </div>
+              </div>
+            )}
           </div>
         </section>
       </div>

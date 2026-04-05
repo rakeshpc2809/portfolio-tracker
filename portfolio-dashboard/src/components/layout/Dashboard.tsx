@@ -150,7 +150,7 @@ export default function Dashboard({ portfolioData }: { portfolioData: any }) {
             )}
             
             {activeTab === 'tax' && (
-              <TaxView portfolioData={portfolioData} isPrivate={isPrivate} />
+              <TaxView portfolioData={portfolioData} isPrivate={isPrivate} pan={investorPan} />
             )}
             
             {activeTab === 'ledger' && (

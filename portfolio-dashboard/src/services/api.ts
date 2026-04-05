@@ -50,3 +50,11 @@ export const fetchTransactions = async (
   if (!response.ok) throw new Error("Ledger synchronization failed");
   return response.json();
 };
+
+export const fetchTlhOpportunities = async (pan: string) => {
+  const response = await authenticatedFetch(
+    `${BASE_URL}/portfolio/${pan}/tax-loss-harvesting`
+  );
+  if (!response.ok) return [];
+  return response.json();
+};

@@ -10,13 +10,13 @@ export default function RebalanceView({
   setSipAmount,
   isPrivate 
 }: { 
-  portfolioData: any;
-  sipAmount: number;
+  portfolioData: any; 
+  sipAmount: number; 
   setSipAmount: (val: number) => void;
   isPrivate: boolean;
 }) {
   const data = (portfolioData.schemeBreakdown || [])
-    .filter((s: any) => s.plannedPercentage > 0 || s.allocationPercentage > 0)
+    .filter((s: any) => (s.plannedPercentage || 0) > 0 || (s.allocationPercentage || 0) > 0)
     .map((s: any) => {
       const drift = (s.allocationPercentage || 0) - (s.plannedPercentage || 0);
       return {
@@ -30,6 +30,33 @@ export default function RebalanceView({
 
   const totalDrift = data.reduce((acc: number, s: any) => acc + Math.abs(s.drift), 0);
   const needsAttention = data.filter((s: any) => Math.abs(s.drift) > 1).length;
+
+  // 🧮 Dynamic SIP allocation logic
+  const totalDeficit = data
+    .filter((s: any) => s.drift < -1)  // underweight funds only
+    .reduce((acc: number, s: any) => acc + Math.abs(s.drift), 0);
+
+  const buyFunds = data.filter((x: any) => x.action === 'BUY');
+  const totalConviction = buyFunds.reduce((a: number, x: any) => a + (x.convictionScore || 1), 0);
+
+  const sipAllocation = buyFunds
+    .map((s: any) => {
+      const weight = (s.convictionScore || 1) / (totalConviction || 1);
+      return {
+        name: s.schemeName.substring(0, 28),
+        amount: Math.round(sipAmount * weight),
+        conviction: s.convictionScore,
+      };
+    })
+    .filter((s: any) => s.amount > 0)
+    .sort((a: any, b: any) => b.amount - a.amount);
+
+  // Estimated months to fix drift assuming sipAmount deployed monthly
+  const portfolioValue = portfolioData.currentValueAmount || 1;
+  const monthlyDriftReduction = (sipAmount / portfolioValue) * 100;
+  const etaMonths = monthlyDriftReduction > 0 
+    ? Math.ceil(totalDeficit / monthlyDriftReduction) 
+    : null;
 
   return (
     <div className="space-y-10 pb-32">
@@ -124,7 +151,7 @@ export default function RebalanceView({
       </section>
 
       {/* SIP SIMULATOR */}
-      <section className="bg-accent/5 border border-accent/10 p-8 rounded-xl flex flex-col md:flex-row items-center gap-10">
+      <section className="bg-accent/5 border border-accent/10 p-8 rounded-xl flex flex-col md:flex-row items-start gap-10">
         <div className="flex-1 space-y-4">
           <div className="flex justify-between items-center">
             <h3 className="text-primary text-sm font-medium tracking-tight">SIP Correction Simulator</h3>
@@ -140,11 +167,33 @@ export default function RebalanceView({
             Increasing your SIP will automatically prioritize underweight funds with the highest conviction scores, 
             naturally pulling your portfolio back to its target alignment over time without incurring exit taxes.
           </p>
+
+          <div className="space-y-2 mt-6 pt-6 border-t border-white/5">
+            <p className="text-[10px] text-muted uppercase tracking-widest mb-3">
+              This SIP of <CurrencyValue isPrivate={isPrivate} value={sipAmount} /> would be deployed as:
+            </p>
+            {sipAllocation.map((s: any) => (
+              <div key={s.name} className="flex items-center justify-between py-1.5">
+                <span className="text-[12px] text-secondary truncate flex-1">{s.name}</span>
+                <span className="text-[12px] text-buy tabular-nums font-medium ml-4">
+                  <CurrencyValue isPrivate={isPrivate} value={s.amount} />
+                </span>
+              </div>
+            ))}
+            {etaMonths && (
+              <p className="text-[11px] text-muted pt-3 border-t border-white/5 mt-3">
+                At this rate, portfolio drift normalises in approx. <span className="text-primary font-medium">{etaMonths} months</span>.
+              </p>
+            )}
+          </div>
         </div>
-        <div className="shrink-0 flex flex-col items-center justify-center p-6 bg-surface-elevated border border-white/5 rounded-2xl w-48 text-center">
-          <p className="text-muted text-[10px] uppercase tracking-widest mb-2">Alignment ETA</p>
-          <p className="text-2xl font-medium text-primary">3.5 <span className="text-xs text-muted">mo</span></p>
-          <p className="text-[10px] text-buy font-bold mt-2 uppercase tracking-tighter">Healthy Recovery</p>
+        
+        <div className="shrink-0 flex flex-col items-center justify-center p-6 bg-surface-elevated border border-white/5 rounded-2xl w-48 text-center sticky top-0">
+          <p className="text-muted text-[10px] uppercase tracking-widest mb-2">Portfolio Drift</p>
+          <p className="text-2xl font-medium text-primary">{totalDrift.toFixed(1)}%</p>
+          <p className={`text-[10px] font-bold mt-2 uppercase tracking-tighter ${totalDrift < 5 ? 'text-buy' : totalDrift < 10 ? 'text-warning' : 'text-exit'}`}>
+            {totalDrift < 5 ? 'Healthy Alignment' : totalDrift < 10 ? 'Moderate Drift' : 'High Variance'}
+          </p>
         </div>
       </section>
     </div>
