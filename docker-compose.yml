@@ -46,6 +46,7 @@ services:
       - "8000:8000"
     environment:
       - JAVA_BACKEND_URL=http://java-backend:8080/api/cas/inject
+      - PORTFOLIO_API_KEY=${PORTFOLIO_API_KEY:-dev-secret-key}
     depends_on:
       - java-backend
 

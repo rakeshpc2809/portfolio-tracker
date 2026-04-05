@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
 app = FastAPI(title="Mutual Fund CAS Parser Service")
 
 JAVA_BACKEND_URL = os.getenv("JAVA_BACKEND_URL", "http://java-backend:8080/api/cas/inject")
+API_KEY = os.getenv("PORTFOLIO_API_KEY", "dev-secret-key")
 
 # --- 1. JSON ENCODER FOR DECIMAL & DATE ---
 class AlphaNumericEncoder(json.JSONEncoder):
@@ -98,7 +99,10 @@ async def push_to_java_backend(parsed_data: dict):
         response = await client.post(
             JAVA_BACKEND_URL,
             content=json_body,
-            headers={"Content-Type": "application/json"},
+            headers={
+                "Content-Type": "application/json",
+                "X-API-KEY": API_KEY
+            },
             timeout=60.0 # Increased timeout for large PDFs
         )
         
