@@ -1,3 +1,4 @@
+import { motion } from 'framer-motion';
 import { 
   ResponsiveContainer, XAxis, YAxis, Tooltip as RechartsTooltip, 
   BarChart, Bar, Cell, CartesianGrid, PieChart, Pie
@@ -116,7 +117,7 @@ export default function PortfolioView({
                 </Pie>
                 {!isPrivate && (
                   <RechartsTooltip
-                    formatter={(value: number) => [`${value.toFixed(1)}%`, '']}
+                    formatter={(value: any) => [`${parseFloat(value).toFixed(1)}%`, '']}
                     contentStyle={{ backgroundColor: '#0f0f18', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px' }}
                   />
                 )}
