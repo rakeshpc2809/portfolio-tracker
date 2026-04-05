@@ -3,6 +3,7 @@ import {
   ArrowUpRight, ArrowDownLeft, Receipt, Box, CalendarDays, ChevronRight
 } from "lucide-react";
 import { formatCurrency } from "../../utils/formatters";
+import { fetchTransactions } from "../../services/api";
 
 interface TransactionDTO {
   id: number;
@@ -15,10 +16,6 @@ interface TransactionDTO {
   schemeName: string;
   isin: string;
 }
-
-
-
-// ... Interface remains the same ...
 
 export default function TransactionsTab({ investorPan }: { investorPan: string }) {
   const [transactions, setTransactions] = useState<TransactionDTO[]>([]);
@@ -67,11 +64,7 @@ export default function TransactionsTab({ investorPan }: { investorPan: string }
   const fetchLedger = async (pageNum: number, type: string) => {
     setLoading(true);
     try {
-      const typeParam = type === "ALL" ? "" : `&type=${type}`;
-      const response = await fetch(
-        `http://localhost:8080/api/transactions?pan=${investorPan}${typeParam}&page=${pageNum}&size=20&sort=date,desc`
-      );
-      const data = await response.json();
+      const data = await fetchTransactions(investorPan, pageNum, type);
       setTransactions(prev => (pageNum === 0 ? data.content : [...prev, ...data.content]));
       setHasMore(!data.last);
     } catch (err) {
