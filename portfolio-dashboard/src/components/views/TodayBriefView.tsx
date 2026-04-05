@@ -1,7 +1,6 @@
 import { motion } from 'framer-motion';
 import { Zap, Info, ShieldAlert, TrendingUp, Receipt, Target } from 'lucide-react';
 import ConvictionBadge from '../ui/ConvictionBadge';
-import MetricWithTooltip from '../ui/MetricWithTooltip';
 import CurrencyValue from '../ui/CurrencyValue';
 
 export default function TodayBriefView({ 
@@ -46,21 +45,33 @@ export default function TodayBriefView({
 
       {/* SECTION 1: MONTHLY SIP PLAN */}
       <section className="space-y-6">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
           <h3 className="text-muted text-[10px] font-medium uppercase tracking-widest flex items-center gap-2">
             <Target size={12} className="text-accent" /> Monthly SIP Strategy
           </h3>
-          <div className="flex items-center gap-4">
-            <div className="flex items-center gap-2 text-[10px] uppercase tracking-widest text-muted">
-              <span>SIP Amount</span>
-              <CurrencyValue isPrivate={isPrivate} value={sipAmount} className="text-primary tabular-nums font-medium" />
+          <div className="flex flex-wrap items-center gap-8">
+            <div className="flex items-center gap-4">
+              <div className="flex items-center gap-2 text-[10px] uppercase tracking-widest text-muted">
+                <span>SIP Amount</span>
+                <CurrencyValue isPrivate={isPrivate} value={sipAmount} className="text-primary tabular-nums font-medium" />
+              </div>
+              <input 
+                type="range" min="0" max="200000" step="1000" 
+                value={sipAmount} 
+                onChange={(e) => setSipAmount(parseInt(e.target.value) || 0)}
+                className="w-32 h-1 bg-white/10 rounded-lg appearance-none cursor-pointer accent-accent"
+              />
             </div>
-            <input 
-              type="range" min="0" max="200000" step="1000" 
-              value={sipAmount} 
-              onChange={(e) => setSipAmount(parseInt(e.target.value) || 0)}
-              className="w-32 h-1 bg-white/10 rounded-lg appearance-none cursor-pointer accent-accent"
-            />
+            <div className="flex items-center gap-3">
+              <label className="text-[10px] uppercase tracking-widest text-muted">Extra Lumpsum</label>
+              <input 
+                type="number" 
+                value={lumpsum || ''} 
+                onChange={(e) => setLumpsum(parseInt(e.target.value) || 0)}
+                placeholder="₹0"
+                className="bg-surface-elevated border border-white/10 rounded-md px-3 py-1.5 text-xs text-primary tabular-nums focus:outline-none focus:border-indigo-500/50 transition-colors w-28"
+              />
+            </div>
           </div>
         </div>
 
