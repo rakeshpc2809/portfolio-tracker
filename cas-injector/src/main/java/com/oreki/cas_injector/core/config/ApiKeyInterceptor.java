@@ -15,6 +15,11 @@ public class ApiKeyInterceptor implements HandlerInterceptor {
 
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) throws Exception {
+        // Skip API key check for OPTIONS requests (CORS preflight)
+        if ("OPTIONS".equalsIgnoreCase(request.getMethod())) {
+            return true;
+        }
+
         // Skip API key check for error path and health checks
         String path = request.getRequestURI();
         if (path.equals("/error") || path.contains("/actuator") || path.contains("/health")) {
