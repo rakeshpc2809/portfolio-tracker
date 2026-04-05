@@ -150,9 +150,17 @@ public class PortfolioOrchestrator {
         List<AggregatedHolding> holdings = aggregateLots(allLots);
         
         // Find realized LTCG so far this FY
-        double realizedLtcg = jdbcTemplate.queryForObject(
-            "SELECT COALESCE(SUM(realized_gain), 0) FROM capital_gain_audit WHERE tax_category LIKE '%LTCG%' AND calculation_date >= '2025-04-01'", 
-            Double.class);
+        String ltcgSql = """
+            SELECT COALESCE(SUM(a.realized_gain), 0) 
+            FROM capital_gain_audit a
+            JOIN transaction t ON a.sell_transaction_id = t.id
+            JOIN scheme s ON t.scheme_id = s.id
+            JOIN folio f ON s.folio_id = f.id
+            WHERE a.tax_category LIKE '%LTCG%' 
+            AND t.transaction_date >= '2025-04-01'
+            AND f.investor_pan = ?
+            """;
+        double realizedLtcg = jdbcTemplate.queryForObject(ltcgSql, Double.class, pan);
         double ltcgHeadroom = Math.max(0, 125000 - realizedLtcg);
 
         List<TacticalSignal> exitPlan = new ArrayList<>();
