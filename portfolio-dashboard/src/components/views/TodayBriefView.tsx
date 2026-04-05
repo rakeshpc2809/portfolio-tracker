@@ -34,10 +34,10 @@ export default function TodayBriefView({
   const totalWarChest = sipAmount + lumpsum + exitProceeds;
 
   const buySignals = (portfolioData.schemeBreakdown || []).filter((s: any) => s.action === 'BUY');
-  const apiTotalBuyRequest = buySignals.reduce((acc: number, s: any) => acc + (s.signalAmount || 0), 0);
+  const totalConviction = buySignals.reduce((acc: number, s: any) => acc + (s.convictionScore || 1), 0);
 
   const scaledBuySignals = buySignals.map((s: any) => {
-    const weight = (s.signalAmount || 0) / (apiTotalBuyRequest || 1);
+    const weight = (s.convictionScore || 1) / (totalConviction || 1);
     return {
       ...s,
       displayAmount: weight * totalWarChest
@@ -97,7 +97,7 @@ export default function TodayBriefView({
                 <CurrencyValue 
                   isPrivate={isPrivate} 
                   value={signal.action === 'BUY' 
-                    ? scaledBuySignals.find((b: any) => b.schemeName === signal.schemeName)?.displayAmount 
+                    ? (scaledBuySignals.find((b: any) => b.schemeName === signal.schemeName)?.displayAmount ?? 0)
                     : signal.signalAmount
                   } 
                 />

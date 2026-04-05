@@ -1,6 +1,6 @@
 import { 
   ResponsiveContainer, XAxis, YAxis, Tooltip as RechartsTooltip, 
-  BarChart, Bar, Cell, CartesianGrid
+  BarChart, Bar, Cell, CartesianGrid, PieChart, Pie
 } from "recharts";
 import { HeartPulse } from 'lucide-react';
 import MetricWithTooltip from '../ui/MetricWithTooltip';
@@ -42,7 +42,7 @@ export default function PortfolioView({
     name: name.replace(/_/g, ' '),
     value: (value / totalValue) * 100,
     color: BUCKET_COLORS[name] || "#94a3b8"
-  })).sort((a: any, b: any) => b.value - a.value);
+  })).sort((a, b) => b.value - a.value);
 
   const xirrData = breakdown
     .filter((s: any) => (s.currentValue || 0) > 0)
@@ -94,31 +94,56 @@ export default function PortfolioView({
           <h3 className="text-primary text-sm font-medium tracking-tight">Allocation by Strategy Bucket</h3>
           <span className="text-muted text-[10px] uppercase tracking-widest">Target vs Actual</span>
         </div>
-        <div className="h-48 w-full">
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={bucketData} layout="vertical" margin={{ left: 0, right: 40 }}>
-              <XAxis type="number" hide />
-              <YAxis 
-                dataKey="name" 
-                type="category" 
-                axisLine={false} 
-                tickLine={false} 
-                width={150}
-                tick={{ fill: 'rgba(241,245,249,0.5)', fontSize: 10, fontWeight: 500 }}
-              />
-              {!isPrivate && (
-                <RechartsTooltip 
-                  cursor={{ fill: 'rgba(255,255,255,0.02)' }}
-                  contentStyle={{ backgroundColor: '#0f0f18', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px' }}
-                />
-              )}
-              <Bar dataKey="value" radius={[0, 4, 4, 0]} barSize={12}>
-                {bucketData.map((entry, index) => (
-                  <Cell key={`cell-${index}`} fill={entry.color} />
-                ))}
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
+        
+        <div className="flex flex-col lg:flex-row items-center gap-12">
+          {/* Donut chart */}
+          <div className="w-full lg:w-64 h-64 shrink-0">
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart>
+                <Pie
+                  data={bucketData}
+                  cx="50%"
+                  cy="50%"
+                  innerRadius={60}
+                  outerRadius={90}
+                  paddingAngle={3}
+                  dataKey="value"
+                  stroke="none"
+                >
+                  {bucketData.map((entry, index) => (
+                    <Cell key={`cell-${index}`} fill={entry.color} />
+                  ))}
+                </Pie>
+                {!isPrivate && (
+                  <RechartsTooltip
+                    formatter={(value: number) => [`${value.toFixed(1)}%`, '']}
+                    contentStyle={{ backgroundColor: '#0f0f18', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px' }}
+                  />
+                )}
+              </PieChart>
+            </ResponsiveContainer>
+          </div>
+
+          {/* Bucket bars with custom legend */}
+          <div className="flex-1 space-y-5 w-full">
+            {bucketData.map((b) => (
+              <div key={b.name} className="space-y-1.5">
+                <div className="flex justify-between items-end">
+                  <span className="text-[10px] font-bold text-muted uppercase tracking-widest">{b.name}</span>
+                  <span className="text-[11px] font-medium tabular-nums" style={{ color: b.color }}>{b.value.toFixed(1)}%</span>
+                </div>
+                <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden">
+                  <motion.div 
+                    initial={{ width: 0 }}
+                    animate={{ width: `${b.value}%` }}
+                    transition={{ duration: 1, ease: "easeOut" }}
+                    className="h-full rounded-full" 
+                    style={{ background: b.color }} 
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       </section>
 

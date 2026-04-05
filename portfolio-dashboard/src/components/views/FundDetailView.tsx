@@ -82,21 +82,22 @@ export default function FundDetailView({
                 </div>
                 
                 <div className="space-y-8">
-                  <div className="relative pt-2">
-                    <div className="h-1 w-full bg-white/5 rounded-full" />
-                    <div className="absolute top-0 left-0 h-5 w-px bg-white/20" />
-                    <div className="absolute top-0 right-0 h-5 w-px bg-white/20" />
-                    <span className="absolute -top-4 left-0 text-[9px] font-bold text-muted uppercase tracking-widest">3yr Low</span>
-                    <span className="absolute -top-4 right-0 text-[9px] font-bold text-muted uppercase tracking-widest">3yr High</span>
-                    <motion.div 
-                      initial={{ left: 0 }}
-                      animate={{ left: `${(fund.navPercentile3yr || 0) * 100}%` }}
-                      transition={{ duration: 1, delay: 0.2 }}
-                      className="absolute top-1/2 -translate-y-1/2 w-3 h-3 bg-accent rounded-full shadow-[0_0_15px_rgba(129,140,248,0.5)] border-2 border-surface"
+                  <div className="relative h-1 w-full bg-white/5 rounded-full my-4">
+                    {/* end markers */}
+                    <div className="absolute top-0 left-0 h-3 w-px bg-white/20 -translate-y-1" />
+                    <div className="absolute top-0 right-0 h-3 w-px bg-white/20 -translate-y-1" />
+                    
+                    <span className="absolute -top-6 left-0 text-[9px] font-bold text-muted uppercase tracking-widest">3yr Low</span>
+                    <span className="absolute -top-6 right-0 text-[9px] font-bold text-muted uppercase tracking-widest">3yr High</span>
+                    
+                    {/* animated dot — using style with clamping */}
+                    <div 
+                      className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-3 h-3 bg-accent rounded-full border-2 border-[#14141f] transition-all duration-1000 shadow-[0_0_15px_rgba(129,140,248,0.5)]"
+                      style={{ left: `${Math.min(98, Math.max(2, (fund.navPercentile3yr || 0) * 100))}%` }}
                     />
                   </div>
                   
-                  <div className="grid grid-cols-2 gap-8">
+                  <div className="grid grid-cols-2 gap-8 pt-4">
                     <div>
                       <p className="text-muted text-[10px] font-medium uppercase tracking-widest mb-1">Positioning</p>
                       <p className="text-sm text-primary font-medium">
