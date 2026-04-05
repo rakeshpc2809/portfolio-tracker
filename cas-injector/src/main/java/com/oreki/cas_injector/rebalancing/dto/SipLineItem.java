@@ -1,0 +1,12 @@
+package com.oreki.cas_injector.rebalancing.dto;
+
+public record SipLineItem(
+    String schemeName,
+    String isin,
+    String amfiCode,
+    double amount,
+    double sipPct,
+    String mode,           // core / strategy / satellite / rebalancer
+    String deployFlag,     // DEPLOY / CAUTION_EXPENSIVE
+    String note
+) {}

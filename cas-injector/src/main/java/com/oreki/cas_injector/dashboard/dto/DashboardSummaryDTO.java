@@ -14,16 +14,16 @@ public class DashboardSummaryDTO {
     private int totalFolios;
     private int totalSchemes;
     private long totalTransactions;
-    private BigDecimal totalInvestedAmount; // Sum of BUYs
-    private BigDecimal totalRealizedGain;   // Sum of Audit entries
-    private long openTaxLots;               // Count of OPEN lots
-    private BigDecimal totalLTCG; // Long Term Capital Gain
-    private BigDecimal totalSTCG; // Short Term Capital Gain
-    private BigDecimal currentInvestedAmount; // Sum of BUYs
-    private BigDecimal currentValueAmount; // Sum of BUYs
-    private BigDecimal totalUnrealizedGain; // Sum of BUYs
+    private BigDecimal totalInvestedAmount; 
+    private BigDecimal totalRealizedGain;   
+    private long openTaxLots;               
+    private BigDecimal totalLTCG; 
+    private BigDecimal totalSTCG; 
+    private BigDecimal currentInvestedAmount; 
+    private BigDecimal currentValueAmount; 
+    private BigDecimal totalUnrealizedGain; 
     private String overallReturn;
     private String overallXirr;
     private List<SchemePerformanceDTO> schemeBreakdown;
-
+    private UnifiedTacticalPayload tacticalPayload; // 🚀 ADD THIS
 }

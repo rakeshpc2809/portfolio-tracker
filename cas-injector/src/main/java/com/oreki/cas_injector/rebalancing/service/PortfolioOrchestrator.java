@@ -3,6 +3,8 @@ package com.oreki.cas_injector.rebalancing.service;
 import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -22,6 +24,7 @@ import com.oreki.cas_injector.core.dto.SchemeDetailsDTO;
 import com.oreki.cas_injector.core.model.Scheme;
 import com.oreki.cas_injector.core.repository.SchemeRepository;
 import com.oreki.cas_injector.core.service.SystemicRiskMonitorService;
+import com.oreki.cas_injector.rebalancing.dto.SipLineItem;
 import com.oreki.cas_injector.rebalancing.dto.StrategyTarget;
 import com.oreki.cas_injector.rebalancing.dto.TacticalSignal;
 import com.oreki.cas_injector.taxmanagement.service.TaxSimulatorService;
@@ -44,181 +47,199 @@ public class PortfolioOrchestrator {
     private final TaxSimulatorService taxSimulator;
     private final JdbcTemplate jdbcTemplate;
     private final SystemicRiskMonitorService systemicRiskMonitor;
-    private final PositionSizingService positionSizingService;
     private final ConvictionScoringService convictionScoringService;
- 
 
- public List<TacticalSignal> generateDailySignals(String investorPan, double monthlySip, double lumpsum) {
-        
-        // 1. Prime the Database
-        convictionScoringService.calculateAndSaveFinalScores(investorPan); 
+    // ==========================================
+    // 🌟 MODE 1: MONTHLY SIP PLAN (Pure Sheet)
+    // ==========================================
+    public List<SipLineItem> computeSipPlan(String pan, double sipAmount) {
+        List<StrategyTarget> targets = strategyService.fetchLatestStrategy();
+        Map<String, MarketMetrics> metrics = fetchLiveMetricsMap(pan);
+
+        return targets.stream()
+            .filter(t -> t.sipPct() > 0 && !"dropped".equalsIgnoreCase(t.status()))
+            .map(t -> {
+                double amount = (t.sipPct() / 100.0) * sipAmount;
+                Scheme scheme = schemeRepository.findByIsin(t.isin()).orElse(null);
+                String amfiCode = scheme != null ? scheme.getAmfiCode() : "";
+                MarketMetrics m = metrics.getOrDefault(amfiCode, defaultMetrics());
+
+                String flag = m.navPercentile3yr() > 0.85 ? "CAUTION_EXPENSIVE" : "DEPLOY";
+                String note = flag.equals("CAUTION_EXPENSIVE")
+                    ? "Fund at " + Math.round(m.navPercentile3yr()*100) + "% of 3yr range. Consider deferring."
+                    : "Deploy as per strategy.";
+
+                return new SipLineItem(t.schemeName(), t.isin(), amfiCode,
+                    amount, t.sipPct(), t.status(), flag, note);
+            })
+            .sorted(Comparator.comparingDouble(SipLineItem::amount).reversed())
+            .collect(Collectors.toList());
+    }
+
+    // ==========================================
+    // 🌟 MODE 2: OPPORTUNISTIC (Accumulators & Extra)
+    // ==========================================
+    public List<TacticalSignal> computeOpportunisticSignals(String pan, double lumpsum) {
+        convictionScoringService.calculateAndSaveFinalScores(pan); 
         
         List<StrategyTarget> targets = strategyService.fetchLatestStrategy();
-        Map<String, MarketMetrics> liveMetricsMap = fetchLiveMetricsMap(investorPan);
-        List<TaxLot> allLots = taxLotRepository.findByStatusAndSchemeFolioInvestorPan("OPEN", investorPan);
-        List<AggregatedHolding> myHoldings = aggregateLots(allLots);
+        Map<String, MarketMetrics> metricsMap = fetchLiveMetricsMap(pan);
+        List<TaxLot> allLots = taxLotRepository.findByStatusAndSchemeFolioInvestorPan("OPEN", pan);
+        List<AggregatedHolding> holdings = aggregateLots(allLots);
         
-        double totalPortfolioValue = myHoldings.stream().mapToDouble(AggregatedHolding::getCurrentValue).sum();
-
-        // 🌟 THE FIX: MERGE TARGETS AND HOLDINGS
-        // We must evaluate everything you own AND everything you plan to buy
-        Set<String> allSchemeNames = new HashSet<>();
-        myHoldings.forEach(h -> allSchemeNames.add(h.getSchemeName().toLowerCase().trim()));
-        targets.forEach(t -> allSchemeNames.add(t.schemeName().toLowerCase().trim()));
-
-        // ==========================================
-        // 🌟 PASS 1: THE HARVESTER (Pool Capital)
-        // ==========================================
-        double totalDeployableCash = monthlySip + lumpsum;
-        List<TacticalSignal> draftSignals = new ArrayList<>();
+        double totalPortfolioValue = holdings.stream().mapToDouble(AggregatedHolding::getCurrentValue).sum();
+        double deployableCash = lumpsum;
         
-        for (String normalizedName : allSchemeNames) {
-            
-            // Get Holding (if you own it) or create empty holding
-          AggregatedHolding holding = myHoldings.stream()
-                .filter(h -> h.getSchemeName().toLowerCase().trim().equals(normalizedName))
-                .findFirst().orElse(new AggregatedHolding(
-                    targets.stream()
-                           .filter(t -> t.schemeName().toLowerCase().trim().equals(normalizedName))
-                           .findFirst()
-                           .map(StrategyTarget::schemeName)
-                           .orElse(normalizedName), // 1. schemeName
-                    0.0,        // 2. units
-                    0.0,        // 3. currentValue
-                    0.0,        // 4. investedAmount
-                    0.0,        // 5. ltcgAmount
-                    0.0,        // 6. stcgAmount
-                    0.0,
-                    0.0,
-                    0,
-                    0,          // 7. oldestAgeDays
-                    "UNKNOWN",  // 8. assetCategory
-                    "DROPPED",   // 9. status
-                    "UNKNOWN" // 8. assetCategory
+        // Add Arbitrage/Rebalancer value to deployable pool if entry points are good
+        double arbitrageValue = holdings.stream()
+            .filter(h -> h.getAssetCategory().contains("ARBITRAGE"))
+            .mapToDouble(AggregatedHolding::getCurrentValue)
+            .sum();
 
-                ));
-            // Get Target (if it's in the strategy sheet) or create 0% target
-           StrategyTarget target = targets.stream()
-    .filter(t -> t.schemeName().toLowerCase().trim().equals(normalizedName))
-    .findFirst()
-    .orElse(new StrategyTarget(
-        "", 
-        holding.getSchemeName(), 
-        0.0, 
-        0.0, 
-        "UNTRACKED" // 🚀 Change from "DROPPED" to "UNTRACKED"
-    ));      
-            // Fetch Metrics
-            Scheme scheme = schemeRepository.findByNameIgnoreCase(holding.getSchemeName()).orElse(null);
-            String amfiCode = scheme != null ? scheme.getAmfiCode() : "";
-            MarketMetrics metrics = liveMetricsMap.getOrDefault(amfiCode, new MarketMetrics(0,0,0,0,0,0.5,0,0, LocalDate.of(1970,1,1)));
-            
-            // Run Base V1 Engine
-            TacticalSignal rawSignal = engine.evaluate(holding, target, metrics, totalPortfolioValue, amfiCode);
-            List<String> justifications = new ArrayList<>(rawSignal.justifications());
-            
-            // 🛡️ OFFENSIVE TAX STRATEGY & EXITS
-        // 🛡️ UPGRADED TAX STRATEGY: LTCG HARVESTING & STCG LOCK
-// Check if the engine wants to EXIT or if the Google Sheet says it's DROPPED
-boolean isDropped = "DROPPED".equalsIgnoreCase(target.status());
+        List<TacticalSignal> opportunisticDrafts = new ArrayList<>();
 
-if ("EXIT".equalsIgnoreCase(rawSignal.action()) || "DROPPED".equalsIgnoreCase(target.status())) {
-    
-    double ltcgValue = holding.getLtcgValue(); // 🚀 Sum of values of lots > 365 days
-    double stcgValue = holding.getStcgValue(); // 🚀 Sum of values of lots <= 365 days
-    double harvestableGains = holding.getLtcgAmount(); // The actual profit in the LTCG lots
+        for (StrategyTarget target : targets) {
+            AggregatedHolding holding = findHolding(holdings, target);
+            MarketMetrics metrics = metricsMap.getOrDefault(amfiCodeFor(target), defaultMetrics());
+            double actualPct = (holding.getCurrentValue() / totalPortfolioValue) * 100;
 
-    if (ltcgValue > 0) {
-        justifications.add(String.format("✅ Surgical Exit: Harvesting ₹%,.0f in LTCG units (Profit: ₹%,.0f).", 
-                          ltcgValue, harvestableGains));
-        totalDeployableCash += ltcgValue;
-    }
-
-    if (stcgValue > 0) {
-        int daysToNextMaturing = holding.getDaysToNextLtcg(); 
-        justifications.add(String.format("🛡️ STCG Shield: Locking ₹%,.0f in units to avoid 20%% tax. Next harvest in %d days.", 
-                          stcgValue, daysToNextMaturing));
-        // We DO NOT add stcgValue to totalDeployableCash
-    }
-
-    // The final signal amount is ONLY the LTCG portion
-    String finalAmount = String.valueOf(ltcgValue);
-    String action = ltcgValue > 0 ? "EXIT" : "HOLD";
-    
-    draftSignals.add(createSignal(rawSignal, action, finalAmount, justifications));
-}
-            // 💡 TAX LOSS HARVESTING
-            else if ("HOLD".equalsIgnoreCase(rawSignal.action()) && holding.getStcgAmount() < -10000) {
-                 justifications.add(String.format("💡 Tax Opportunity: You have a ₹%,.0f short-term loss. Consider harvesting.", Math.abs(holding.getStcgAmount())));
-                 draftSignals.add(createSignal(rawSignal, "HOLD", "0", justifications));
-            }
-            // 🚀 REBALANCE REDIRECT: Capture TRIM proceeds
-            else if ("TRIM".equalsIgnoreCase(rawSignal.action())) {
-                double trimAmount = Double.parseDouble(rawSignal.amount().replace(",", ""));
-                if (trimAmount > 0) {
-                    justifications.add(String.format("⚖️ Rebalance Redirect: Redirecting ₹%,.0f TRIM proceeds to underweight high-conviction funds.", trimAmount));
-                    totalDeployableCash += trimAmount;
+            // 1. ACCUMULATOR LOGIC (Buy on dips)
+            if ("accumulator".equalsIgnoreCase(target.status())) {
+                boolean isUnderTarget = actualPct < target.targetPortfolioPct();
+                boolean isNearLow = metrics.navPercentile3yr() < 0.40;
+                
+                if (isUnderTarget && isNearLow) {
+                    List<String> justs = List.of(String.format("🎯 Accumulator Entry: Fund at %d%% of 3yr range. Good opportunistic dip.", 
+                        Math.round(metrics.navPercentile3yr() * 100)));
+                    
+                    // Base amount is drift gap or 2x SIP default
+                    double baseAmount = Math.max(sipAmountFromTarget(target, 75000) * 2, (target.targetPortfolioPct() - actualPct) / 100.0 * totalPortfolioValue);
+                    opportunisticDrafts.add(new TacticalSignal(target.schemeName(), amfiCodeFor(target), "BUY", String.valueOf(baseAmount), 
+                        target.targetPortfolioPct(), actualPct, target.sipPct(), target.status(), metrics.convictionScore(), 
+                        metrics.sortinoRatio(), metrics.maxDrawdown(), metrics.navPercentile3yr(), metrics.drawdownFromAth(), 
+                        metrics.returnZScore(), metrics.lastBuyDate(), justs));
                 }
-                draftSignals.add(createSignal(rawSignal, rawSignal.action(), rawSignal.amount(), justifications));
             }
-            else {
-                draftSignals.add(createSignal(rawSignal, rawSignal.action(), rawSignal.amount(), justifications));
+
+            // 2. REBALANCER DEPLOY (Core/Strategy significant drift)
+            if ("core".equalsIgnoreCase(target.status()) || "strategy".equalsIgnoreCase(target.status())) {
+                double drift = actualPct - target.targetPortfolioPct();
+                if (drift < -5.0 && metrics.navPercentile3yr() < 0.60 && arbitrageValue > 10000) {
+                    double deployFromArb = Math.min(arbitrageValue * 0.4, Math.abs(drift/100.0) * totalPortfolioValue);
+                    List<String> justs = List.of(String.format("⚖️ Rebalancer Deploy: Fund is %.1f%% underweight. Redeploying ₹%,.0f from Arbitrage parking.", 
+                        Math.abs(drift), deployFromArb));
+                    
+                    opportunisticDrafts.add(new TacticalSignal(target.schemeName(), amfiCodeFor(target), "BUY", String.valueOf(deployFromArb), 
+                        target.targetPortfolioPct(), actualPct, target.sipPct(), target.status(), metrics.convictionScore(), 
+                        metrics.sortinoRatio(), metrics.maxDrawdown(), metrics.navPercentile3yr(), metrics.drawdownFromAth(), 
+                        metrics.returnZScore(), metrics.lastBuyDate(), justs));
+                }
             }
         }
 
-        // ==========================================
-        // 🌟 PASS 2: THE SNIPER (Distribute Capital)
-        // ==========================================
-        double totalRiskAdjustedDemand = 0.0;
+        // Apply conviction-based weighting to lumpsum if multiple signals exist
+        return weightSignalsByConviction(opportunisticDrafts, lumpsum);
+    }
+
+    // ==========================================
+    // 🌟 MODE 3: EXIT QUEUE (Dropped Funds)
+    // ==========================================
+    public List<TacticalSignal> computeExitQueue(String pan) {
+        List<StrategyTarget> targets = strategyService.fetchLatestStrategy();
+        List<TaxLot> allLots = taxLotRepository.findByStatusAndSchemeFolioInvestorPan("OPEN", pan);
+        List<AggregatedHolding> holdings = aggregateLots(allLots);
         
-        for (TacticalSignal sig : draftSignals) {
-            if ("BUY".equalsIgnoreCase(sig.action())) {
-                double baseDeficit = Double.parseDouble(sig.amount().replace(",", ""));
-                double scoreMult = Math.max(0.2, sig.convictionScore() / 100.0);
-                totalRiskAdjustedDemand += (baseDeficit * scoreMult);
+        // Find realized LTCG so far this FY
+        double realizedLtcg = jdbcTemplate.queryForObject(
+            "SELECT COALESCE(SUM(realized_gain), 0) FROM capital_gain_audit WHERE tax_category LIKE '%LTCG%' AND calculation_date >= '2025-04-01'", 
+            Double.class);
+        double ltcgHeadroom = Math.max(0, 125000 - realizedLtcg);
+
+        List<TacticalSignal> exitPlan = new ArrayList<>();
+
+        for (AggregatedHolding h : holdings) {
+            StrategyTarget target = targets.stream()
+                .filter(t -> t.schemeName().equalsIgnoreCase(h.getSchemeName()))
+                .findFirst().orElse(null);
+
+            if (target == null || "dropped".equalsIgnoreCase(target.status())) {
+                List<String> justs = new ArrayList<>();
+                double exitAmount = 0;
+                
+                // Debt funds: Exit immediately (no LTCG benefit post-2023)
+                if (h.getAssetCategory().contains("DEBT") || h.getAssetCategory().contains("GILT")) {
+                    exitAmount = h.getCurrentValue();
+                    justs.add("🚀 Priority Exit: Debt fund dropped from strategy. Slab-taxed anyway, exit now.");
+                } 
+                // Equity: Sequence by tax efficiency
+                else {
+                    if (h.getLtcgValue() > 0 && ltcgHeadroom > 0) {
+                        double amountToHarvest = Math.min(h.getLtcgValue(), ltcgHeadroom * 5); // Rough proxy
+                        exitAmount = amountToHarvest;
+                        justs.add(String.format("✅ Tax-Efficient: Exiting ₹%,.0f in LTCG lots (using remaining headroom).", exitAmount));
+                    } else if (h.getStcgValue() > 0) {
+                        justs.add(String.format("⏳ Deferred: %d days until next lot becomes LTCG. Holding to avoid 20%% tax.", h.getDaysToNextLtcg()));
+                    }
+                }
+
+                if (exitAmount > 0 || !justs.isEmpty()) {
+                    exitPlan.add(new TacticalSignal(h.getSchemeName(), amfiCodeFor(h), "EXIT", String.valueOf(exitAmount), 
+                        0, (h.getCurrentValue()/1000000), 0, "DROPPED", 0, 0, 0, 0, 0, 0, LocalDate.now(), justs));
+                }
             }
         }
+        return exitPlan;
+    }
 
-        double finalCashPool = totalDeployableCash;
-        double finalDemand = totalRiskAdjustedDemand;
+    // Helper: Legacy compatibility wrapper
+    public List<TacticalSignal> generateDailySignals(String investorPan, double monthlySip, double lumpsum) {
+        return computeOpportunisticSignals(investorPan, lumpsum);
+    }
 
-        return draftSignals.stream().map(sig -> {
-            if (!"BUY".equalsIgnoreCase(sig.action())) return sig;
+    private List<TacticalSignal> weightSignalsByConviction(List<TacticalSignal> signals, double cash) {
+        if (signals.isEmpty()) return signals;
+        
+        double totalDemand = signals.stream()
+            .mapToDouble(s -> Double.parseDouble(s.amount()) * (s.convictionScore() / 100.0))
+            .sum();
 
-            List<String> justs = new ArrayList<>(sig.justifications());
+        return signals.stream().map(sig -> {
+            double baseAmount = Double.parseDouble(sig.amount());
+            double scoreMult = sig.convictionScore() / 100.0;
+            double weightedAmount = (totalDemand > 0) ? (baseAmount * scoreMult / totalDemand) * cash : 0;
             
-            // 🚀 COOLDOWN LOGIC: Check for recent BUY transactions (21-day window)
-            long daysSinceLastBuy = ChronoUnit.DAYS.between(sig.lastBuyDate(), LocalDate.now());
-            if (daysSinceLastBuy < 21) {
-                justs.add(String.format("❄️ Cooldown Active: Last buy was %d days ago (21-day limit). Skipping further BUY signals to prevent concentration risk.", daysSinceLastBuy));
+            // Cooldown check
+            long daysSinceLast = ChronoUnit.DAYS.between(sig.lastBuyDate(), LocalDate.now());
+            if (daysSinceLast < 21) {
+                List<String> justs = new ArrayList<>(sig.justifications());
+                justs.add("❄️ Cooldown Active (21d). Skipping for now.");
                 return createSignal(sig, "HOLD", "0", justs);
             }
 
-            double baseDeficit = Double.parseDouble(sig.amount().replace(",", ""));
-            double scoreMult = Math.max(0.2, sig.convictionScore() / 100.0);
-            double riskAdjustedDemand = baseDeficit * scoreMult;
-            
-            double allocatedAmount = 0.0;
-            
-            if (finalCashPool > 0 && finalDemand > 0) {
-                double shareOfPool = riskAdjustedDemand / finalDemand;
-                allocatedAmount = finalCashPool * shareOfPool;
-                
-                allocatedAmount = Math.min(allocatedAmount, riskAdjustedDemand);
-                
-            } else if (finalCashPool <= 0) {
-                // If you have 0 cash, convert BUYs to HOLDs
-                justs.add("⚠️ Capital Exhausted: No liquidity available to execute this buy.");
-                return createSignal(sig, "HOLD", "0", justs);
-            }
-
-            justs.add(String.format("💰 Capital Pool: Drawing from ₹%,.0f total available liquidity.", finalCashPool));
-            justs.add(String.format("⚖️ Risk-Sized: Base Deficit ₹%,.0f. Applied %.2fx Conviction Multiplier. Final Allocation: ₹%,.0f.", 
-                      baseDeficit, scoreMult, allocatedAmount));
-
-            return createSignal(sig, "BUY", String.format("%.2f", allocatedAmount), justs);
-            
+            return createSignal(sig, "BUY", String.format("%.2f", weightedAmount), sig.justifications());
         }).collect(Collectors.toList());
+    }
+
+    private AggregatedHolding findHolding(List<AggregatedHolding> holdings, StrategyTarget t) {
+        return holdings.stream()
+            .filter(h -> h.getSchemeName().equalsIgnoreCase(t.schemeName()))
+            .findFirst().orElse(new AggregatedHolding(t.schemeName(), 0,0,0,0,0,0,0,0,0,"UNKNOWN","DROPPED", t.isin()));
+    }
+
+    private String amfiCodeFor(StrategyTarget t) {
+        return schemeRepository.findByIsin(t.isin()).map(Scheme::getAmfiCode).orElse("");
+    }
+
+    private String amfiCodeFor(AggregatedHolding h) {
+        return schemeRepository.findByNameIgnoreCase(h.getSchemeName()).map(Scheme::getAmfiCode).orElse("");
+    }
+
+    private double sipAmountFromTarget(StrategyTarget t, double totalSip) {
+        return (t.sipPct() / 100.0) * totalSip;
+    }
+
+    private MarketMetrics defaultMetrics() {
+        return new MarketMetrics(0,0,0,0,0,0.5,0,0, LocalDate.of(1970,1,1));
     }
 
     private TacticalSignal createSignal(TacticalSignal s, String action, String amt, List<String> justs) {
@@ -226,7 +247,7 @@ if ("EXIT".equalsIgnoreCase(rawSignal.action()) || "DROPPED".equalsIgnoreCase(ta
     }
 
    private Map<String, MarketMetrics> fetchLiveMetricsMap(String pan) {
-        // 1. Fetch Conviction Metrics (NAV Signals replaces PE/PB)
+        // ... (existing implementation from previous turn)
         String sql = """
             SELECT m.amfi_code, m.sortino_ratio, m.cvar_5, m.win_rate, m.max_drawdown, 
                    m.conviction_score, m.nav_percentile_3yr, m.drawdown_from_ath, m.return_z_score
@@ -237,7 +258,6 @@ if ("EXIT".equalsIgnoreCase(rawSignal.action()) || "DROPPED".equalsIgnoreCase(ta
             AND m.calculation_date = (SELECT MAX(calculation_date) FROM fund_conviction_metrics)
             """;
         
-        // 2. Fetch Last Buy Date per Scheme
         String lastBuySql = """
             SELECT s.amfi_code, MAX(t.transaction_date) as last_buy
             FROM transaction t
@@ -276,12 +296,10 @@ if ("EXIT".equalsIgnoreCase(rawSignal.action()) || "DROPPED".equalsIgnoreCase(ta
         Map<Scheme, List<TaxLot>> groupedLots = lots.stream().collect(Collectors.groupingBy(TaxLot::getScheme));
         return groupedLots.entrySet().stream().map(entry -> {
             Scheme scheme = entry.getKey();
-            
-            // 🚀 EFFICIENCY FIX: Call NavService only once per scheme
             SchemeDetailsDTO details = amfiService.getLatestSchemeDetails(scheme.getAmfiCode());
             double liveNav = (details != null && details.getNav() != null) ? details.getNav().doubleValue() : 0.0;
 
-         double units = 0, cost = 0, val = 0, ltcgGains = 0, stcgGains = 0;
+            double units = 0, cost = 0, val = 0, ltcgGains = 0, stcgGains = 0;
             double ltcgVal = 0, stcgVal = 0;
             int minDaysToLtcg = 365; 
             LocalDate oldest = LocalDate.now();
@@ -297,7 +315,6 @@ if ("EXIT".equalsIgnoreCase(rawSignal.action()) || "DROPPED".equalsIgnoreCase(ta
                 long age = ChronoUnit.DAYS.between(lot.getBuyDate(), LocalDate.now());
                 double gain = lVal - lCost;
                 
-                String cat = (scheme.getAssetCategory() != null) ? scheme.getAssetCategory().toUpperCase() : "EQUITY";
                 boolean isLtcg = (age > 365); 
 
                 if (isLtcg) {
@@ -313,21 +330,9 @@ if ("EXIT".equalsIgnoreCase(rawSignal.action()) || "DROPPED".equalsIgnoreCase(ta
             
             int finalDaysToNext = (stcgVal > 0) ? minDaysToLtcg : 0;
 
-            return new AggregatedHolding(
-                scheme.getName(),       
-                units,                  
-                val,                    
-                cost,                   
-                ltcgVal,                
-                ltcgGains,              
-                stcgVal,                
-                stcgGains,              
-                finalDaysToNext,        
-                (int)ChronoUnit.DAYS.between(oldest, LocalDate.now()), 
-                scheme.getAssetCategory(), 
-                "ACTIVE",               
-                scheme.getIsin()        
-            );
+            return new AggregatedHolding(scheme.getName(), units, val, cost, ltcgVal, ltcgGains, 
+                stcgVal, stcgGains, finalDaysToNext, (int)ChronoUnit.DAYS.between(oldest, LocalDate.now()), 
+                scheme.getAssetCategory(), "ACTIVE", scheme.getIsin());
         }).collect(Collectors.toList());
     }
 }
