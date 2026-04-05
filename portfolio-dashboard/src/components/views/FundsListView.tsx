@@ -1,6 +1,5 @@
 import { useState } from 'react';
 import { Search, ChevronRight } from 'lucide-react';
-import { } from '../../utils/formatters';
 import ConvictionBadge from '../ui/ConvictionBadge';
 import CurrencyValue from '../ui/CurrencyValue';
 
@@ -18,7 +17,7 @@ export default function FundsListView({
 
   const funds = (portfolioData.schemeBreakdown || []).filter((f: any) => {
     const matchesSearch = f.schemeName.toLowerCase().includes(search.toLowerCase());
-    const matchesFilter = filter === 'ALL' || f.category.toUpperCase().includes(filter);
+    const matchesFilter = filter === 'ALL' || f.category?.toUpperCase().includes(filter);
     return matchesSearch && matchesFilter;
   });
 
@@ -40,7 +39,7 @@ export default function FundsListView({
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Search funds..."
-              className="bg-surface border border-white/5 rounded-lg pl-10 pr-4 py-2 text-sm text-primary focus:outline-none focus:border-indigo-500/50 transition-colors w-64"
+              className="bg-surface border border-white/5 rounded-lg pl-10 pr-4 py-2 text-sm text-primary focus:outline-none focus:border-accent/50 transition-colors w-64"
             />
           </div>
           <div className="flex bg-surface border border-white/5 p-1 rounded-lg">
@@ -83,14 +82,14 @@ export default function FundsListView({
               </div>
               <div className="text-right">
                 <p className="text-[9px] uppercase tracking-widest text-muted mb-1">XIRR</p>
-                <p className={`text-sm font-medium tabular-nums ${parseFloat(fund.xirr) >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>{fund.xirr}</p>
+                <p className={`text-sm font-medium tabular-nums ${parseFloat(fund.xirr) >= 0 ? 'text-buy' : 'text-exit'}`}>{fund.xirr}</p>
               </div>
             </div>
 
             <div className="flex items-center justify-between pt-4 border-t border-white/5">
               <span className={`text-[10px] font-bold uppercase tracking-widest ${
-                fund.action === 'BUY' ? 'text-emerald-400' : 
-                fund.action === 'EXIT' ? 'text-red-400' : 'text-slate-500'
+                fund.action === 'BUY' ? 'text-buy' : 
+                fund.action === 'EXIT' ? 'text-exit' : 'text-hold'
               }`}>
                 {fund.action}
               </span>

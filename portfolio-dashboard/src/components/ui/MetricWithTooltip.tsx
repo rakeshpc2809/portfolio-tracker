@@ -1,9 +1,9 @@
-import React from 'react';
+import { type ReactNode } from 'react';
 import * as Tooltip from '@radix-ui/react-tooltip';
 
 export default function MetricWithTooltip({
   label, value, tooltip, valueClass = ''
-}: { label: string; value: React.ReactNode; tooltip: string; valueClass?: string }) {
+}: { label: string; value: ReactNode; tooltip: string; valueClass?: string }) {
   return (
     <Tooltip.Provider delayDuration={200}>
       <Tooltip.Root>

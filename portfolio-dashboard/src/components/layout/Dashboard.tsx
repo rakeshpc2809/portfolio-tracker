@@ -46,14 +46,14 @@ export default function Dashboard({ portfolioData }: { portfolioData: any }) {
   const mask = (val: string) => isPrivate ? "••••" : val;
 
   const stats = [
-    { label: 'Value', value: formatCurrencyShort(portfolioData.currentValueAmount) },
-    { label: 'XIRR', value: portfolioData.overallXirr, color: parseFloat(portfolioData.overallXirr) >= 0 ? 'text-emerald-400' : 'text-red-400' },
-    { label: 'P&L', value: (portfolioData.totalUnrealizedGain >= 0 ? '+' : '') + formatCurrencyShort(portfolioData.totalUnrealizedGain), color: portfolioData.totalUnrealizedGain >= 0 ? 'text-emerald-400' : 'text-red-400' },
-    { label: 'Tax', value: formatCurrencyShort(portfolioData.totalSTCG), color: 'text-amber-400' },
+    { label: 'Value', value: formatCurrencyShort(portfolioData.currentValueAmount || 0) },
+    { label: 'XIRR', value: portfolioData.overallXirr || '0%', color: parseFloat(portfolioData.overallXirr || '0') >= 0 ? 'text-buy' : 'text-exit' },
+    { label: 'P&L', value: ((portfolioData.totalUnrealizedGain || 0) >= 0 ? '+' : '') + formatCurrencyShort(portfolioData.totalUnrealizedGain || 0), color: (portfolioData.totalUnrealizedGain || 0) >= 0 ? 'text-buy' : 'text-exit' },
+    { label: 'Tax', value: formatCurrencyShort(portfolioData.totalSTCG || 0), color: 'text-warning' },
   ];
 
   return (
-    <div className="min-h-screen bg-[#09090f] text-primary font-sans selection:bg-indigo-500/30">
+    <div className="min-h-screen bg-[#09090f] text-primary font-sans selection:bg-accent/30">
       <div className="fixed inset-0 pointer-events-none opacity-40" 
            style={{ background: 'radial-gradient(ellipse 80% 50% at 20% 0%, rgba(129,140,248,0.08) 0%, transparent 60%)' }} 
       />
@@ -61,10 +61,10 @@ export default function Dashboard({ portfolioData }: { portfolioData: any }) {
       <header className="sticky top-0 z-[90] border-b border-white/5 bg-[#09090f]/80 backdrop-blur-md px-8 py-4 flex justify-between items-center">
         <div className="flex items-center gap-10">
           <div className="flex items-center gap-2">
-            <div className="w-6 h-6 bg-indigo-500 rounded-md flex items-center justify-center">
+            <div className="w-6 h-6 bg-accent rounded-md flex items-center justify-center">
               <TrendingUp size={14} className="text-white" />
             </div>
-            <h1 className="text-[10px] font-bold uppercase tracking-[0.2em] text-indigo-400">Portfolio OS</h1>
+            <h1 className="text-[10px] font-bold uppercase tracking-[0.2em] text-accent">Portfolio OS</h1>
           </div>
 
           <div className="hidden lg:flex items-center gap-8 border-l border-white/5 pl-8">
@@ -83,7 +83,7 @@ export default function Dashboard({ portfolioData }: { portfolioData: any }) {
             <Switch.Root 
               checked={isPrivate} 
               onCheckedChange={setIsPrivate}
-              className="w-8 h-4 bg-white/10 rounded-full relative data-[state=checked]:bg-indigo-500 outline-none cursor-pointer transition-colors"
+              className="w-8 h-4 bg-white/10 rounded-full relative data-[state=checked]:bg-accent outline-none cursor-pointer transition-colors"
             >
               <Switch.Thumb className="block w-3 h-3 bg-white rounded-full transition-transform duration-150 translate-x-0.5 will-change-transform data-[state=checked]:translate-x-[18px]" />
             </Switch.Root>
@@ -99,7 +99,7 @@ export default function Dashboard({ portfolioData }: { portfolioData: any }) {
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
               className={`flex items-center gap-2 px-5 py-2 rounded-lg text-[11px] font-bold uppercase tracking-wider transition-all duration-150 ${
-                activeTab === tab.id ? 'bg-indigo-500/10 text-indigo-400' : 'text-muted hover:text-secondary'
+                activeTab === tab.id ? 'bg-accent/10 text-accent' : 'text-muted hover:text-secondary'
               }`}
             >
               {tab.icon}
@@ -160,16 +160,14 @@ export default function Dashboard({ portfolioData }: { portfolioData: any }) {
         </AnimatePresence>
       </main>
 
-      <AnimatePresence>
-        {selectedFundName && (
-          <FundDetailView 
-            fund={selectedFund}
-            isOpen={!!selectedFundName}
-            onClose={() => setSelectedFundName(null)}
-            isPrivate={isPrivate}
-          />
-        )}
-      </AnimatePresence>
+      {selectedFundName && (
+        <FundDetailView 
+          fund={selectedFund}
+          isOpen={!!selectedFundName}
+          onClose={() => setSelectedFundName(null)}
+          isPrivate={isPrivate}
+        />
+      )}
     </div>
   );
 }

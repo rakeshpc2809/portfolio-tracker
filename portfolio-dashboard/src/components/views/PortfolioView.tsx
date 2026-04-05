@@ -23,7 +23,7 @@ export default function PortfolioView({
 }) {
   const breakdown = portfolioData.schemeBreakdown || [];
   
-  const avgConviction = breakdown.reduce((acc: number, s: any) => acc + s.convictionScore, 0) / (breakdown.length || 1);
+  const avgConviction = breakdown.reduce((acc: number, s: any) => acc + (s.convictionScore || 0), 0) / (breakdown.length || 1);
   const totalValue = portfolioData.currentValueAmount || 0;
   const weightedCVaR = breakdown.reduce((acc: number, s: any) => {
     const weight = (s.currentValue || 0) / (totalValue || 1);
@@ -42,14 +42,14 @@ export default function PortfolioView({
     name: name.replace(/_/g, ' '),
     value: (value / totalValue) * 100,
     color: BUCKET_COLORS[name] || "#94a3b8"
-  })).sort((a, b) => b.value - a.value);
+  })).sort((a: any, b: any) => b.value - a.value);
 
   const xirrData = breakdown
-    .filter((s: any) => s.currentValue > 0)
+    .filter((s: any) => (s.currentValue || 0) > 0)
     .map((s: any) => ({
       name: s.schemeName.substring(0, 20),
-      Personal: parseFloat(s.xirr || 0),
-      Benchmark: s.category.includes("MIDCAP") ? 18 : 14
+      Personal: parseFloat(s.xirr || '0'),
+      Benchmark: s.category?.includes("MIDCAP") ? 18 : 14
     }))
     .sort((a: any, b: any) => b.Personal - a.Personal);
 

@@ -58,13 +58,13 @@ export default function TaxView({
           </Progress.Root>
         </div>
         
-        <p className="text-[11px] text-secondary leading-relaxed flex items-center gap-2">
+        <div className="text-[11px] text-secondary leading-relaxed flex items-center gap-2">
           <Info size={14} className="text-accent" />
           {realizedLTCG < ltcgLimit 
             ? <span>You can harvest <CurrencyValue isPrivate={isPrivate} value={ltcgLimit - realizedLTCG} /> more in LTCG gains tax-free this year.</span>
             : `You have exceeded the tax-free limit. Further LTCG will be taxed at 12.5%.`
           }
-        </p>
+        </div>
       </section>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">

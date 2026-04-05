@@ -19,10 +19,10 @@ export default function FundDetailView({
   if (!fund) return null;
 
   const components = [
-    { label: 'Yield', score: fund.convictionScore * 0.8, weight: '20%', tooltip: 'Your personal CAGR from tax lots.' },
-    { label: 'Risk', score: fund.sortinoRatio * 40, weight: '25%', tooltip: 'Sortino ratio - return relative to downside risk.' },
-    { label: 'Value', score: (1 - fund.navPercentile3yr) * 100, weight: '25%', tooltip: 'NAV position + drawdown from ATH.' },
-    { label: 'Pain', score: (1 - Math.abs(fund.maxDrawdown / 100)) * 100, weight: '15%', tooltip: 'Max drawdown resilience.' },
+    { label: 'Yield', score: (fund.convictionScore || 0) * 0.8, weight: '20%', tooltip: 'Your personal CAGR from tax lots.' },
+    { label: 'Risk', score: (fund.sortinoRatio || 0) * 40, weight: '25%', tooltip: 'Sortino ratio - return relative to downside risk.' },
+    { label: 'Value', score: (1 - (fund.navPercentile3yr || 0)) * 100, weight: '25%', tooltip: 'NAV position + drawdown from ATH.' },
+    { label: 'Pain', score: (1 - Math.abs((fund.maxDrawdown || 0) / 100)) * 100, weight: '15%', tooltip: 'Max drawdown resilience.' },
     { label: 'Friction', score: 85, weight: '15%', tooltip: 'Tax drag simulation results.' },
   ];
 
@@ -89,7 +89,7 @@ export default function FundDetailView({
                     <span className="absolute -top-4 right-0 text-[9px] font-bold text-muted uppercase tracking-widest">3yr High</span>
                     <motion.div 
                       initial={{ left: 0 }}
-                      animate={{ left: `${fund.navPercentile3yr * 100}%` }}
+                      animate={{ left: `${(fund.navPercentile3yr || 0) * 100}%` }}
                       transition={{ duration: 1, delay: 0.2 }}
                       className="absolute top-1/2 -translate-y-1/2 w-3 h-3 bg-accent rounded-full shadow-[0_0_15px_rgba(129,140,248,0.5)] border-2 border-surface"
                     />
@@ -99,13 +99,13 @@ export default function FundDetailView({
                     <div>
                       <p className="text-muted text-[10px] font-medium uppercase tracking-widest mb-1">Positioning</p>
                       <p className="text-sm text-primary font-medium">
-                        At {Math.round(fund.navPercentile3yr * 100)}% of its range
+                        At {Math.round((fund.navPercentile3yr || 0) * 100)}% of its range
                       </p>
                     </div>
                     <div>
                       <p className="text-muted text-[10px] font-medium uppercase tracking-widest mb-1">ATH Drawdown</p>
                       <p className="text-sm text-exit font-medium font-mono">
-                        {(fund.drawdownFromAth * 100).toFixed(1)}% from peak
+                        {((fund.drawdownFromAth || 0) * 100).toFixed(1)}% from peak
                       </p>
                     </div>
                   </div>
@@ -158,7 +158,7 @@ export default function FundDetailView({
                   <h3 className="text-[10px] font-bold uppercase tracking-widest">System Verdict</h3>
                 </div>
                 <p className="text-[13px] text-secondary leading-relaxed italic">
-                  "{buildPlainEnglishReason(fund)} This asset is being monitored for rebalancing opportunities based on its {fund.sortinoRatio.toFixed(2)} Sortino ratio and current {((fund.actualPercentage - fund.plannedPercentage)).toFixed(1)}% allocation drift."
+                  "{buildPlainEnglishReason(fund)} This asset is being monitored for rebalancing opportunities based on its {(fund.sortinoRatio || 0).toFixed(2)} Sortino ratio and current {((fund.actualPercentage || 0) - (fund.plannedPercentage || 0)).toFixed(1)}% allocation drift."
                 </p>
               </section>
             </div>

@@ -102,8 +102,8 @@ export default function RebalanceView({
             {data.map((s: any) => (
               <tr key={s.schemeName} className="hover:bg-white/[0.01] transition-colors group">
                 <td className="px-6 py-4 text-[13px] text-primary truncate max-w-md">{s.schemeName}</td>
-                <td className="px-6 py-4 text-right text-[13px] text-secondary tabular-nums">{s.plannedPercentage.toFixed(1)}%</td>
-                <td className="px-6 py-4 text-right text-[13px] text-secondary tabular-nums">{s.allocationPercentage.toFixed(1)}%</td>
+                <td className="px-6 py-4 text-right text-[13px] text-secondary tabular-nums">{(s.plannedPercentage || 0).toFixed(1)}%</td>
+                <td className="px-6 py-4 text-right text-[13px] text-secondary tabular-nums">{(s.allocationPercentage || 0).toFixed(1)}%</td>
                 <td className={`px-6 py-4 text-right text-[13px] font-medium tabular-nums ${
                   s.drift > 1 ? 'text-exit' : s.drift < -1 ? 'text-buy' : 'text-hold'
                 }`}>
