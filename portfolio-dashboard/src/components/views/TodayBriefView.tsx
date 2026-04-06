@@ -23,6 +23,10 @@ export default function TodayBriefView({
   const dateStr = new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
   const payload = portfolioData.tacticalPayload || { sipPlan: [], opportunisticSignals: [], exitQueue: [] };
 
+  const exitCount = payload.exitQueue?.length || 0;
+  const sipTotal = payload.sipPlan?.reduce((a: number, s: any) => a + s.amount, 0) || 0;
+  const opCount = payload.opportunisticSignals?.length || 0;
+
   const container = {
     hidden: { opacity: 0 },
     show: {
@@ -38,9 +42,35 @@ export default function TodayBriefView({
 
   return (
     <div className="space-y-12 pb-32">
-      <header>
-        <h2 className="text-muted text-[10px] font-medium uppercase tracking-[0.2em] mb-1">Decision Support</h2>
-        <p className="text-xl font-medium text-primary tracking-tight">Today's brief · {dateStr}</p>
+      <header className="space-y-6">
+        <div>
+          <h2 className="text-muted text-[10px] font-medium uppercase tracking-[0.2em] mb-1">Decision Support</h2>
+          <p className="text-xl font-medium text-primary tracking-tight">Today's brief · {dateStr}</p>
+        </div>
+
+        {/* Design Improvement 4: Portfolio Health Banner */}
+        <div className="flex flex-wrap items-center gap-6 px-6 py-4 bg-white/[0.02] border border-white/5 rounded-xl">
+          <div className="flex items-center gap-3">
+            <div className={`w-2 h-2 rounded-full ${exitCount > 0 ? 'bg-exit' : 'bg-buy'}`} />
+            <span className="text-[11px] text-secondary">
+              {exitCount > 0 
+                ? `${exitCount} dropped funds need clearing` 
+                : 'No exit actions pending'}
+            </span>
+          </div>
+          <div className="flex items-center gap-3 border-l border-white/5 pl-6">
+            <div className="w-2 h-2 rounded-full bg-accent" />
+            <span className="text-[11px] text-secondary">
+              SIP this month: <CurrencyValue isPrivate={isPrivate} value={sipTotal} className="text-primary font-medium" />
+            </span>
+          </div>
+          {opCount > 0 && (
+            <div className="flex items-center gap-3 border-l border-white/5 pl-6">
+              <div className="w-2 h-2 rounded-full bg-warning" />
+              <span className="text-[11px] text-secondary">{opCount} opportunistic signals active</span>
+            </div>
+          )}
+        </div>
       </header>
 
       {/* SECTION 1: MONTHLY SIP PLAN */}
@@ -86,26 +116,35 @@ export default function TodayBriefView({
               </tr>
             </thead>
             <tbody className="divide-y divide-white/5">
-              {payload.sipPlan.map((s: any) => (
-                <tr key={s.isin} className="hover:bg-white/[0.01] transition-colors group">
-                  <td className="px-6 py-4">
-                    <button onClick={() => onFundClick(s.schemeName)} className="text-[13px] text-primary hover:text-accent transition-colors truncate max-w-xs block text-left">
-                      {s.schemeName}
-                    </button>
-                  </td>
-                  <td className="px-6 py-4 text-right text-[12px] text-secondary tabular-nums">{s.sipPct}%</td>
-                  <td className="px-6 py-4 text-right text-[12px] text-buy font-medium tabular-nums">
-                    <CurrencyValue isPrivate={isPrivate} value={s.amount} />
-                  </td>
-                  <td className="px-6 py-4 text-right">
-                    <span className={`text-[9px] font-bold uppercase tracking-widest px-2 py-0.5 rounded ${
-                      s.deployFlag === 'DEPLOY' ? 'text-buy bg-buy/10' : 'text-warning bg-warning/10'
-                    }`}>
-                      {s.deployFlag === 'DEPLOY' ? 'Ready' : 'Expensive'}
-                    </span>
+              {payload.sipPlan.length === 0 ? (
+                <tr>
+                  <td colSpan={4} className="px-6 py-12 text-center text-muted text-xs italic">
+                    <p className="mb-2">SIP plan not loaded.</p>
+                    <p className="text-[10px] uppercase tracking-widest non-italic">Check Google Sheet strategy & ensure funds have sip% &gt; 0</p>
                   </td>
                 </tr>
-              ))}
+              ) : (
+                payload.sipPlan.map((s: any) => (
+                  <tr key={s.isin} className="hover:bg-white/[0.01] transition-colors group">
+                    <td className="px-6 py-4">
+                      <button onClick={() => onFundClick(s.schemeName)} className="text-[13px] text-primary hover:text-accent transition-colors truncate max-w-xs block text-left">
+                        {s.schemeName}
+                      </button>
+                    </td>
+                    <td className="px-6 py-4 text-right text-[12px] text-secondary tabular-nums">{s.sipPct}%</td>
+                    <td className="px-6 py-4 text-right text-[12px] text-buy font-medium tabular-nums">
+                      <CurrencyValue isPrivate={isPrivate} value={s.amount} />
+                    </td>
+                    <td className="px-6 py-4 text-right">
+                      <span className={`text-[9px] font-bold uppercase tracking-widest px-2 py-0.5 rounded ${
+                        s.deployFlag === 'DEPLOY' ? 'text-buy bg-buy/10' : 'text-warning bg-warning/10'
+                      }`}>
+                        {s.deployFlag === 'DEPLOY' ? 'Ready' : 'Expensive'}
+                      </span>
+                    </td>
+                  </tr>
+                ))
+              )}
             </tbody>
           </table>
         </div>

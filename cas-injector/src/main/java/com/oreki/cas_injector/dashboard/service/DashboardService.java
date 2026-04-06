@@ -131,6 +131,26 @@ public class DashboardService {
                 BigDecimal currentValue = Optional.of(unitsHeld.multiply(currentNav))
                     .map(CommonUtils.SCALE_MONEY)
                     .orElse(BigDecimal.ZERO);
+
+                // Compute unrealized LTCG vs STCG (Bug 4 fix)
+                double ltcgUnrealized = allLots.stream()
+                    .filter(lot -> "OPEN".equalsIgnoreCase(lot.getStatus()))
+                    .filter(lot -> java.time.temporal.ChronoUnit.DAYS.between(lot.getBuyDate(), LocalDate.now()) > 365)
+                    .mapToDouble(lot -> {
+                        double val = lot.getRemainingUnits().doubleValue() * currentNav.doubleValue();
+                        double cost = lot.getRemainingUnits().doubleValue() * lot.getCostBasisPerUnit().doubleValue();
+                        return Math.max(0, val - cost);
+                    }).sum();
+
+                double stcgUnrealized = allLots.stream()
+                    .filter(lot -> "OPEN".equalsIgnoreCase(lot.getStatus()))
+                    .filter(lot -> java.time.temporal.ChronoUnit.DAYS.between(lot.getBuyDate(), LocalDate.now()) <= 365)
+                    .mapToDouble(lot -> {
+                        double val = lot.getRemainingUnits().doubleValue() * currentNav.doubleValue();
+                        double cost = lot.getRemainingUnits().doubleValue() * lot.getCostBasisPerUnit().doubleValue();
+                        return Math.max(0, val - cost);
+                    }).sum();
+
                 // Unrealized Gain = Current Value - What you paid for these specific units
                 BigDecimal unrealizedGain =  Optional.of(currentValue.subtract(currentInvested))
                     .map(CommonUtils.SCALE_MONEY)
@@ -171,6 +191,8 @@ public class DashboardService {
                     .currentValue(currentValue)
                     .realizedGain(schemeGain)
                     .unrealizedGain(unrealizedGain)
+                    .ltcgUnrealizedGain(ltcgUnrealized)
+                    .stcgUnrealizedGain(stcgUnrealized)
                     .transactionCount(cleanTxCount)
                     .xirr(displayXirr)
                     .status(status)

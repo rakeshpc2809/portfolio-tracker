@@ -111,8 +111,9 @@ public class ConvictionScoringService {
                 int finalScore = (int) Math.round(baseConviction);
                 finalScore = Math.max(1, Math.min(100, finalScore)); 
 
-                // 6. Repository Update
-                convictionMetricsRepository.updateFinalConvictionScore(finalScore, amfiCode);
+                // 6. Repository Update (Enhanced Breakdown for Design 5)
+                convictionMetricsRepository.updateConvictionBreakdown(finalScore, yieldScore, riskScore, 
+                    valueScore, painScore, frictionScore, amfiCode);
 
             } catch (Exception e) {
                 log.error("❌ Crash scoring AMFI {}", amfiCode, e);

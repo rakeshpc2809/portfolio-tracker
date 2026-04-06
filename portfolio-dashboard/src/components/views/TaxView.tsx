@@ -35,6 +35,76 @@ export default function TaxView({
       .catch(() => setTlhOps([]));
   }, [pan]);
 
+  const stcgSection = (
+    <section className="space-y-4">
+      <h3 className="text-muted text-[10px] font-medium uppercase tracking-widest flex items-center gap-2">
+        <ShieldAlert size={12} className="text-exit" /> STCG Lock List
+      </h3>
+      <div className="bg-surface border border-white/5 rounded-xl overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-left">
+            <thead className="bg-white/[0.02] text-muted text-[10px] uppercase tracking-widest border-b border-white/5">
+              <tr>
+                <th className="px-6 py-4 font-medium">Fund</th>
+                <th className="px-6 py-4 font-medium text-right">Potential Tax</th>
+                <th className="px-6 py-4 font-medium text-right">Wait Time</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-white/5">
+              {stcgFunds.map((f: any) => (
+                <tr key={f.name} className="hover:bg-white/[0.01]">
+                  <td className="px-6 py-4 text-[12px] text-primary truncate max-w-[180px]">{f.name}</td>
+                  <td className="px-6 py-4 text-right text-[12px] text-exit tabular-nums">
+                    <CurrencyValue isPrivate={isPrivate} value={f.tax} />
+                  </td>
+                  <td className="px-6 py-4 text-right text-[12px] text-secondary tabular-nums">
+                    {f.days} <span className="text-[10px] text-muted uppercase">days</span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  );
+
+  const tlhSection = (
+    <section className="space-y-4">
+      <h3 className="text-muted text-[10px] font-medium uppercase tracking-widest flex items-center gap-2">
+        <TrendingDown size={12} className="text-buy" /> Harvesting Ops
+      </h3>
+      <div className="space-y-3">
+        {tlhOps.map((op: any) => (
+          <div key={op.schemeName} className="bg-surface border border-white/5 rounded-xl p-5 space-y-3">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-[10px] text-muted uppercase tracking-widest mb-1">Sell</p>
+                <p className="text-sm text-primary truncate max-w-[200px]">{op.schemeName}</p>
+              </div>
+              <div className="text-right">
+                <p className="text-[10px] text-muted uppercase tracking-widest mb-1">Buy</p>
+                <p className="text-sm text-buy truncate max-w-[200px]">
+                  {op.proxySchemeRecommendation || 'Search for similar category fund'}
+                </p>
+              </div>
+            </div>
+            <div className="flex justify-between pt-3 border-t border-white/5">
+              <div>
+                <p className="text-[10px] text-muted uppercase">Loss to harvest</p>
+                <CurrencyValue isPrivate={isPrivate} value={Math.abs(op.estimatedCapitalLoss)} className="text-exit text-sm font-medium tabular-nums" />
+              </div>
+              <div className="text-right">
+                <p className="text-[10px] text-muted uppercase">Est. tax saving</p>
+                <CurrencyValue isPrivate={isPrivate} value={Math.abs(op.estimatedCapitalLoss) * 0.20} className="text-buy text-sm font-medium tabular-nums" />
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+
   return (
     <div className="space-y-10 pb-32">
       <header>
@@ -78,92 +148,28 @@ export default function TaxView({
         </div>
       </section>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-        {/* SECTION B: STCG EXPOSURE */}
-        <section className="space-y-4">
-          <h3 className="text-muted text-[10px] font-medium uppercase tracking-widest flex items-center gap-2">
-            <ShieldAlert size={12} className="text-exit" /> STCG Lock List
-          </h3>
-          <div className="bg-surface border border-white/5 rounded-xl overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="w-full text-left">
-                <thead className="bg-white/[0.02] text-muted text-[10px] uppercase tracking-widest border-b border-white/5">
-                  <tr>
-                    <th className="px-6 py-4 font-medium">Fund</th>
-                    <th className="px-6 py-4 font-medium text-right">Potential Tax</th>
-                    <th className="px-6 py-4 font-medium text-right">Wait Time</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-white/5">
-                  {stcgFunds.map((f: any) => (
-                    <tr key={f.name} className="hover:bg-white/[0.01]">
-                      <td className="px-6 py-4 text-[12px] text-primary truncate max-w-[180px]">{f.name}</td>
-                      <td className="px-6 py-4 text-right text-[12px] text-exit tabular-nums">
-                        <CurrencyValue isPrivate={isPrivate} value={f.tax} />
-                      </td>
-                      <td className="px-6 py-4 text-right text-[12px] text-secondary tabular-nums">
-                        {f.days} <span className="text-[10px] text-muted uppercase">days</span>
-                      </td>
-                    </tr>
-                  ))}
-                  {stcgFunds.length === 0 && (
-                    <tr>
-                      <td colSpan={3} className="px-6 py-8 text-center text-muted text-xs italic">
-                        No short-term gains detected in current holdings.
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
+      {stcgFunds.length > 0 && tlhOps.length > 0 ? (
+        // Both have content: side by side
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+          {stcgSection}
+          {tlhSection}
+        </div>
+      ) : (
+        // Only one has content: full width
+        <div className="space-y-8">
+          {stcgFunds.length > 0 && stcgSection}
+          {tlhOps.length > 0 && tlhSection}
+          {stcgFunds.length === 0 && tlhOps.length === 0 && (
+            <div className="bg-surface border border-white/5 rounded-xl p-8 text-center space-y-3">
+              <Receipt size={32} className="text-muted mx-auto opacity-20" />
+              <p className="text-muted text-sm">No tax actions needed today.</p>
+              <p className="text-muted text-[11px] uppercase tracking-widest leading-relaxed">
+                System monitors FIFO lots for -5% drops and STCG exposure daily.
+              </p>
             </div>
-          </div>
-        </section>
-
-        {/* SECTION C: TLH OPPORTUNITIES */}
-        <section className="space-y-4">
-          <h3 className="text-muted text-[10px] font-medium uppercase tracking-widest flex items-center gap-2">
-            <TrendingDown size={12} className="text-buy" /> Harvesting Ops
-          </h3>
-          <div className="space-y-3">
-            {tlhOps.length > 0 ? (
-              tlhOps.map((op: any) => (
-                <div key={op.schemeName} className="bg-surface border border-white/5 rounded-xl p-5 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-[10px] text-muted uppercase tracking-widest mb-1">Sell</p>
-                      <p className="text-sm text-primary truncate max-w-[200px]">{op.schemeName}</p>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-[10px] text-muted uppercase tracking-widest mb-1">Buy</p>
-                      <p className="text-sm text-buy truncate max-w-[200px]">{op.proxySchemeRecommendation}</p>
-                    </div>
-                  </div>
-                  <div className="flex justify-between pt-3 border-t border-white/5">
-                    <div>
-                      <p className="text-[10px] text-muted uppercase">Loss to harvest</p>
-                      <CurrencyValue isPrivate={isPrivate} value={Math.abs(op.estimatedCapitalLoss)} className="text-exit text-sm font-medium tabular-nums" />
-                    </div>
-                    <div className="text-right">
-                      <p className="text-[10px] text-muted uppercase">Est. tax saving</p>
-                      <CurrencyValue isPrivate={isPrivate} value={Math.abs(op.estimatedCapitalLoss) * 0.20} className="text-buy text-sm font-medium tabular-nums" />
-                    </div>
-                  </div>
-                </div>
-              ))
-            ) : (
-              <div className="bg-surface border border-white/5 rounded-xl p-6 min-h-[200px] flex flex-col justify-center">
-                <div className="text-center space-y-3">
-                  <Receipt size={32} className="text-muted mx-auto opacity-20" />
-                  <p className="text-muted text-xs font-medium">No tax-loss harvesting opportunities identified today.</p>
-                  <p className="text-[10px] text-muted uppercase tracking-widest leading-relaxed max-w-[240px] mx-auto">
-                    The system monitors your FIFO lots for -5% drops exceeding ₹1,000 in absolute loss.
-                  </p>
-                </div>
-              </div>
-            )}
-          </div>
-        </section>
-      </div>
+          )}
+        </div>
+      )}
 
       {/* SECTION D: YEAR SUMMARY */}
       <section className="bg-white/[0.02] border border-white/5 p-8 rounded-xl">

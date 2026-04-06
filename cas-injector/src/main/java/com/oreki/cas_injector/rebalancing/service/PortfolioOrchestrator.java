@@ -71,7 +71,7 @@ public class PortfolioOrchestrator {
                     : "Deploy as per strategy.";
 
                 return new SipLineItem(t.schemeName(), t.isin(), amfiCode,
-                    amount, t.sipPct(), t.status(), flag, note);
+                    amount, t.sipPct(), t.targetPortfolioPct(), t.status(), flag, note);
             })
             .sorted(Comparator.comparingDouble(SipLineItem::amount).reversed())
             .collect(Collectors.toList());

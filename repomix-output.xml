@@ -110,6 +110,7 @@ cas-injector/
                   DashboardController.java
                 dto/
                   DashboardSummaryDTO.java
+                  UnifiedTacticalPayload.java
                 service/
                   DashboardService.java
                   PortfolioFullService.java
@@ -117,6 +118,7 @@ cas-injector/
                 controller/
                   RebalanceController.java
                 dto/
+                  SipLineItem.java
                   StrategyTarget.java
                   TacticalSignal.java
                 service/
@@ -237,6 +239,7 @@ portfolio-dashboard/
   tsconfig.node.json
   vite.config.ts
 .gitignore
+allocation_plan.odt
 CODEBASE_INDEX.md
 docker-compose.yml
 gemini-conviction-refactor-prompt.md
@@ -696,43 +699,6 @@ public class RestConfig {
         factory.setReadTimeout(10000);    // 10 seconds
         
         return new RestTemplate(factory);
-    }
-}
-</file>
-
-<file path="cas-injector/src/main/java/com/oreki/cas_injector/core/controller/InjectionController.java">
-package com.oreki.cas_injector.core.controller;
-
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
-
-import com.oreki.cas_injector.core.service.CasProcessingService;
-
-import lombok.extern.slf4j.Slf4j;
-import tools.jackson.databind.JsonNode;
-
-@RestController
-@RequestMapping("/cas")
-@Slf4j
-public class InjectionController {
-
-    @Autowired 
-    private CasProcessingService casProcessingService;
-
-    @PostMapping("/inject")
-    public ResponseEntity<String> injectCasData(@RequestBody JsonNode root) {
-        try {
-            log.info("Received CAS JSON for injection. Processing...");
-            casProcessingService.processJson(root);
-            return ResponseEntity.ok("CAS Data injected successfully. Tax lots and Capital Gains calculated.");
-        } catch (Exception e) {
-            log.error("Error during CAS injection: ", e);
-            return ResponseEntity.internalServerError().body("Injection failed: " + e.getMessage());
-        }
     }
 }
 </file>
@@ -1376,162 +1342,6 @@ public class SystemicRiskMonitorService {
 }
 </file>
 
-<file path="cas-injector/src/main/java/com/oreki/cas_injector/core/utils/CommonUtils.java">
-package com.oreki.cas_injector.core.utils;
-
-import java.math.BigDecimal;
-import java.math.RoundingMode;
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.time.LocalDate;
-import java.time.temporal.ChronoUnit;
-import java.util.List;
-import java.util.function.BiFunction;
-import java.util.function.Function;
-
-import com.oreki.cas_injector.transactions.dto.TransactionDTO;
-
-import tools.jackson.databind.JsonNode;
-
-public class CommonUtils {
-
-// Sanitizes strings for database consistency
-    public static final Function<String, String> SANITIZE = s -> 
-        s == null ? "" : s.trim().toUpperCase();
-
-    public static final Function<BigDecimal, BigDecimal> SCALE_MONEY = b -> 
-        (b == null ? BigDecimal.ZERO : b)
-            .setScale(2, RoundingMode.HALF_UP);
-
-    // Safely converts JSON nodes to BigDecimal
-    public static final Function<JsonNode, BigDecimal> TO_DECIMAL = node -> 
-        (node == null || node.isMissingNode() || node.isNull()) 
-            ? BigDecimal.ZERO 
-            : new BigDecimal(node.asText());
-
-    // Calculates NAV/Price per unit
-    public static final BiFunction<BigDecimal, BigDecimal, BigDecimal> CALC_NAV = (amt, units) -> 
-        (units == null || units.compareTo(BigDecimal.ZERO) == 0) 
-            ? BigDecimal.ZERO 
-            : amt.abs().divide(units.abs(), 4, RoundingMode.HALF_UP);
-
-    // Determines Indian Income Tax category
-    public static final BiFunction<LocalDate, LocalDate, String> GET_TAX_CAT = (buy, sell) -> 
-        ChronoUnit.DAYS.between(buy, sell) > 365 ? "LTCG" : "STCG";
-
-    // Generates the Idempotency Hash
-    public static final BiFunction<JsonNode, Long, String> GENERATE_HASH = (node, schemeId) -> {
-        try {
-            String raw = node.path("date").asText() + 
-                         node.path("description").asText().trim().toUpperCase() + 
-                         node.path("amount").asText() + 
-                         node.path("units").asText() + 
-                         schemeId;
-
-            MessageDigest md = MessageDigest.getInstance("SHA-256");
-            byte[] hash = md.digest(raw.getBytes(StandardCharsets.UTF_8));
-            StringBuilder sb = new StringBuilder();
-            for (byte b : hash) sb.append(String.format("%02x", b));
-            return sb.toString();
-        } catch (Exception e) {
-            throw new RuntimeException("Hash generation failed", e);
-        }
-    };
-
-
-    private static double calculateNpv(double rate, List<TransactionDTO> txs) {
-        double npv = 0.0;
-        for (TransactionDTO tx : txs) {
-            // Convert BigDecimal to double for the math
-            double amount = tx.getAmount().doubleValue(); 
-            long days = ChronoUnit.DAYS.between(txs.get(0).getDate(), tx.getDate());
-            npv += amount / Math.pow(1.0 + rate, days / 365.25);
-        }
-        return npv;
-    }
-
-public static final Function<List<TransactionDTO>, BigDecimal> SOLVE_XIRR = txs -> {
-        if (txs == null || txs.size() < 2) return BigDecimal.ZERO;
-
-        double rate = 0.1; // Initial guess 10%
-        
-        for (int i = 0; i < 30; i++) { // Newton-Raphson iterations
-            double epsilon = 0.0001;
-            double npv = calculateNpv(rate, txs);
-            
-            // Numerical derivative (Newton's method)
-            double derivative = (calculateNpv(rate + epsilon, txs) - npv) / epsilon;
-            
-            // Prevent division by zero which causes NaN/Infinity
-            if (Math.abs(derivative) < 1e-7) {
-                break; 
-            }
-            
-            rate = rate - (npv / derivative);
-        }
-        
-        // SAFETY CHECK: Ensure the result is an actual number before converting to BigDecimal
-        if (!Double.isFinite(rate)) {
-            // log.warn("XIRR calculation failed to converge. Defaulting to 0.");
-            return BigDecimal.ZERO; 
-        }
-
-        return BigDecimal.valueOf(rate * 100);
-    };
-    
-    public static final Function<BigDecimal, FundStatus> GET_STATUS = units -> 
-    (units != null && units.compareTo(new BigDecimal("0.001")) > 0) 
-        ? FundStatus.ACTIVE 
-        : FundStatus.REDEEMED;
-
-    private static long getDays(LocalDate buy, LocalDate sell) {
-        return ChronoUnit.DAYS.between(buy, sell);
-    }
-
-    /**
-     * Tri-Function to determine the Tax Category based on:
-     * 1. Purchase Date (Important for Debt/Gold post-April 2023)
-     * 2. Sale Date
-     * 3. Fund Category (Equity, Arbitrage, Gold, Debt)
-     */
-    public static final TriFunction<LocalDate, LocalDate, String, String> DETERMINE_TAX_CATEGORY = (buyDate, sellDate, category) -> {
-        if (buyDate == null || sellDate == null || category == null) return "UNKNOWN";
-
-        String cat = category.toUpperCase();
-        long days = getDays(buyDate, sellDate);
-        LocalDate cutoff2023 = LocalDate.of(2023, 4, 1);
-
-        // --- RULE 1: EQUITY & ARBITRAGE ---
-        // Arbitrage funds are taxed as Equity (65%+ exposure)
-        if (cat.contains("EQUITY") || cat.contains("ARBITRAGE")) {
-            return (days > 365) ? "EQUITY_LTCG" : "EQUITY_STCG";
-        }
-
-        // --- RULE 2: GOLD FoF & DEBT FUNDS ---
-        if (cat.contains("GOLD") || cat.contains("DEBT") || cat.contains("BOND")) {
-            
-            // New 2023 Rule: If bought on/after April 1, 2023, 
-            // no LTCG benefit exists (taxed at slab rate).
-            if (!buyDate.isBefore(cutoff2023)) {
-                return "SLAB_RATE_TAX";
-            }
-
-            // Old Rule: Units bought before April 1, 2023 
-            // get LTCG benefit after 3 years (1095 days).
-            return (days > 1095) ? "NON_EQUITY_LTCG_OLD" : "NON_EQUITY_STCG_OLD";
-        }
-
-        // --- RULE 3: OTHER HYBRIDS (Balanced/Conservative) ---
-        // For funds with 35% to 65% Equity (post-2024 rules)
-        if (cat.contains("BALANCED") || cat.contains("HYBRID")) {
-             return (days > 730) ? "HYBRID_LTCG" : "SLAB_RATE_TAX";
-        }
-
-        return "OTHER_STCG";
-    };
-}
-</file>
-
 <file path="cas-injector/src/main/java/com/oreki/cas_injector/core/utils/FundStatus.java">
 package com.oreki.cas_injector.core.utils;
 
@@ -1557,35 +1367,29 @@ public interface TriFunction<T, U, V, R> {
 }
 </file>
 
-<file path="cas-injector/src/main/java/com/oreki/cas_injector/dashboard/dto/DashboardSummaryDTO.java">
+<file path="cas-injector/src/main/java/com/oreki/cas_injector/dashboard/dto/UnifiedTacticalPayload.java">
 package com.oreki.cas_injector.dashboard.dto;
 
-import lombok.Builder;
-import lombok.Data;
-import java.math.BigDecimal;
 import java.util.List;
 
-import com.oreki.cas_injector.core.dto.SchemePerformanceDTO;
+import com.oreki.cas_injector.rebalancing.dto.SipLineItem;
+import com.oreki.cas_injector.rebalancing.dto.TacticalSignal;
+
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
+import lombok.NoArgsConstructor;
 
 @Data
 @Builder
-public class DashboardSummaryDTO {
-    private String investorName;
-    private int totalFolios;
-    private int totalSchemes;
-    private long totalTransactions;
-    private BigDecimal totalInvestedAmount; // Sum of BUYs
-    private BigDecimal totalRealizedGain;   // Sum of Audit entries
-    private long openTaxLots;               // Count of OPEN lots
-    private BigDecimal totalLTCG; // Long Term Capital Gain
-    private BigDecimal totalSTCG; // Short Term Capital Gain
-    private BigDecimal currentInvestedAmount; // Sum of BUYs
-    private BigDecimal currentValueAmount; // Sum of BUYs
-    private BigDecimal totalUnrealizedGain; // Sum of BUYs
-    private String overallReturn;
-    private String overallXirr;
-    private List<SchemePerformanceDTO> schemeBreakdown;
-
+@NoArgsConstructor
+@AllArgsConstructor
+public class UnifiedTacticalPayload {
+    private List<SipLineItem> sipPlan;
+    private List<TacticalSignal> opportunisticSignals;
+    private List<TacticalSignal> exitQueue;
+    private double totalExitValue;
+    private int droppedFundsCount;
 }
 </file>
 
@@ -1642,6 +1446,21 @@ public class RebalanceController {
             return taxLossHarvestingService.scanForOpportunities(pan);
         }
 }
+</file>
+
+<file path="cas-injector/src/main/java/com/oreki/cas_injector/rebalancing/dto/SipLineItem.java">
+package com.oreki.cas_injector.rebalancing.dto;
+
+public record SipLineItem(
+    String schemeName,
+    String isin,
+    String amfiCode,
+    double amount,
+    double sipPct,
+    String mode,           // core / strategy / satellite / rebalancer
+    String deployFlag,     // DEPLOY / CAUTION_EXPENSIVE
+    String note
+) {}
 </file>
 
 <file path="cas-injector/src/main/java/com/oreki/cas_injector/rebalancing/dto/StrategyTarget.java">
@@ -2108,28 +1927,6 @@ public class Transaction {
     @OneToMany(mappedBy = "parent", cascade = CascadeType.ALL)
     @ToString.Exclude // Prevent circular reference in Lombok toString
     private List<Transaction> children;
-}
-</file>
-
-<file path="cas-injector/src/main/java/com/oreki/cas_injector/transactions/repository/TaxLotRepository.java">
-package com.oreki.cas_injector.transactions.repository;
-
-import java.util.List;
-import java.util.Optional;
-
-import org.springframework.data.jpa.repository.JpaRepository;
-
-import com.oreki.cas_injector.core.model.Scheme;
-import com.oreki.cas_injector.transactions.model.TaxLot;
-public interface TaxLotRepository extends JpaRepository<TaxLot, Long> {
-    // This MUST return Optional<TaxLot>
-    Optional<TaxLot> findFirstBySchemeAndStatusOrderByBuyDateDesc(Scheme scheme, String status);
-    
-    List<TaxLot> findBySchemeAndStatusOrderByBuyDateAsc(Scheme scheme, String status);
-
-    long countByStatus(String status);
-
-    List<TaxLot> findByStatusAndSchemeFolioInvestorPan(String status,String investorPan);
 }
 </file>
 
@@ -5895,6 +5692,52 @@ public class WebConfig implements WebMvcConfigurer {
 }
 </file>
 
+<file path="cas-injector/src/main/java/com/oreki/cas_injector/core/controller/InjectionController.java">
+package com.oreki.cas_injector.core.controller;
+
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
+
+import com.oreki.cas_injector.core.service.CasProcessingService;
+import com.oreki.cas_injector.dashboard.dto.DashboardSummaryDTO;
+import com.oreki.cas_injector.dashboard.service.PortfolioFullService;
+
+import tools.jackson.databind.JsonNode;
+
+@RestController
+@RequestMapping("/api")
+public class InjectionController {
+
+    @Autowired
+    private CasProcessingService casProcessingService;
+
+    @Autowired
+    private PortfolioFullService fullService;
+
+    @PostMapping("/inject")
+    public ResponseEntity<String> inject(@RequestBody JsonNode root) {
+        casProcessingService.processJson(root);
+        return ResponseEntity.ok("Successfully processed portfolio data");
+    }
+
+    @GetMapping("/dashboard/full/{pan}")
+    public DashboardSummaryDTO getFullDashboard(
+        @PathVariable String pan,
+        @RequestParam(defaultValue = "75000") double sip,
+        @RequestParam(defaultValue = "0") double lumpsum
+    ) {
+        return fullService.getFullPortfolio(pan, sip, lumpsum);
+    }
+}
+</file>
+
 <file path="cas-injector/src/main/java/com/oreki/cas_injector/core/dto/SchemeDetailsDTO.java">
 package com.oreki.cas_injector.core.dto;
 
@@ -5959,6 +5802,171 @@ public class MetricsSchedulerService {
             logger.error("Failed to trigger {}: {}", taskName, e.getMessage());
         }
     }
+}
+</file>
+
+<file path="cas-injector/src/main/java/com/oreki/cas_injector/core/utils/CommonUtils.java">
+package com.oreki.cas_injector.core.utils;
+
+import java.math.BigDecimal;
+import java.math.RoundingMode;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.time.LocalDate;
+import java.time.temporal.ChronoUnit;
+import java.util.List;
+import java.util.function.BiFunction;
+import java.util.function.Function;
+
+import com.oreki.cas_injector.transactions.dto.TransactionDTO;
+
+import tools.jackson.databind.JsonNode;
+
+public class CommonUtils {
+
+// Sanitizes strings for database consistency
+    public static final Function<String, String> SANITIZE = s -> 
+        s == null ? "" : s.trim().toUpperCase();
+
+    public static final Function<BigDecimal, BigDecimal> SCALE_MONEY = b -> 
+        (b == null ? BigDecimal.ZERO : b)
+            .setScale(2, RoundingMode.HALF_UP);
+
+    // Safely converts JSON nodes to BigDecimal
+    public static final Function<JsonNode, BigDecimal> TO_DECIMAL = node -> 
+        (node == null || node.isMissingNode() || node.isNull()) 
+            ? BigDecimal.ZERO 
+            : new BigDecimal(node.asText());
+
+    // Calculates NAV/Price per unit
+    public static final BiFunction<BigDecimal, BigDecimal, BigDecimal> CALC_NAV = (amt, units) -> 
+        (units == null || units.compareTo(BigDecimal.ZERO) == 0) 
+            ? BigDecimal.ZERO 
+            : amt.abs().divide(units.abs(), 4, RoundingMode.HALF_UP);
+
+    // Determines Indian Income Tax category
+    public static final BiFunction<LocalDate, LocalDate, String> GET_TAX_CAT = (buy, sell) -> 
+        ChronoUnit.DAYS.between(buy, sell) > 365 ? "LTCG" : "STCG";
+
+    // Generates the Idempotency Hash
+    public static final BiFunction<JsonNode, Long, String> GENERATE_HASH = (node, schemeId) -> {
+        try {
+            String raw = node.path("date").asText() + 
+                         node.path("description").asText().trim().toUpperCase() + 
+                         node.path("amount").asText() + 
+                         node.path("units").asText() + 
+                         schemeId;
+
+            MessageDigest md = MessageDigest.getInstance("SHA-256");
+            byte[] hash = md.digest(raw.getBytes(StandardCharsets.UTF_8));
+            StringBuilder sb = new StringBuilder();
+            for (byte b : hash) sb.append(String.format("%02x", b));
+            return sb.toString();
+        } catch (Exception e) {
+            throw new RuntimeException("Hash generation failed", e);
+        }
+    };
+
+
+    private static double calculateNpv(double rate, List<TransactionDTO> txs) {
+        double npv = 0.0;
+        for (TransactionDTO tx : txs) {
+            // Convert BigDecimal to double for the math
+            double amount = tx.getAmount().doubleValue(); 
+            long days = ChronoUnit.DAYS.between(txs.get(0).getDate(), tx.getDate());
+            npv += amount / Math.pow(1.0 + rate, days / 365.25);
+        }
+        return npv;
+    }
+
+public static final Function<List<TransactionDTO>, BigDecimal> SOLVE_XIRR = txs -> {
+        if (txs == null || txs.size() < 2) return BigDecimal.ZERO;
+
+        double rate = 0.1; // Initial guess 10%
+        
+        for (int i = 0; i < 30; i++) { // Newton-Raphson iterations
+            double epsilon = 0.0001;
+            double npv = calculateNpv(rate, txs);
+            
+            // Numerical derivative (Newton's method)
+            double derivative = (calculateNpv(rate + epsilon, txs) - npv) / epsilon;
+            
+            // Prevent division by zero which causes NaN/Infinity
+            if (Math.abs(derivative) < 1e-7) {
+                break; 
+            }
+            
+            rate = rate - (npv / derivative);
+        }
+        
+        // SAFETY CHECK: Ensure the result is an actual number before converting to BigDecimal
+        if (!Double.isFinite(rate)) {
+            // log.warn("XIRR calculation failed to converge. Defaulting to 0.");
+            return BigDecimal.ZERO; 
+        }
+
+        return BigDecimal.valueOf(rate * 100);
+    };
+    
+    public static final Function<BigDecimal, FundStatus> GET_STATUS = units -> 
+    (units != null && units.compareTo(new BigDecimal("0.001")) > 0) 
+        ? FundStatus.ACTIVE 
+        : FundStatus.REDEEMED;
+
+    public static LocalDate getCurrentFyStart() {
+        LocalDate today = LocalDate.now();
+        int year = today.getYear();
+        if (today.getMonthValue() < 4) {
+            year--;
+        }
+        return LocalDate.of(year, 4, 1);
+    }
+
+    private static long getDays(LocalDate buy, LocalDate sell) {
+        return ChronoUnit.DAYS.between(buy, sell);
+    }
+
+    /**
+     * Tri-Function to determine the Tax Category based on:
+     * 1. Purchase Date (Important for Debt/Gold post-April 2023)
+     * 2. Sale Date
+     * 3. Fund Category (Equity, Arbitrage, Gold, Debt)
+     */
+    public static final TriFunction<LocalDate, LocalDate, String, String> DETERMINE_TAX_CATEGORY = (buyDate, sellDate, category) -> {
+        if (buyDate == null || sellDate == null || category == null) return "UNKNOWN";
+
+        String cat = category.toUpperCase();
+        long days = getDays(buyDate, sellDate);
+        LocalDate cutoff2023 = LocalDate.of(2023, 4, 1);
+
+        // --- RULE 1: EQUITY & ARBITRAGE ---
+        // Arbitrage funds are taxed as Equity (65%+ exposure)
+        if (cat.contains("EQUITY") || cat.contains("ARBITRAGE")) {
+            return (days > 365) ? "EQUITY_LTCG" : "EQUITY_STCG";
+        }
+
+        // --- RULE 2: GOLD FoF & DEBT FUNDS ---
+        if (cat.contains("GOLD") || cat.contains("DEBT") || cat.contains("BOND")) {
+            
+            // New 2023 Rule: If bought on/after April 1, 2023, 
+            // no LTCG benefit exists (taxed at slab rate).
+            if (!buyDate.isBefore(cutoff2023)) {
+                return "SLAB_RATE_TAX";
+            }
+
+            // Old Rule: Units bought before April 1, 2023 
+            // get LTCG benefit after 3 years (1095 days).
+            return (days > 1095) ? "NON_EQUITY_LTCG_OLD" : "NON_EQUITY_STCG_OLD";
+        }
+
+        // --- RULE 3: OTHER HYBRIDS (Balanced/Conservative) ---
+        // For funds with 35% to 65% Equity (post-2024 rules)
+        if (cat.contains("BALANCED") || cat.contains("HYBRID")) {
+             return (days > 730) ? "HYBRID_LTCG" : "SLAB_RATE_TAX";
+        }
+
+        return "OTHER_STCG";
+    };
 }
 </file>
 
@@ -6093,339 +6101,35 @@ public class GoogleSheetService {
 }
 </file>
 
-<file path="cas-injector/src/main/java/com/oreki/cas_injector/dashboard/controller/DashboardController.java">
-package com.oreki.cas_injector.dashboard.controller;
+<file path="cas-injector/src/main/java/com/oreki/cas_injector/dashboard/dto/DashboardSummaryDTO.java">
+package com.oreki.cas_injector.dashboard.dto;
 
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.CrossOrigin;
-import org.springframework.web.bind.annotation.DeleteMapping;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PathVariable;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
-
-import com.oreki.cas_injector.core.repository.FolioRepository;
-import com.oreki.cas_injector.core.repository.InvestorRepository;
-import com.oreki.cas_injector.core.repository.SchemeRepository;
-import com.oreki.cas_injector.dashboard.dto.DashboardSummaryDTO;
-import com.oreki.cas_injector.dashboard.service.DashboardService;
-import com.oreki.cas_injector.dashboard.service.PortfolioFullService;
-import com.oreki.cas_injector.transactions.repository.CapitalGainAuditRepository;
-import com.oreki.cas_injector.transactions.repository.TaxLotRepository;
-import com.oreki.cas_injector.transactions.repository.TransactionRepository;
-
-import lombok.extern.slf4j.Slf4j;
-
-@RestController
-@RequestMapping("/dashboard")
-@Slf4j
-@CrossOrigin(origins = "*")
-public class DashboardController {
-
-    @Autowired private DashboardService dashboardService;
-    @Autowired private PortfolioFullService fullService;
-    
-    // Repositories for the "Wipe" operation
-    @Autowired private TransactionRepository txnRepo;
-    @Autowired private TaxLotRepository taxLotRepo;
-    @Autowired private CapitalGainAuditRepository auditRepo;
-    @Autowired private SchemeRepository schemeRepo;
-    @Autowired private FolioRepository folioRepo;
-    @Autowired private InvestorRepository investorRepo;
-
-    @GetMapping("/summary/{pan}")
-    public ResponseEntity<DashboardSummaryDTO> getSummary(@PathVariable String pan) {
-        return ResponseEntity.ok(dashboardService.getInvestorSummary(pan));
-    }
-
-    @GetMapping("/full/{pan}")
-    public ResponseEntity<DashboardSummaryDTO> getFullPortfolio(@PathVariable String pan) {
-        return ResponseEntity.ok(fullService.getFullPortfolio(pan));
-    }
-
-    @DeleteMapping("/reset")
-    public ResponseEntity<String> resetAllData() {
-        log.warn("Wiping all financial data for a fresh start...");
-        
-        // Order matters due to Foreign Key constraints
-        auditRepo.deleteAll();
-        taxLotRepo.deleteAll();
-        txnRepo.deleteAll();
-        schemeRepo.deleteAll();
-        folioRepo.deleteAll();
-        investorRepo.deleteAll();
-        
-        return ResponseEntity.ok("Database cleared. Ready for fresh injection.");
-    }
-}
-</file>
-
-<file path="cas-injector/src/main/java/com/oreki/cas_injector/dashboard/service/DashboardService.java">
-package com.oreki.cas_injector.dashboard.service;
-
+import lombok.Builder;
+import lombok.Data;
 import java.math.BigDecimal;
-import java.math.RoundingMode;
-import java.time.LocalDate;
-import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.List;
-import java.util.Optional;
-import java.util.stream.Collectors;
 
-import org.springframework.stereotype.Service;
-
-import com.oreki.cas_injector.backfill.repository.HistoricalNavRepository;
-import com.oreki.cas_injector.backfill.service.NavService;
-import com.oreki.cas_injector.core.dto.SchemeDetailsDTO;
 import com.oreki.cas_injector.core.dto.SchemePerformanceDTO;
-import com.oreki.cas_injector.core.model.Investor;
-import com.oreki.cas_injector.core.repository.InvestorRepository;
-import com.oreki.cas_injector.core.utils.CommonUtils;
-import com.oreki.cas_injector.core.utils.FundStatus;
-import com.oreki.cas_injector.dashboard.dto.DashboardSummaryDTO;
-import com.oreki.cas_injector.transactions.dto.TransactionDTO;
-import com.oreki.cas_injector.transactions.model.CapitalGainAudit;
-import com.oreki.cas_injector.transactions.model.TaxLot;
-import com.oreki.cas_injector.transactions.model.Transaction;
-import com.oreki.cas_injector.transactions.repository.CapitalGainAuditRepository;
-import com.oreki.cas_injector.transactions.repository.TaxLotRepository;
-import com.oreki.cas_injector.transactions.repository.TransactionRepository;
 
-import lombok.RequiredArgsConstructor;
-
-
-
-@Service
-@RequiredArgsConstructor
-public class DashboardService {
-
-    private final InvestorRepository investorRepo;
-    private final TaxLotRepository taxLotRepo;
-    private final CapitalGainAuditRepository auditRepo;
-    private final TransactionRepository txnRepo;
-    private final NavService navService;
-    private final HistoricalNavRepository historicalNavRepo;
-
-    public DashboardSummaryDTO getInvestorSummary(String pan) {
-        Investor investor = investorRepo.findById(pan)
-            .orElseThrow(() -> new RuntimeException("Investor not found"));
-
-        List<TransactionDTO> totalCashFlow=new ArrayList<>();
-        // Pre-fetch all audits for this investor once to avoid repetitive DB calls
-        List<CapitalGainAudit> allInvestorAudits = auditRepo.findAllBySellTransactionSchemeFolioInvestorPan(pan);
-
-        // 1. Calculate the Breakdown per Scheme
-        List<SchemePerformanceDTO> breakdown = investor.getFolios().stream()
-            .flatMap(f -> f.getSchemes().stream())
-            .map(scheme -> {
-                List<TaxLot> allLots = scheme.getTaxLots();
-
-                // A. TOTAL INVESTED (Historical Gross)
-                BigDecimal totalInvested = scheme.getTransactions().stream()
-                    .filter(t -> "BUY".equalsIgnoreCase(t.getTransactionType()) || 
-                    "STAMP_DUTY".equalsIgnoreCase(t.getTransactionType()))
-                    .map(Transaction::getAmount)
-                    .map(CommonUtils.SCALE_MONEY)
-                    .reduce(BigDecimal.ZERO, BigDecimal::add);
-
-                // B. SOLD AMOUNT (Cost basis of exited units)
-                BigDecimal soldAmountCost = allInvestorAudits.stream()
-                    .filter(a -> a.getSellTransaction().getScheme().getId().equals(scheme.getId()))
-                    .map(audit -> audit.getUnitsMatched().multiply(audit.getTaxLot().getCostBasisPerUnit()))
-                    .map(CommonUtils.SCALE_MONEY)
-                    .reduce(BigDecimal.ZERO, BigDecimal::add);
-
-                // C. CURRENT INVESTED (Net Principal currently at risk)
-                BigDecimal currentInvested = allLots.stream()
-                    .filter(lot -> "OPEN".equalsIgnoreCase(lot.getStatus()))
-                    .map(lot -> lot.getRemainingUnits().multiply(lot.getCostBasisPerUnit()))
-                    .map(CommonUtils.SCALE_MONEY)
-                    .reduce(BigDecimal.ZERO, BigDecimal::add);
-
-                // D. REALIZED GAIN (Profit/Loss booked)
-                BigDecimal schemeGain = allInvestorAudits.stream()
-                    .filter(a -> a.getSellTransaction().getScheme().getId().equals(scheme.getId()))
-                    .map(CapitalGainAudit::getRealizedGain)
-                    .map(CommonUtils.SCALE_MONEY)
-                    .reduce(BigDecimal.ZERO, BigDecimal::add);
-
-                // E. TRANSACTION COUNT (Excluding Stamp Duty)
-                long cleanTxCount = scheme.getTransactions().stream()
-                    .filter(t -> "BUY".equalsIgnoreCase(t.getTransactionType()) || 
-                    "SELL".equalsIgnoreCase(t.getTransactionType())).count();
-
-                // F. CURRENT VALUE (Placeholder for now)
-                SchemeDetailsDTO schemeDetails = navService.getLatestSchemeDetails(scheme.getAmfiCode());
-
-                // 2. Extract the NAV for your valuation math
-                BigDecimal currentNav = schemeDetails.getNav();
-
-                // 3. Extract the Category to determine your Rebalancing Bucket
-                String amfiCategory = schemeDetails.getCategory().toUpperCase();
-
-                // 4. Enhanced Bucket Logic for 2026
-                String bucket;
-                if (amfiCategory.contains("ARBITRAGE")) {
-                    // Rationale: Taxed as Equity (12.5% LTCG after 1yr). 
-                    // Best "Safe" place for rebalancing dry powder.
-                    bucket = "SAFE_REBALANCER_EQUITY_TAX"; 
-                } 
-                else if (amfiCategory.contains("GOLD") || schemeDetails.getSchemeName().toUpperCase().contains("GOLD")) {
-                    bucket = "GOLD_HEDGE_24M";
-                }
-                else if (amfiCategory.contains("EQUITY") || amfiCategory.contains("INDEX") || amfiCategory.contains("FLEXI") || amfiCategory.contains("GROWTH")) {
-                    // Rationale: Standard 12-month LTCG threshold.
-                    bucket = "AGGRESSIVE_GROWTH";
-                } 
-                else if (amfiCategory.contains("TERM") || amfiCategory.contains("LIQUID") || amfiCategory.contains("DEBT")) {
-                    // Rationale: Post-April 2023 Debt is slab-taxed forever. 
-                    // Only use for ultra-short term (under 3 months).
-                    bucket = "DEBT_SLAB_TAXED";
-                } 
-                else {
-                    bucket = "OTHERS_CHECK_ISIN";
-                }
-                    
-                // Calculate total units currently held
-                BigDecimal unitsHeld = allLots.stream()
-                    .filter(lot -> "OPEN".equalsIgnoreCase(lot.getStatus()))
-                    .map(TaxLot::getRemainingUnits)
-                    .reduce(BigDecimal.ZERO, BigDecimal::add);
-
-                // Current Value = Units * Latest Price
-                BigDecimal currentValue = Optional.of(unitsHeld.multiply(currentNav))
-                    .map(CommonUtils.SCALE_MONEY)
-                    .orElse(BigDecimal.ZERO);
-                // Unrealized Gain = Current Value - What you paid for these specific units
-                BigDecimal unrealizedGain =  Optional.of(currentValue.subtract(currentInvested))
-                    .map(CommonUtils.SCALE_MONEY)
-                    .orElse(BigDecimal.ZERO);
-
-           List<TransactionDTO> cashFlows = scheme.getTransactions().stream()
-                    .map(t -> {
-                        // 🚀 PRECISION UPGRADE: Try to use Historical NAV for the exact date 
-                        // to ensure cash flows are SEBI-accurate if 'amount' was approximated
-                        BigDecimal preciseAmount = historicalNavRepo.findByAmfiCodeAndNavDate(scheme.getAmfiCode(), t.getDate())
-                            .map(h -> h.getNav().multiply(t.getUnits().abs()))
-                            .orElse(t.getAmount());
-                            
-                        return new TransactionDTO(preciseAmount.negate(), t.getDate());
-                    })
-                    .collect(Collectors.toList());
-                                
-                FundStatus status = CommonUtils.GET_STATUS.apply(unitsHeld);
-
-                totalCashFlow.addAll(cashFlows);
-
-                cashFlows.sort(Comparator.comparing(TransactionDTO::getDate));
-
-
-                if (status == FundStatus.ACTIVE) {
-                    cashFlows.add(new TransactionDTO(currentValue, LocalDate.now()));
-                }
-              
-                // System.out.println("--- XIRR Debug: " + scheme.getName() + " ---");
-                // cashFlows.forEach(tx -> System.out.println(tx.getDate() + " | Amount: " + tx.getAmount()));
-                // System.out.println("------------------------------------");
-                
-                BigDecimal xirrValue = CommonUtils.SOLVE_XIRR.apply(cashFlows);
-                String displayXirr = CommonUtils.SCALE_MONEY.apply(xirrValue).toString() + "%";
-
-
-                return SchemePerformanceDTO.builder()
-                    .schemeName(scheme.getName())
-                    .isin(scheme.getIsin())
-                    .amfiCode(scheme.getAmfiCode())
-                    .totalInvested(totalInvested)
-                    .soldAmountCost(soldAmountCost)
-                    .currentInvested(currentInvested)
-                    .currentValue(currentValue)
-                    .realizedGain(schemeGain)
-                    .unrealizedGain(unrealizedGain)
-                    .transactionCount(cleanTxCount)
-                    .xirr(displayXirr)
-                    .status(status)
-                    .category(amfiCategory)
-                    .bucket(bucket)
-                    .benchmarkIndex(scheme.getBenchmarkIndex())
-                    .build();
-            })
-            .collect(Collectors.toList());
-
-        // 2. Aggregate Totals for the Dashboard
-        BigDecimal aggregateTotalInvested = breakdown.stream()
-            .map(SchemePerformanceDTO::getTotalInvested)
-            .map(CommonUtils.SCALE_MONEY)
-            .reduce(BigDecimal.ZERO, BigDecimal::add);
-
-        BigDecimal aggregateCurrentInvested = breakdown.stream()
-            .map(SchemePerformanceDTO::getCurrentInvested)
-            .reduce(BigDecimal.ZERO, BigDecimal::add);
-
-        BigDecimal aggregateCurrentValue = breakdown.stream()
-            .map(SchemePerformanceDTO::getCurrentValue)
-            .map(CommonUtils.SCALE_MONEY)
-            .reduce(BigDecimal.ZERO, BigDecimal::add);
-
-        BigDecimal aggregateRealizedGain = breakdown.stream()
-            .map(SchemePerformanceDTO::getRealizedGain)
-            .map(CommonUtils.SCALE_MONEY)
-            .reduce(BigDecimal.ZERO, BigDecimal::add);
-        
-        BigDecimal aggregateUnrealizedGain = breakdown.stream()
-            .map(SchemePerformanceDTO::getUnrealizedGain)
-            .map(CommonUtils.SCALE_MONEY)
-            .reduce(BigDecimal.ZERO, BigDecimal::add);
-
-        BigDecimal totalLTCG = allInvestorAudits.stream()
-    .filter(a -> a.getTaxCategory().contains("LTCG")) // Catches EQUITY_LTCG, GOLD_LTCG, etc.
-    .map(CapitalGainAudit::getRealizedGain)
-    .reduce(BigDecimal.ZERO, BigDecimal::add);
-
-BigDecimal totalSTCG = allInvestorAudits.stream()
-    .filter(a -> a.getTaxCategory().contains("STCG") || a.getTaxCategory().contains("SLAB"))
-    .map(CapitalGainAudit::getRealizedGain)
-    .reduce(BigDecimal.ZERO, BigDecimal::add);
-
-        BigDecimal portfolioPerformance = aggregateTotalInvested.compareTo(BigDecimal.ZERO) > 0 
-         ? aggregateUnrealizedGain.divide(aggregateTotalInvested, 4, RoundingMode.HALF_UP)
-        .multiply(new BigDecimal("100")): BigDecimal.ZERO;
-
-        // Format it using your SCALE_MONZY function
-        String overallReturn = CommonUtils.SCALE_MONEY.apply(portfolioPerformance) + "%";
-
-        BigDecimal totalPortfolioValue = breakdown.stream()
-            .map(SchemePerformanceDTO::getCurrentValue) // Assuming this is your calculated market value
-            .reduce(BigDecimal.ZERO, BigDecimal::add);
-
-        totalCashFlow.add(new TransactionDTO(totalPortfolioValue, LocalDate.now()));
-
-        totalCashFlow.sort(Comparator.comparing(TransactionDTO::getDate));
-        
-        BigDecimal totalXirr = CommonUtils.SOLVE_XIRR.apply(totalCashFlow);
-
-        String overallXirr = CommonUtils.SCALE_MONEY.apply(totalXirr) + "%";
-        
-
-        return DashboardSummaryDTO.builder()
-            .investorName(investor.getName())
-            .totalFolios(investor.getFolios().size())
-            .totalSchemes(breakdown.size())
-            .totalTransactions(txnRepo.countActualTransactionsByPan(pan)) // Uses the DB query excluding stamp duty
-            .totalInvestedAmount(aggregateTotalInvested)
-            .currentInvestedAmount(aggregateCurrentInvested)
-            .currentValueAmount(aggregateCurrentValue)
-            .totalRealizedGain(aggregateRealizedGain)
-            .totalUnrealizedGain(aggregateUnrealizedGain)
-            .openTaxLots(taxLotRepo.countByStatus("OPEN"))
-            .totalSTCG(totalSTCG)
-            .totalLTCG(totalLTCG)
-            .schemeBreakdown(breakdown)
-            .overallReturn(overallReturn)
-            .overallXirr(overallXirr)
-            .build();
-    }
+@Data
+@Builder
+public class DashboardSummaryDTO {
+    private String investorName;
+    private int totalFolios;
+    private int totalSchemes;
+    private long totalTransactions;
+    private BigDecimal totalInvestedAmount; 
+    private BigDecimal totalRealizedGain;   
+    private long openTaxLots;               
+    private BigDecimal totalLTCG; 
+    private BigDecimal totalSTCG; 
+    private BigDecimal currentInvestedAmount; 
+    private BigDecimal currentValueAmount; 
+    private BigDecimal totalUnrealizedGain; 
+    private String overallReturn;
+    private String overallXirr;
+    private List<SchemePerformanceDTO> schemeBreakdown;
+    private UnifiedTacticalPayload tacticalPayload; // 🚀 ADD THIS
 }
 </file>
 
@@ -6587,6 +6291,30 @@ public interface CapitalGainAuditRepository extends JpaRepository<CapitalGainAud
     List<CapitalGainAudit> findAllBySellTransactionSchemeFolioInvestorPan(String pan);
 
     List<CapitalGainAudit> findAllBySellTransactionSchemeId(Long schemeId);
+}
+</file>
+
+<file path="cas-injector/src/main/java/com/oreki/cas_injector/transactions/repository/TaxLotRepository.java">
+package com.oreki.cas_injector.transactions.repository;
+
+import java.util.List;
+import java.util.Optional;
+
+import org.springframework.data.jpa.repository.JpaRepository;
+
+import com.oreki.cas_injector.core.model.Scheme;
+import com.oreki.cas_injector.transactions.model.TaxLot;
+public interface TaxLotRepository extends JpaRepository<TaxLot, Long> {
+    // This MUST return Optional<TaxLot>
+    Optional<TaxLot> findFirstBySchemeAndStatusOrderByBuyDateDesc(Scheme scheme, String status);
+    
+    List<TaxLot> findBySchemeAndStatusOrderByBuyDateAsc(Scheme scheme, String status);
+
+    long countByStatus(String status);
+
+    long countByStatusAndSchemeFolioInvestorPan(String status, String investorPan);
+
+    List<TaxLot> findByStatusAndSchemeFolioInvestorPan(String status,String investorPan);
 }
 </file>
 
@@ -7121,63 +6849,6 @@ export const buildPlainEnglishReason = (signal: any): string => {
 };
 </file>
 
-<file path="portfolio-dashboard/src/App.tsx">
-import { useState, useEffect } from "react";
-import { motion, AnimatePresence } from "framer-motion";
-import { fetchMasterPortfolio } from "./services/api";
-import Dashboard from "./components/layout/Dashboard";
-
-export default function App() {
-  const [portfolioData, setPortfolioData] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const investorPan = "CFXPR4533R"; 
-
-  useEffect(() => {
-    fetchMasterPortfolio(investorPan)
-      .then(data => {
-        setPortfolioData(data);
-        setLoading(false);
-      })
-      .catch((err) => {
-        console.error("System Failure:", err);
-        setError("Unable to load portfolio data. Please check connection.");
-        setLoading(false);
-      });
-  }, []);
-
-  return (
-    <AnimatePresence mode="wait">
-      {loading ? (
-        <motion.div 
-          key="loader"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          className="fixed inset-0 bg-[#09090f] flex flex-col items-center justify-center z-[200]"
-        >
-          <div className="w-10 h-10 border-2 border-indigo-500/20 border-t-indigo-500 rounded-full animate-spin mb-4" />
-          <p className="text-[10px] font-bold uppercase tracking-[0.3em] text-muted animate-pulse">Loading your portfolio...</p>
-        </motion.div>
-      ) : error ? (
-        <div className="fixed inset-0 bg-[#09090f] flex items-center justify-center text-red-400 font-medium text-xs uppercase tracking-widest px-8 text-center">
-          {error}
-        </div>
-      ) : (
-        <motion.div 
-          key="dashboard"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ duration: 0.4 }}
-        >
-          <Dashboard portfolioData={portfolioData} />
-        </motion.div>
-      )}
-    </AnimatePresence>
-  );
-}
-</file>
-
 <file path="portfolio-dashboard/src/index.css">
 @import "tailwindcss";
 @import "@fontsource-variable/geist";
@@ -7666,100 +7337,75 @@ public class SchemePerformanceDTO {
 }
 </file>
 
-<file path="cas-injector/src/main/java/com/oreki/cas_injector/dashboard/service/PortfolioFullService.java">
-package com.oreki.cas_injector.dashboard.service;
+<file path="cas-injector/src/main/java/com/oreki/cas_injector/dashboard/controller/DashboardController.java">
+package com.oreki.cas_injector.dashboard.controller;
 
-import java.time.LocalDate;
-import java.util.Collections;
-import java.util.List;
-import java.util.Map;
-import java.util.stream.Collectors;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.CrossOrigin;
+import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
 
-import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.stereotype.Service;
-
+import com.oreki.cas_injector.core.repository.FolioRepository;
+import com.oreki.cas_injector.core.repository.InvestorRepository;
+import com.oreki.cas_injector.core.repository.SchemeRepository;
 import com.oreki.cas_injector.dashboard.dto.DashboardSummaryDTO;
-import com.oreki.cas_injector.rebalancing.dto.TacticalSignal;
-import com.oreki.cas_injector.rebalancing.service.PortfolioOrchestrator;
+import com.oreki.cas_injector.dashboard.service.DashboardService;
+import com.oreki.cas_injector.dashboard.service.PortfolioFullService;
+import com.oreki.cas_injector.transactions.repository.CapitalGainAuditRepository;
+import com.oreki.cas_injector.transactions.repository.TaxLotRepository;
+import com.oreki.cas_injector.transactions.repository.TransactionRepository;
 
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
-@Service
+@RestController
+@RequestMapping("/dashboard")
 @Slf4j
-@RequiredArgsConstructor
-public class PortfolioFullService {
+@CrossOrigin(origins = "*")
+public class DashboardController {
 
-    private final DashboardService dashboardService;
-    private final PortfolioOrchestrator orchestrator;
-    private final JdbcTemplate jdbcTemplate;
+    @Autowired private DashboardService dashboardService;
+    @Autowired private PortfolioFullService fullService;
+    
+    // Repositories for the "Wipe" operation
+    @Autowired private TransactionRepository txnRepo;
+    @Autowired private TaxLotRepository taxLotRepo;
+    @Autowired private CapitalGainAuditRepository auditRepo;
+    @Autowired private SchemeRepository schemeRepo;
+    @Autowired private FolioRepository folioRepo;
+    @Autowired private InvestorRepository investorRepo;
 
-    public DashboardSummaryDTO getFullPortfolio(String pan) {
-        log.info("📊 Fetching Unified Portfolio Payload for {}", pan);
-        
-        // 1. Get Base Dashboard (Schemes, NAVs, Gains)
-        DashboardSummaryDTO summary = dashboardService.getInvestorSummary(pan);
-        
-        // 2. Get Tactical Signals (Planned vs Actual Allocations)
-        // Now amfiCode is directly available in TacticalSignal
-        Map<String, TacticalSignal> signals = orchestrator.generateDailySignals(pan, 75000, 0).stream()
-            .collect(Collectors.toMap(TacticalSignal::amfiCode, s -> s, (s1, s2) -> s1));
-            
-        // 3. Get Conviction Metrics (Sortino, Score, MDD, NAV Signals)
-        String metricsSql = "SELECT amfi_code, conviction_score, sortino_ratio, max_drawdown, " +
-                           "nav_percentile_3yr, drawdown_from_ath, return_z_score " +
-                           "FROM fund_conviction_metrics " +
-                           "WHERE calculation_date = (SELECT MAX(calculation_date) FROM fund_conviction_metrics)";
-        
-        Map<String, Map<String, Object>> metrics = jdbcTemplate.queryForList(metricsSql).stream()
-            .collect(Collectors.toMap(m -> (String) m.get("amfi_code"), m -> m, (m1, m2) -> m1));
-
-        // 4. Merge everything into SchemePerformanceDTO using amfiCode as Join Key
-        summary.getSchemeBreakdown().forEach(scheme -> {
-            String code = scheme.getAmfiCode();
-            
-            // Join Signals
-            TacticalSignal signal = signals.get(code);
-            if (signal != null) {
-                scheme.setPlannedPercentage(signal.plannedPercentage());
-                scheme.setAllocationPercentage(signal.actualPercentage());
-                scheme.setSignalType(signal.action());
-                scheme.setAction(signal.action());
-                scheme.setSignalAmount(new java.math.BigDecimal(signal.amount().replace(",", "")));
-                scheme.setJustifications(signal.justifications());
-                scheme.setLastBuyDate(signal.lastBuyDate());
-            } else {
-                scheme.setAllocationPercentage(0.0); 
-                scheme.setPlannedPercentage(0.0);
-                scheme.setSignalType("NOT_IN_STRATEGY");
-                scheme.setAction("HOLD"); 
-                scheme.setJustifications(Collections.emptyList());
-                scheme.setLastBuyDate(LocalDate.of(1970, 1, 1));
-            }
-            
-            // Join Metrics
-            Map<String, Object> fundMetrics = metrics.get(code);
-            if (fundMetrics != null) {
-                scheme.setConvictionScore(getSafeInt(fundMetrics.get("conviction_score")));
-                scheme.setSortinoRatio(getSafeDouble(fundMetrics.get("sortino_ratio")));
-                scheme.setMaxDrawdown(getSafeDouble(fundMetrics.get("max_drawdown")));
-                scheme.setNavPercentile3yr(getSafeDouble(fundMetrics.get("nav_percentile_3yr")));
-                scheme.setDrawdownFromAth(getSafeDouble(fundMetrics.get("drawdown_from_ath")));
-                scheme.setReturnZScore(getSafeDouble(fundMetrics.get("return_z_score")));
-            }
-        });
-
-        return summary;
+    @GetMapping("/summary/{pan}")
+    public ResponseEntity<DashboardSummaryDTO> getSummary(@PathVariable String pan) {
+        return ResponseEntity.ok(dashboardService.getInvestorSummary(pan));
     }
 
-    private double getSafeDouble(Object obj) {
-        if (obj == null) return 0.0;
-        return ((Number) obj).doubleValue();
+    @GetMapping("/full/{pan}")
+    public ResponseEntity<DashboardSummaryDTO> getFullPortfolio(
+        @PathVariable String pan,
+        @RequestParam(defaultValue = "75000") double sip,
+        @RequestParam(defaultValue = "0") double lumpsum
+    ) {
+        return ResponseEntity.ok(fullService.getFullPortfolio(pan, sip, lumpsum));
     }
 
-    private int getSafeInt(Object obj) {
-        if (obj == null) return 0;
-        return ((Number) obj).intValue();
+    @DeleteMapping("/reset")
+    public ResponseEntity<String> resetAllData() {
+        log.warn("Wiping all financial data for a fresh start...");
+        
+        // Order matters due to Foreign Key constraints
+        auditRepo.deleteAll();
+        taxLotRepo.deleteAll();
+        txnRepo.deleteAll();
+        schemeRepo.deleteAll();
+        folioRepo.deleteAll();
+        investorRepo.deleteAll();
+        
+        return ResponseEntity.ok("Database cleared. Ready for fresh injection.");
     }
 }
 </file>
@@ -7860,67 +7506,71 @@ if __name__ == "__main__":
     daily_fetch()
 </file>
 
-<file path="portfolio-dashboard/src/services/api.ts">
-import { normalizeCategory } from '../utils/formatters';
+<file path="portfolio-dashboard/src/App.tsx">
+import { useState, useEffect } from "react";
+import { motion, AnimatePresence } from "framer-motion";
+import { fetchMasterPortfolio } from "./services/api";
+import Dashboard from "./components/layout/Dashboard";
 
-const BASE_URL = '/api';
-const API_KEY = 'dev-secret-key'; // In production, this should be an environment variable
+export default function App() {
+  const [portfolioData, setPortfolioData] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [sipAmount, setSipAmount] = useState(75000);
+  const [lumpsum, setLumpsum] = useState(0);
+  
+  const investorPan = "CFXPR4533R"; 
 
-const authenticatedFetch = (url: string, options: RequestInit = {}) => {
-  return fetch(url, {
-    ...options,
-    headers: {
-      ...options.headers,
-      'X-API-KEY': API_KEY,
-    },
-  });
-};
+  useEffect(() => {
+    setLoading(true);
+    fetchMasterPortfolio(investorPan, sipAmount, lumpsum)
+      .then(data => {
+        setPortfolioData(data);
+        setLoading(false);
+      })
+      .catch((err) => {
+        console.error("System Failure:", err);
+        setError("Unable to load portfolio data. Please check connection.");
+        setLoading(false);
+      });
+  }, [sipAmount, lumpsum]);
 
-export const fetchMasterPortfolio = async (investorPan: string) => {
-  try {
-    const response = await authenticatedFetch(`${BASE_URL}/dashboard/full/${investorPan}`);
-    if (!response.ok) throw new Error("Portfolio synchronization failed");
-    
-    const dashboard = await response.json();
-
-    const mergedData = (dashboard.schemeBreakdown || []).map((item: any) => {
-      return {
-        ...item,
-        cleanCategory: normalizeCategory(item.category),
-        shortName: item.schemeName ? item.schemeName.substring(0, 25) + "..." : "Unknown Fund",
-        deviation: (parseFloat(item.allocationPercentage || 0) - parseFloat(item.plannedPercentage || 0)).toFixed(2)
-      };
-    }).sort((a: any, b: any) => b.convictionScore - a.convictionScore);
-
-    return { ...dashboard, schemeBreakdown: mergedData };
-  } catch (error) {
-    console.error("API Error:", error);
-    throw error;
-  }
-};
-
-
-export const fetchTransactions = async (
-  pan: string, 
-  page: number = 0, 
-  type: string = "ALL", 
-  size: number = 20
-) => {
-  const typeParam = type !== "ALL" ? `&type=${type}` : "";
-  const response = await authenticatedFetch(
-    `${BASE_URL}/transactions?pan=${pan}${typeParam}&page=${page}&size=${size}&sort=date,desc`
+  return (
+    <AnimatePresence mode="wait">
+      {loading && !portfolioData ? (
+        <motion.div 
+          key="loader"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          className="fixed inset-0 bg-[#09090f] flex flex-col items-center justify-center z-[200]"
+        >
+          <div className="w-10 h-10 border-2 border-indigo-500/20 border-t-indigo-500 rounded-full animate-spin mb-4" />
+          <p className="text-[10px] font-bold uppercase tracking-[0.3em] text-muted animate-pulse">Loading your portfolio...</p>
+        </motion.div>
+      ) : error ? (
+        <div className="fixed inset-0 bg-[#09090f] flex items-center justify-center text-red-400 font-medium text-xs uppercase tracking-widest px-8 text-center">
+          {error}
+        </div>
+      ) : (
+        <motion.div 
+          key="dashboard"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ duration: 0.4 }}
+        >
+          <Dashboard 
+            portfolioData={portfolioData} 
+            sipAmount={sipAmount} 
+            setSipAmount={setSipAmount}
+            lumpsum={lumpsum}
+            setLumpsum={setLumpsum}
+          />
+        </motion.div>
+      )}
+    </AnimatePresence>
   );
-  if (!response.ok) throw new Error("Ledger synchronization failed");
-  return response.json();
-};
-
-export const fetchTlhOpportunities = async (pan: string) => {
-  const response = await authenticatedFetch(
-    `${BASE_URL}/portfolio/${pan}/tax-loss-harvesting`
-  );
-  if (!response.ok) return [];
-  return response.json();
-};
+}
 </file>
 
 <file path="docker-compose.yml">
@@ -8002,6 +7652,267 @@ volumes:
   postgres_data:
 </file>
 
+<file path="cas-injector/src/main/java/com/oreki/cas_injector/dashboard/service/DashboardService.java">
+package com.oreki.cas_injector.dashboard.service;
+
+import java.math.BigDecimal;
+import java.math.RoundingMode;
+import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.stream.Collectors;
+
+import org.springframework.stereotype.Service;
+
+import com.oreki.cas_injector.backfill.repository.HistoricalNavRepository;
+import com.oreki.cas_injector.backfill.service.NavService;
+import com.oreki.cas_injector.core.dto.SchemeDetailsDTO;
+import com.oreki.cas_injector.core.dto.SchemePerformanceDTO;
+import com.oreki.cas_injector.core.model.Investor;
+import com.oreki.cas_injector.core.repository.InvestorRepository;
+import com.oreki.cas_injector.core.utils.CommonUtils;
+import com.oreki.cas_injector.core.utils.FundStatus;
+import com.oreki.cas_injector.dashboard.dto.DashboardSummaryDTO;
+import com.oreki.cas_injector.transactions.dto.TransactionDTO;
+import com.oreki.cas_injector.transactions.model.CapitalGainAudit;
+import com.oreki.cas_injector.transactions.model.TaxLot;
+import com.oreki.cas_injector.transactions.model.Transaction;
+import com.oreki.cas_injector.transactions.repository.CapitalGainAuditRepository;
+import com.oreki.cas_injector.transactions.repository.TaxLotRepository;
+import com.oreki.cas_injector.transactions.repository.TransactionRepository;
+
+import lombok.RequiredArgsConstructor;
+
+
+
+@Service
+@RequiredArgsConstructor
+public class DashboardService {
+
+    private final InvestorRepository investorRepo;
+    private final TaxLotRepository taxLotRepo;
+    private final CapitalGainAuditRepository auditRepo;
+    private final TransactionRepository txnRepo;
+    private final NavService navService;
+    private final HistoricalNavRepository historicalNavRepo;
+
+    public DashboardSummaryDTO getInvestorSummary(String pan) {
+        Investor investor = investorRepo.findById(pan)
+            .orElseThrow(() -> new RuntimeException("Investor not found"));
+
+        List<TransactionDTO> totalCashFlow=new ArrayList<>();
+        
+        // 🚀 EFFICIENCY FIX: Pre-group audits by Scheme ID to avoid O(n*m) scan inside the loop
+        List<CapitalGainAudit> allInvestorAudits = auditRepo.findAllBySellTransactionSchemeFolioInvestorPan(pan);
+        Map<Long, List<CapitalGainAudit>> auditsBySchemeId = allInvestorAudits.stream()
+            .collect(Collectors.groupingBy(a -> a.getSellTransaction().getScheme().getId()));
+
+        // 1. Calculate the Breakdown per Scheme
+        List<SchemePerformanceDTO> breakdown = investor.getFolios().stream()
+            .flatMap(f -> f.getSchemes().stream())
+            .map(scheme -> {
+                List<TaxLot> allLots = scheme.getTaxLots();
+                List<CapitalGainAudit> schemeAudits = auditsBySchemeId.getOrDefault(scheme.getId(), List.of());
+
+                // A. TOTAL INVESTED (Historical Gross)
+                BigDecimal totalInvested = scheme.getTransactions().stream()
+                    .filter(t -> "BUY".equalsIgnoreCase(t.getTransactionType()) || 
+                    "STAMP_DUTY".equalsIgnoreCase(t.getTransactionType()))
+                    .map(Transaction::getAmount)
+                    .map(CommonUtils.SCALE_MONEY)
+                    .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+                // B. SOLD AMOUNT (Cost basis of exited units)
+                BigDecimal soldAmountCost = schemeAudits.stream()
+                    .map(audit -> audit.getUnitsMatched().multiply(audit.getTaxLot().getCostBasisPerUnit()))
+                    .map(CommonUtils.SCALE_MONEY)
+                    .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+                // C. CURRENT INVESTED (Net Principal currently at risk)
+                BigDecimal currentInvested = allLots.stream()
+                    .filter(lot -> "OPEN".equalsIgnoreCase(lot.getStatus()))
+                    .map(lot -> lot.getRemainingUnits().multiply(lot.getCostBasisPerUnit()))
+                    .map(CommonUtils.SCALE_MONEY)
+                    .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+                // D. REALIZED GAIN (Profit/Loss booked)
+                BigDecimal schemeGain = schemeAudits.stream()
+                    .map(CapitalGainAudit::getRealizedGain)
+                    .map(CommonUtils.SCALE_MONEY)
+                    .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+                // E. TRANSACTION COUNT (Excluding Stamp Duty)
+                long cleanTxCount = scheme.getTransactions().stream()
+                    .filter(t -> "BUY".equalsIgnoreCase(t.getTransactionType()) || 
+                    "SELL".equalsIgnoreCase(t.getTransactionType())).count();
+
+                // F. CURRENT VALUE
+                SchemeDetailsDTO schemeDetails = navService.getLatestSchemeDetails(scheme.getAmfiCode());
+
+                // 2. Extract the NAV for your valuation math
+                BigDecimal currentNav = schemeDetails.getNav();
+
+                // 3. Extract the Category to determine your Rebalancing Bucket
+                String amfiCategory = schemeDetails.getCategory().toUpperCase();
+
+                // 4. Enhanced Bucket Logic for 2026
+                String bucket;
+                if (amfiCategory.contains("ARBITRAGE")) {
+                    bucket = "SAFE_REBALANCER_EQUITY_TAX"; 
+                } 
+                else if (amfiCategory.contains("GOLD") || schemeDetails.getSchemeName().toUpperCase().contains("GOLD")) {
+                    bucket = "GOLD_HEDGE_24M";
+                }
+                else if (amfiCategory.contains("EQUITY") || amfiCategory.contains("INDEX") || amfiCategory.contains("FLEXI") || amfiCategory.contains("GROWTH")) {
+                    bucket = "AGGRESSIVE_GROWTH";
+                } 
+                else if (amfiCategory.contains("TERM") || amfiCategory.contains("LIQUID") || amfiCategory.contains("DEBT")) {
+                    bucket = "DEBT_SLAB_TAXED";
+                } 
+                else {
+                    bucket = "OTHERS_CHECK_ISIN";
+                }
+                    
+                // Calculate total units currently held
+                BigDecimal unitsHeld = allLots.stream()
+                    .filter(lot -> "OPEN".equalsIgnoreCase(lot.getStatus()))
+                    .map(TaxLot::getRemainingUnits)
+                    .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+                // Current Value = Units * Latest Price
+                BigDecimal currentValue = Optional.of(unitsHeld.multiply(currentNav))
+                    .map(CommonUtils.SCALE_MONEY)
+                    .orElse(BigDecimal.ZERO);
+                // Unrealized Gain = Current Value - What you paid for these specific units
+                BigDecimal unrealizedGain =  Optional.of(currentValue.subtract(currentInvested))
+                    .map(CommonUtils.SCALE_MONEY)
+                    .orElse(BigDecimal.ZERO);
+
+           List<TransactionDTO> cashFlows = scheme.getTransactions().stream()
+                    .map(t -> {
+                        BigDecimal preciseAmount = historicalNavRepo.findByAmfiCodeAndNavDate(scheme.getAmfiCode(), t.getDate())
+                            .map(h -> h.getNav().multiply(t.getUnits().abs()))
+                            .orElse(t.getAmount());
+                            
+                        return new TransactionDTO(preciseAmount.negate(), t.getDate());
+                    })
+                    .collect(Collectors.toList());
+                                
+                FundStatus status = CommonUtils.GET_STATUS.apply(unitsHeld);
+
+                totalCashFlow.addAll(cashFlows);
+
+                cashFlows.sort(Comparator.comparing(TransactionDTO::getDate));
+
+
+                if (status == FundStatus.ACTIVE) {
+                    cashFlows.add(new TransactionDTO(currentValue, LocalDate.now()));
+                }
+              
+                BigDecimal xirrValue = CommonUtils.SOLVE_XIRR.apply(cashFlows);
+                String displayXirr = CommonUtils.SCALE_MONEY.apply(xirrValue).toString() + "%";
+
+
+                return SchemePerformanceDTO.builder()
+                    .schemeName(scheme.getName())
+                    .isin(scheme.getIsin())
+                    .amfiCode(scheme.getAmfiCode())
+                    .totalInvested(totalInvested)
+                    .soldAmountCost(soldAmountCost)
+                    .currentInvested(currentInvested)
+                    .currentValue(currentValue)
+                    .realizedGain(schemeGain)
+                    .unrealizedGain(unrealizedGain)
+                    .transactionCount(cleanTxCount)
+                    .xirr(displayXirr)
+                    .status(status)
+                    .category(amfiCategory)
+                    .bucket(bucket)
+                    .benchmarkIndex(scheme.getBenchmarkIndex())
+                    .build();
+            })
+            .collect(Collectors.toList());
+
+        // 2. Aggregate Totals for the Dashboard
+        BigDecimal aggregateTotalInvested = breakdown.stream()
+            .map(SchemePerformanceDTO::getTotalInvested)
+            .map(CommonUtils.SCALE_MONEY)
+            .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+        BigDecimal aggregateCurrentInvested = breakdown.stream()
+            .map(SchemePerformanceDTO::getCurrentInvested)
+            .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+        BigDecimal aggregateCurrentValue = breakdown.stream()
+            .map(SchemePerformanceDTO::getCurrentValue)
+            .map(CommonUtils.SCALE_MONEY)
+            .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+        BigDecimal aggregateRealizedGain = breakdown.stream()
+            .map(SchemePerformanceDTO::getRealizedGain)
+            .map(CommonUtils.SCALE_MONEY)
+            .reduce(BigDecimal.ZERO, BigDecimal::add);
+        
+        BigDecimal aggregateUnrealizedGain = breakdown.stream()
+            .map(SchemePerformanceDTO::getUnrealizedGain)
+            .map(CommonUtils.SCALE_MONEY)
+            .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+        LocalDate fyStart = CommonUtils.getCurrentFyStart();
+
+        BigDecimal totalLTCG = allInvestorAudits.stream()
+            .filter(a -> a.getTaxCategory().contains("LTCG") && !a.getSellTransaction().getDate().isBefore(fyStart)) 
+            .map(CapitalGainAudit::getRealizedGain)
+            .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+        BigDecimal totalSTCG = allInvestorAudits.stream()
+            .filter(a -> (a.getTaxCategory().contains("STCG") || a.getTaxCategory().contains("SLAB")) && !a.getSellTransaction().getDate().isBefore(fyStart))
+            .map(CapitalGainAudit::getRealizedGain)
+            .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+        BigDecimal portfolioPerformance = aggregateTotalInvested.compareTo(BigDecimal.ZERO) > 0 
+         ? aggregateUnrealizedGain.divide(aggregateTotalInvested, 4, RoundingMode.HALF_UP)
+        .multiply(new BigDecimal("100")): BigDecimal.ZERO;
+
+        String overallReturn = CommonUtils.SCALE_MONEY.apply(portfolioPerformance) + "%";
+
+        BigDecimal totalPortfolioValue = breakdown.stream()
+            .map(SchemePerformanceDTO::getCurrentValue) 
+            .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+        totalCashFlow.add(new TransactionDTO(totalPortfolioValue, LocalDate.now()));
+
+        totalCashFlow.sort(Comparator.comparing(TransactionDTO::getDate));
+        
+        BigDecimal totalXirr = CommonUtils.SOLVE_XIRR.apply(totalCashFlow);
+
+        String overallXirr = CommonUtils.SCALE_MONEY.apply(totalXirr) + "%";
+        
+
+        return DashboardSummaryDTO.builder()
+            .investorName(investor.getName())
+            .totalFolios(investor.getFolios().size())
+            .totalSchemes(breakdown.size())
+            .totalTransactions(txnRepo.countActualTransactionsByPan(pan)) 
+            .totalInvestedAmount(aggregateTotalInvested)
+            .currentInvestedAmount(aggregateCurrentInvested)
+            .currentValueAmount(aggregateCurrentValue)
+            .totalRealizedGain(aggregateRealizedGain)
+            .totalUnrealizedGain(aggregateUnrealizedGain)
+            .openTaxLots(taxLotRepo.countByStatusAndSchemeFolioInvestorPan("OPEN", pan))
+            .totalSTCG(totalSTCG)
+            .totalLTCG(totalLTCG)
+            .schemeBreakdown(breakdown)
+            .overallReturn(overallReturn)
+            .overallXirr(overallXirr)
+            .build();
+    }
+}
+</file>
+
 <file path="cas-injector/src/main/java/com/oreki/cas_injector/rebalancing/dto/TacticalSignal.java">
 package com.oreki.cas_injector.rebalancing.dto;
 
@@ -8026,327 +7937,6 @@ public record TacticalSignal(
     LocalDate lastBuyDate,
     List<String> justifications
 ) {}
-</file>
-
-<file path="cas-injector/src/main/java/com/oreki/cas_injector/rebalancing/service/PortfolioOrchestrator.java">
-package com.oreki.cas_injector.rebalancing.service;
-
-import java.time.LocalDate;
-import java.time.temporal.ChronoUnit;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-import java.util.stream.Collectors;
-
-import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.stereotype.Service;
-
-import com.oreki.cas_injector.backfill.service.NavService;
-import com.oreki.cas_injector.convictionmetrics.dto.MarketMetrics;
-import com.oreki.cas_injector.convictionmetrics.service.ConvictionScoringService;
-import com.oreki.cas_injector.core.GoogleSheetService;
-import com.oreki.cas_injector.core.dto.AggregatedHolding;
-import com.oreki.cas_injector.core.model.Scheme;
-import com.oreki.cas_injector.core.repository.SchemeRepository;
-import com.oreki.cas_injector.core.service.SystemicRiskMonitorService;
-import com.oreki.cas_injector.rebalancing.dto.StrategyTarget;
-import com.oreki.cas_injector.rebalancing.dto.TacticalSignal;
-import com.oreki.cas_injector.taxmanagement.service.TaxSimulatorService;
-import com.oreki.cas_injector.transactions.model.TaxLot;
-import com.oreki.cas_injector.transactions.repository.TaxLotRepository;
-
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
-
-@Service
-@Slf4j
-@RequiredArgsConstructor
-public class PortfolioOrchestrator {
-    
-    private final GoogleSheetService strategyService;
-    private final NavService amfiService; 
-    private final RebalanceEngine engine;
-    private final TaxLotRepository taxLotRepository; 
-    private final SchemeRepository schemeRepository;
-    private final TaxSimulatorService taxSimulator;
-    private final JdbcTemplate jdbcTemplate;
-    private final SystemicRiskMonitorService systemicRiskMonitor;
-    private final PositionSizingService positionSizingService;
-    private final ConvictionScoringService convictionScoringService;
- 
-
- public List<TacticalSignal> generateDailySignals(String investorPan, double monthlySip, double lumpsum) {
-        
-        // 1. Prime the Database
-        convictionScoringService.calculateAndSaveFinalScores(investorPan); 
-        
-        List<StrategyTarget> targets = strategyService.fetchLatestStrategy();
-        Map<String, MarketMetrics> liveMetricsMap = fetchLiveMetricsMap(investorPan);
-        List<TaxLot> allLots = taxLotRepository.findByStatusAndSchemeFolioInvestorPan("OPEN", investorPan);
-        List<AggregatedHolding> myHoldings = aggregateLots(allLots);
-        
-        double totalPortfolioValue = myHoldings.stream().mapToDouble(AggregatedHolding::getCurrentValue).sum();
-
-        // 🌟 THE FIX: MERGE TARGETS AND HOLDINGS
-        // We must evaluate everything you own AND everything you plan to buy
-        Set<String> allSchemeNames = new HashSet<>();
-        myHoldings.forEach(h -> allSchemeNames.add(h.getSchemeName().toLowerCase().trim()));
-        targets.forEach(t -> allSchemeNames.add(t.schemeName().toLowerCase().trim()));
-
-        // ==========================================
-        // 🌟 PASS 1: THE HARVESTER (Pool Capital)
-        // ==========================================
-        double totalDeployableCash = monthlySip + lumpsum;
-        List<TacticalSignal> draftSignals = new ArrayList<>();
-        
-        for (String normalizedName : allSchemeNames) {
-            
-            // Get Holding (if you own it) or create empty holding
-          AggregatedHolding holding = myHoldings.stream()
-                .filter(h -> h.getSchemeName().toLowerCase().trim().equals(normalizedName))
-                .findFirst().orElse(new AggregatedHolding(
-                    targets.stream()
-                           .filter(t -> t.schemeName().toLowerCase().trim().equals(normalizedName))
-                           .findFirst()
-                           .map(StrategyTarget::schemeName)
-                           .orElse(normalizedName), // 1. schemeName
-                    0.0,        // 2. units
-                    0.0,        // 3. currentValue
-                    0.0,        // 4. investedAmount
-                    0.0,        // 5. ltcgAmount
-                    0.0,        // 6. stcgAmount
-                    0.0,
-                    0.0,
-                    0,
-                    0,          // 7. oldestAgeDays
-                    "UNKNOWN",  // 8. assetCategory
-                    "DROPPED",   // 9. status
-                    "UNKNOWN" // 8. assetCategory
-
-                ));
-            // Get Target (if it's in the strategy sheet) or create 0% target
-           StrategyTarget target = targets.stream()
-    .filter(t -> t.schemeName().toLowerCase().trim().equals(normalizedName))
-    .findFirst()
-    .orElse(new StrategyTarget(
-        "", 
-        holding.getSchemeName(), 
-        0.0, 
-        0.0, 
-        "UNTRACKED" // 🚀 Change from "DROPPED" to "UNTRACKED"
-    ));      
-            // Fetch Metrics
-            Scheme scheme = schemeRepository.findByNameIgnoreCase(holding.getSchemeName()).orElse(null);
-            String amfiCode = scheme != null ? scheme.getAmfiCode() : "";
-            MarketMetrics metrics = liveMetricsMap.getOrDefault(amfiCode, new MarketMetrics(0,0,0,0,0,0.5,0,0, LocalDate.of(1970,1,1)));
-            
-            // Run Base V1 Engine
-            TacticalSignal rawSignal = engine.evaluate(holding, target, metrics, totalPortfolioValue, amfiCode);
-            List<String> justifications = new ArrayList<>(rawSignal.justifications());
-            
-            // 🛡️ OFFENSIVE TAX STRATEGY & EXITS
-        // 🛡️ UPGRADED TAX STRATEGY: LTCG HARVESTING & STCG LOCK
-// Check if the engine wants to EXIT or if the Google Sheet says it's DROPPED
-boolean isDropped = "DROPPED".equalsIgnoreCase(target.status());
-
-if ("EXIT".equalsIgnoreCase(rawSignal.action()) || "DROPPED".equalsIgnoreCase(target.status())) {
-    
-    double ltcgValue = holding.getLtcgValue(); // 🚀 Sum of values of lots > 365 days
-    double stcgValue = holding.getStcgValue(); // 🚀 Sum of values of lots <= 365 days
-    double harvestableGains = holding.getLtcgAmount(); // The actual profit in the LTCG lots
-
-    if (ltcgValue > 0) {
-        justifications.add(String.format("✅ Surgical Exit: Harvesting ₹%,.0f in LTCG units (Profit: ₹%,.0f).", 
-                          ltcgValue, harvestableGains));
-        totalDeployableCash += ltcgValue;
-    }
-
-    if (stcgValue > 0) {
-        int daysToNextMaturing = holding.getDaysToNextLtcg(); 
-        justifications.add(String.format("🛡️ STCG Shield: Locking ₹%,.0f in units to avoid 20%% tax. Next harvest in %d days.", 
-                          stcgValue, daysToNextMaturing));
-        // We DO NOT add stcgValue to totalDeployableCash
-    }
-
-    // The final signal amount is ONLY the LTCG portion
-    String finalAmount = String.valueOf(ltcgValue);
-    String action = ltcgValue > 0 ? "EXIT" : "HOLD";
-    
-    draftSignals.add(createSignal(rawSignal, action, finalAmount, justifications));
-}
-            // 💡 TAX LOSS HARVESTING
-            else if ("HOLD".equalsIgnoreCase(rawSignal.action()) && holding.getStcgAmount() < -10000) {
-                 justifications.add(String.format("💡 Tax Opportunity: You have a ₹%,.0f short-term loss. Consider harvesting.", Math.abs(holding.getStcgAmount())));
-                 draftSignals.add(createSignal(rawSignal, "HOLD", "0", justifications));
-            }
-            else {
-                draftSignals.add(createSignal(rawSignal, rawSignal.action(), rawSignal.amount(), justifications));
-            }
-        }
-
-        // ==========================================
-        // 🌟 PASS 2: THE SNIPER (Distribute Capital)
-        // ==========================================
-        double totalRiskAdjustedDemand = 0.0;
-        
-        for (TacticalSignal sig : draftSignals) {
-            if ("BUY".equalsIgnoreCase(sig.action())) {
-                double baseDeficit = Double.parseDouble(sig.amount().replace(",", ""));
-                double scoreMult = Math.max(0.2, sig.convictionScore() / 100.0);
-                totalRiskAdjustedDemand += (baseDeficit * scoreMult);
-            }
-        }
-
-        double finalCashPool = totalDeployableCash;
-        double finalDemand = totalRiskAdjustedDemand;
-
-        return draftSignals.stream().map(sig -> {
-            if (!"BUY".equalsIgnoreCase(sig.action())) return sig;
-
-            List<String> justs = new ArrayList<>(sig.justifications());
-            double baseDeficit = Double.parseDouble(sig.amount().replace(",", ""));
-            double scoreMult = Math.max(0.2, sig.convictionScore() / 100.0);
-            double riskAdjustedDemand = baseDeficit * scoreMult;
-            
-            double allocatedAmount = 0.0;
-            
-            if (finalCashPool > 0 && finalDemand > 0) {
-                double shareOfPool = riskAdjustedDemand / finalDemand;
-                allocatedAmount = finalCashPool * shareOfPool;
-                
-                // 🐛 THE FIX: Strictly cap the allocation at the Risk-Adjusted Demand. 
-                // Never dump excess cash into a weak fund just because the cash is available.
-                allocatedAmount = Math.min(allocatedAmount, riskAdjustedDemand);
-                
-            } else if (finalCashPool <= 0) {
-                // If you have 0 cash, convert BUYs to HOLDs
-                justs.add("⚠️ Capital Exhausted: No liquidity available to execute this buy.");
-                return createSignal(sig, "HOLD", "0", justs);
-            }
-
-            justs.add(String.format("💰 Capital Pool: Drawing from ₹%,.0f total available liquidity.", finalCashPool));
-            justs.add(String.format("⚖️ Risk-Sized: Base Deficit ₹%,.0f. Applied %.2fx Conviction Multiplier. Final Allocation: ₹%,.0f.", 
-                      baseDeficit, scoreMult, allocatedAmount));
-
-            return createSignal(sig, "BUY", String.format("%.2f", allocatedAmount), justs);
-            
-        }).collect(Collectors.toList());
-    }
-
-    private TacticalSignal createSignal(TacticalSignal s, String action, String amt, List<String> justs) {
-        return new TacticalSignal(s.schemeName(), s.amfiCode(), action, amt, s.plannedPercentage(), s.actualPercentage(), s.sipPercentage(), s.fundStatus(), s.convictionScore(), s.sortinoRatio(), s.maxDrawdown(), s.navPercentile3yr(), s.drawdownFromAth(), s.returnZScore(), s.lastBuyDate(), justs);
-    }
-
-   private Map<String, MarketMetrics> fetchLiveMetricsMap(String pan) {
-        // 1. Fetch Conviction Metrics (NAV Signals replaces PE/PB)
-        String sql = """
-            SELECT m.amfi_code, m.sortino_ratio, m.cvar_5, m.win_rate, m.max_drawdown, 
-                   m.conviction_score, m.nav_percentile_3yr, m.drawdown_from_ath, m.return_z_score
-            FROM fund_conviction_metrics m
-            JOIN scheme s ON m.amfi_code = s.amfi_code 
-            JOIN folio f ON s.folio_id = f.id
-            WHERE f.investor_pan = ?
-            AND m.calculation_date = (SELECT MAX(calculation_date) FROM fund_conviction_metrics)
-            """;
-        
-        // 2. Fetch Last Buy Date per Scheme
-        String lastBuySql = """
-            SELECT s.amfi_code, MAX(t.transaction_date) as last_buy
-            FROM transaction t
-            JOIN scheme s ON t.scheme_id = s.id
-            JOIN folio f ON s.folio_id = f.id
-            WHERE f.investor_pan = ? AND t.transaction_type = 'BUY'
-            GROUP BY s.amfi_code
-        """;
-
-        Map<String, LocalDate> lastBuyDates = jdbcTemplate.queryForList(lastBuySql, pan).stream()
-            .collect(Collectors.toMap(
-                r -> (String) r.get("amfi_code"),
-                r -> r.get("last_buy") != null ? ((java.sql.Date) r.get("last_buy")).toLocalDate() : LocalDate.of(1970, 1, 1)
-            ));
-
-        List<Map<String, Object>> rows = jdbcTemplate.queryForList(sql, pan);
-        Map<String, MarketMetrics> map = new HashMap<>();
-        for (Map<String, Object> r : rows) {
-            String amfi = (String) r.get("amfi_code");
-            map.put(amfi, new MarketMetrics(
-                r.get("conviction_score") != null ? ((Number)r.get("conviction_score")).intValue() : 0,
-                r.get("sortino_ratio") != null ? ((Number)r.get("sortino_ratio")).doubleValue() : 0.0,
-                r.get("cvar_5") != null ? ((Number)r.get("cvar_5")).doubleValue() : 0.0,
-                r.get("win_rate") != null ? ((Number)r.get("win_rate")).doubleValue() : 0.0,
-                r.get("max_drawdown") != null ? ((Number)r.get("max_drawdown")).doubleValue() : 0.0,
-                r.get("nav_percentile_3yr") != null ? ((Number)r.get("nav_percentile_3yr")).doubleValue() : 0.5,
-                r.get("drawdown_from_ath") != null ? ((Number)r.get("drawdown_from_ath")).doubleValue() : 0.0,
-                r.get("return_z_score") != null ? ((Number)r.get("return_z_score")).doubleValue() : 0.0,
-                lastBuyDates.getOrDefault(amfi, LocalDate.of(1970, 1, 1))
-            ));
-        }
-        return map;
-    }
-
-    private List<AggregatedHolding> aggregateLots(List<TaxLot> lots) {
-        Map<Scheme, List<TaxLot>> groupedLots = lots.stream().collect(Collectors.groupingBy(TaxLot::getScheme));
-        return groupedLots.entrySet().stream().map(entry -> {
-            Scheme scheme = entry.getKey();
-            double liveNav = amfiService.getLatestSchemeDetails(scheme.getAmfiCode()) != null ? amfiService.getLatestSchemeDetails(scheme.getAmfiCode()).getNav().doubleValue() : 0.0;
-
-         double units = 0, cost = 0, val = 0, ltcgGains = 0, stcgGains = 0;
-            double ltcgVal = 0, stcgVal = 0;
-            int minDaysToLtcg = 365; // Start high and find the minimum
-            LocalDate oldest = LocalDate.now();
-
-            for (TaxLot lot : entry.getValue()) {
-                double lUnits = lot.getRemainingUnits().doubleValue();
-                double lCost = lot.getCostBasisPerUnit().doubleValue() * lUnits;
-                double lVal = lUnits * liveNav;
-                
-                units += lUnits; cost += lCost; val += lVal;
-                if (lot.getBuyDate().isBefore(oldest)) oldest = lot.getBuyDate();
-
-                long age = ChronoUnit.DAYS.between(lot.getBuyDate(), LocalDate.now());
-                double gain = lVal - lCost;
-                
-                // Asset Category Logic
-                String cat = (scheme.getAssetCategory() != null) ? scheme.getAssetCategory().toUpperCase() : "EQUITY";
-                boolean isLtcg = (age > 365); // Simplified for Equity/ELSS
-
-                if (isLtcg) {
-                    ltcgVal += lVal;
-                    ltcgGains += Math.max(0, gain);
-                } else {
-                    stcgVal += lVal;
-                    stcgGains += Math.max(0, gain);
-                    // 🚀 FIX: Calculate days remaining for this specific lot
-                    int daysLeft = 365 - (int) age;
-                    if (daysLeft < minDaysToLtcg) minDaysToLtcg = daysLeft;
-                }
-            }
-            
-            // If there are no STCG lots, days to next should be 0
-            int finalDaysToNext = (stcgVal > 0) ? minDaysToLtcg : 0;
-
-            // 🚀 MATCH THE 13-ARGUMENT CONSTRUCTOR EXACTLY
-            return new AggregatedHolding(
-                scheme.getName(),       // 1
-                units,                  // 2
-                val,                    // 3
-                cost,                   // 4
-                ltcgVal,                // 5
-                ltcgGains,              // 6
-                stcgVal,                // 7
-                stcgGains,              // 8
-                finalDaysToNext,        // 9 (Calculated!)
-                (int)ChronoUnit.DAYS.between(oldest, LocalDate.now()), // 10
-                scheme.getAssetCategory(), // 11
-                "ACTIVE",               // 12
-                scheme.getIsin()        // 13
-            );
-        }).collect(Collectors.toList());
-    }
-}
 </file>
 
 <file path="cas-injector/src/main/java/com/oreki/cas_injector/rebalancing/service/RebalanceEngine.java">
@@ -9284,217 +8874,157 @@ export default function TaxView({
 }
 </file>
 
-<file path="portfolio-dashboard/src/components/views/TodayBriefView.tsx">
-import { motion } from 'framer-motion';
-import { Zap, Info, ShieldAlert } from 'lucide-react';
-import { buildPlainEnglishReason } from '../../utils/formatters';
-import ConvictionBadge from '../ui/ConvictionBadge';
-import MetricWithTooltip from '../ui/MetricWithTooltip';
-import CurrencyValue from '../ui/CurrencyValue';
+<file path="portfolio-dashboard/src/services/api.ts">
+import { normalizeCategory } from '../utils/formatters';
 
-export default function TodayBriefView({ 
-  portfolioData, 
-  sipAmount, 
-  setSipAmount, 
-  lumpsum, 
-  setLumpsum,
-  onFundClick,
-  isPrivate
-}: { 
-  portfolioData: any;
-  sipAmount: number;
-  setSipAmount: (val: number) => void;
-  lumpsum: number;
-  setLumpsum: (val: number) => void;
-  onFundClick: (schemeName: string) => void;
-  isPrivate: boolean;
-}) {
-  const dateStr = new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
-  
-  const actionSignals = (portfolioData.schemeBreakdown || []).filter((s: any) => s.action === 'BUY' || s.action === 'EXIT');
-  const holdCount = (portfolioData.schemeBreakdown || []).filter((s: any) => s.action === 'HOLD').length;
+const BASE_URL = '/api';
+const API_KEY = 'dev-secret-key'; 
 
-  const exitProceeds = (portfolioData.schemeBreakdown || [])
-    .filter((s: any) => s.action === 'EXIT')
-    .reduce((acc: number, s: any) => acc + (s.signalAmount || 0), 0);
-
-  const totalWarChest = sipAmount + lumpsum + exitProceeds;
-
-  const buySignals = (portfolioData.schemeBreakdown || []).filter((s: any) => s.action === 'BUY');
-  const totalConviction = buySignals.reduce((acc: number, s: any) => acc + (s.convictionScore || 1), 0);
-
-  const scaledBuySignals = buySignals.map((s: any) => {
-    const weight = (s.convictionScore || 1) / (totalConviction || 1);
-    return {
-      ...s,
-      displayAmount: weight * totalWarChest
-    };
+const authenticatedFetch = (url: string, options: RequestInit = {}) => {
+  return fetch(url, {
+    ...options,
+    headers: {
+      ...options.headers,
+      'X-API-KEY': API_KEY,
+    },
   });
+};
 
-  const container = {
-    hidden: { opacity: 0 },
-    show: {
-      opacity: 1,
-      transition: { staggerChildren: 0.05 }
-    }
-  };
+export const fetchMasterPortfolio = async (investorPan: string, sip: number = 75000, lumpsum: number = 0) => {
+  try {
+    const response = await authenticatedFetch(`${BASE_URL}/dashboard/full/${investorPan}?sip=${sip}&lumpsum=${lumpsum}`);
+    if (!response.ok) throw new Error("Portfolio synchronization failed");
+    
+    const dashboard = await response.json();
 
-  const item = {
-    hidden: { opacity: 0, y: 10 },
-    show: { opacity: 1, y: 0 }
-  };
+    const mergedData = (dashboard.schemeBreakdown || []).map((item: any) => {
+      return {
+        ...item,
+        cleanCategory: normalizeCategory(item.category),
+        shortName: item.schemeName ? item.schemeName.substring(0, 25) + "..." : "Unknown Fund",
+        deviation: (parseFloat(item.allocationPercentage || 0) - parseFloat(item.plannedPercentage || 0)).toFixed(2)
+      };
+    }).sort((a: any, b: any) => b.convictionScore - a.convictionScore);
 
-  return (
-    <div className="space-y-10 pb-32">
-      <header>
-        <h2 className="text-muted text-[10px] font-medium uppercase tracking-[0.2em] mb-1">Portfolio intelligence</h2>
-        <p className="text-xl font-medium text-primary tracking-tight">Today's brief · {dateStr}</p>
-      </header>
+    return { ...dashboard, schemeBreakdown: mergedData };
+  } catch (error) {
+    console.error("API Error:", error);
+    throw error;
+  }
+};
 
-      {/* ACTION CARDS */}
-      <section>
-        <h3 className="text-muted text-[10px] font-medium uppercase tracking-widest mb-4 flex items-center gap-2">
-          <Zap size={12} className="text-warning" /> Priority Actions
-        </h3>
-        <motion.div 
-          variants={container}
-          initial="hidden"
-          animate="show"
-          className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"
-        >
-          {actionSignals.map((signal: any) => (
-            <motion.div 
-              key={signal.schemeName}
-              variants={item}
-              onClick={() => onFundClick(signal.schemeName)}
-              className={`p-5 rounded-xl border transition-all cursor-pointer group hover:bg-white/[0.02] ${
-                signal.action === 'BUY' 
-                  ? 'border-buy/10 bg-buy/[0.02] hover:border-buy/20' 
-                  : 'border-exit/10 bg-exit/[0.02] hover:border-exit/20'
-              }`}
-            >
-              <div className="flex items-center justify-between mb-4">
-                <span className={`text-[10px] font-bold uppercase tracking-widest ${signal.action === 'BUY' ? 'text-buy' : 'text-exit'}`}>
-                  {signal.action}
-                </span>
-                <ConvictionBadge score={signal.convictionScore} />
-              </div>
-              <p className="text-[13px] font-medium text-primary mb-1 truncate group-hover:text-white transition-colors">{signal.schemeName}</p>
-              <div className={`text-2xl font-medium tabular-nums mb-4 ${signal.action === 'BUY' ? 'text-buy' : 'text-exit'}`}>
-                <CurrencyValue 
-                  isPrivate={isPrivate} 
-                  value={signal.action === 'BUY' 
-                    ? (scaledBuySignals.find((b: any) => b.schemeName === signal.schemeName)?.displayAmount ?? 0)
-                    : signal.signalAmount
-                  } 
-                />
-              </div>
-              <p className="text-[11px] text-secondary leading-relaxed line-clamp-2">
-                {buildPlainEnglishReason(signal)}
-              </p>
-            </motion.div>
-          ))}
-          
-          {actionSignals.length === 0 && (
-            <div className="col-span-full py-12 flex flex-col items-center justify-center bg-surface border border-white/5 rounded-xl">
-              <Info className="text-muted mb-3" size={24} />
-              <p className="text-secondary text-xs font-medium">No urgent actions identified for today.</p>
-            </div>
-          )}
-        </motion.div>
-      </section>
 
-      {/* SIP CALCULATOR */}
-      <section className="bg-surface border border-white/5 rounded-xl overflow-hidden">
-        <div className="p-6 border-b border-white/5 flex flex-col md:flex-row md:items-center justify-between gap-6">
-          <div>
-            <h3 className="text-primary text-sm font-medium mb-1 tracking-tight">SIP Deployment Calculator</h3>
-            <p className="text-muted text-[11px]">Proportional distribution based on conviction and target drift.</p>
-          </div>
-          <div className="flex flex-wrap items-center gap-8">
-            <div className="space-y-2 min-w-[200px]">
-              <div className="flex justify-between items-center text-[10px] uppercase tracking-widest text-muted">
-                <span>Monthly SIP</span>
-                <CurrencyValue isPrivate={isPrivate} value={sipAmount} className="text-primary tabular-nums font-medium" />
-              </div>
-              <input 
-                type="range" min="0" max="200000" step="1000" 
-                value={sipAmount} 
-                onChange={(e) => setSipAmount(parseInt(e.target.value) || 0)}
-                className="w-full h-1 bg-white/10 rounded-lg appearance-none cursor-pointer accent-accent"
-              />
-            </div>
-            <div className="space-y-2">
-              <label className="block text-[10px] uppercase tracking-widest text-muted">Extra Lumpsum</label>
-              <input 
-                type="number" 
-                value={lumpsum || ''} 
-                onChange={(e) => setLumpsum(parseInt(e.target.value) || 0)}
-                placeholder="₹0"
-                className="bg-surface-elevated border border-white/10 rounded-md px-3 py-1.5 text-sm text-primary tabular-nums focus:outline-none focus:border-indigo-500/50 transition-colors w-32"
-              />
-            </div>
-          </div>
-        </div>
-
-        <div className="overflow-x-auto">
-          <table className="w-full text-left">
-            <thead className="bg-white/[0.02] text-muted text-[10px] uppercase tracking-widest border-b border-white/5">
-              <tr>
-                <th className="px-6 py-4 font-medium">Fund name</th>
-                <th className="px-6 py-4 font-medium text-right">Conviction</th>
-                <th className="px-6 py-4 font-medium text-right">Planned %</th>
-                <th className="px-6 py-4 font-medium text-right">Deploy amount</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-white/5">
-              {scaledBuySignals.map((signal: any) => (
-                <tr key={signal.schemeName} className="hover:bg-white/[0.01] transition-colors group">
-                  <td className="px-6 py-4">
-                    <button 
-                      onClick={() => onFundClick(signal.schemeName)}
-                      className="text-[13px] text-primary hover:text-accent transition-colors truncate max-w-xs block text-left"
-                    >
-                      {signal.schemeName}
-                    </button>
-                  </td>
-                  <td className="px-6 py-4 text-right">
-                    <div className="flex justify-end">
-                      <MetricWithTooltip 
-                        label="" 
-                        value={<ConvictionBadge score={signal.convictionScore} />} 
-                        tooltip="A 0–100 score combining your personal return, fund risk profile, and current valuation. Higher = stronger case to hold or buy more."
-                      />
-                    </div>
-                  </td>
-                  <td className="px-6 py-4 text-right text-[13px] text-secondary tabular-nums">
-                    {signal.plannedPercentage}%
-                  </td>
-                  <td className="px-6 py-4 text-right text-[13px] text-buy font-medium tabular-nums">
-                    <CurrencyValue isPrivate={isPrivate} value={signal.displayAmount} />
-                  </td>
-                </tr>
-              ))}
-              {scaledBuySignals.length === 0 && (
-                <tr>
-                  <td colSpan={4} className="px-6 py-8 text-center text-muted text-xs italic">
-                    All funds are currently within target allocation or marked for exit.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      </section>
-
-      <footer className="flex items-center gap-3 px-6 py-4 bg-white/[0.02] border border-white/5 rounded-xl text-secondary">
-        <ShieldAlert size={14} className="text-hold" />
-        <p className="text-[11px] font-medium uppercase tracking-widest">
-          {holdCount} funds on hold · Weights within tolerance
-        </p>
-      </footer>
-    </div>
+export const fetchTransactions = async (
+  pan: string, 
+  page: number = 0, 
+  type: string = "ALL", 
+  size: number = 20
+) => {
+  const typeParam = type !== "ALL" ? `&type=${type}` : "";
+  const response = await authenticatedFetch(
+    `${BASE_URL}/transactions?pan=${pan}${typeParam}&page=${page}&size=${size}&sort=date,desc`
   );
+  if (!response.ok) throw new Error("Ledger synchronization failed");
+  return response.json();
+};
+
+export const fetchTlhOpportunities = async (pan: string) => {
+  const response = await authenticatedFetch(
+    `${BASE_URL}/portfolio/${pan}/tax-loss-harvesting`
+  );
+  if (!response.ok) return [];
+  return response.json();
+};
+</file>
+
+<file path="cas-injector/src/main/java/com/oreki/cas_injector/dashboard/service/PortfolioFullService.java">
+package com.oreki.cas_injector.dashboard.service;
+
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
+
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.stereotype.Service;
+
+import com.oreki.cas_injector.dashboard.dto.DashboardSummaryDTO;
+import com.oreki.cas_injector.dashboard.dto.UnifiedTacticalPayload;
+import com.oreki.cas_injector.rebalancing.dto.SipLineItem;
+import com.oreki.cas_injector.rebalancing.dto.TacticalSignal;
+import com.oreki.cas_injector.rebalancing.service.PortfolioOrchestrator;
+
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+
+@Service
+@Slf4j
+@RequiredArgsConstructor
+public class PortfolioFullService {
+
+    private final DashboardService dashboardService;
+    private final PortfolioOrchestrator orchestrator;
+    private final JdbcTemplate jdbcTemplate;
+
+    public DashboardSummaryDTO getFullPortfolio(String pan, double monthlySip, double lumpsum) {
+        log.info("📊 Fetching Unified Portfolio Payload for {} (SIP: {}, Lumpsum: {})", pan, monthlySip, lumpsum);
+        
+        DashboardSummaryDTO summary = dashboardService.getInvestorSummary(pan);
+        
+        // 🚀 NEW: Compute the Three Rebalance Modes
+        List<SipLineItem> sipPlan = orchestrator.computeSipPlan(pan, monthlySip);
+        List<TacticalSignal> opportunistic = orchestrator.computeOpportunisticSignals(pan, lumpsum);
+        List<TacticalSignal> exitQueue = orchestrator.computeExitQueue(pan);
+
+        double totalExitValue = exitQueue.stream()
+            .mapToDouble(s -> Double.parseDouble(s.amount()))
+            .sum();
+
+        UnifiedTacticalPayload tacticalPayload = UnifiedTacticalPayload.builder()
+            .sipPlan(sipPlan)
+            .opportunisticSignals(opportunistic)
+            .exitQueue(exitQueue)
+            .totalExitValue(totalExitValue)
+            .droppedFundsCount(exitQueue.size())
+            .build();
+
+        summary.setTacticalPayload(tacticalPayload);
+
+        // 3. Get Conviction Metrics (Sortino, Score, MDD, NAV Signals)
+        String metricsSql = "SELECT amfi_code, conviction_score, sortino_ratio, max_drawdown, " +
+                           "nav_percentile_3yr, drawdown_from_ath, return_z_score " +
+                           "FROM fund_conviction_metrics " +
+                           "WHERE calculation_date = (SELECT MAX(calculation_date) FROM fund_conviction_metrics)";
+        
+        Map<String, Map<String, Object>> metrics = jdbcTemplate.queryForList(metricsSql).stream()
+            .collect(Collectors.toMap(m -> (String) m.get("amfi_code"), m -> m, (m1, m2) -> m1));
+
+        // 4. Merge Metrics into SchemePerformanceDTO (Join Keys)
+        summary.getSchemeBreakdown().forEach(scheme -> {
+            String code = scheme.getAmfiCode();
+            Map<String, Object> fundMetrics = metrics.get(code);
+            if (fundMetrics != null) {
+                scheme.setConvictionScore(getSafeInt(fundMetrics.get("conviction_score")));
+                scheme.setSortinoRatio(getSafeDouble(fundMetrics.get("sortino_ratio")));
+                scheme.setMaxDrawdown(getSafeDouble(fundMetrics.get("max_drawdown")));
+                scheme.setNavPercentile3yr(getSafeDouble(fundMetrics.get("nav_percentile_3yr")));
+                scheme.setDrawdownFromAth(getSafeDouble(fundMetrics.get("drawdown_from_ath")));
+                scheme.setReturnZScore(getSafeDouble(fundMetrics.get("return_z_score")));
+            }
+        });
+
+        return summary;
+    }
+
+    private double getSafeDouble(Object obj) {
+        if (obj == null) return 0.0;
+        return ((Number) obj).doubleValue();
+    }
+
+    private int getSafeInt(Object obj) {
+        if (obj == null) return 0;
+        return ((Number) obj).intValue();
+    }
 }
 </file>
 
@@ -9524,12 +9054,22 @@ import LedgerView from '../views/LedgerView';
 import FundDetailView from '../views/FundDetailView';
 import FundsListView from '../views/FundsListView';
 
-export default function Dashboard({ portfolioData }: { portfolioData: any }) {
+export default function Dashboard({ 
+  portfolioData,
+  sipAmount,
+  setSipAmount,
+  lumpsum,
+  setLumpsum 
+}: { 
+  portfolioData: any;
+  sipAmount: number;
+  setSipAmount: (val: number) => void;
+  lumpsum: number;
+  setLumpsum: (val: number) => void;
+}) {
   const [activeTab, setActiveTab] = useState('today');
   const [isPrivate, setIsPrivate] = useState(false);
   const [selectedFundName, setSelectedFundName] = useState<string | null>(null);
-  const [sipAmount, setSipAmount] = useState(75000);
-  const [lumpsum, setLumpsum] = useState(0);
 
   const investorPan = "CFXPR4533R";
 
@@ -9671,6 +9211,561 @@ export default function Dashboard({ portfolioData }: { portfolioData: any }) {
       )}
     </div>
   );
+}
+</file>
+
+<file path="portfolio-dashboard/src/components/views/TodayBriefView.tsx">
+import { motion } from 'framer-motion';
+import { Zap, Info, ShieldAlert, TrendingUp, Receipt, Target } from 'lucide-react';
+import ConvictionBadge from '../ui/ConvictionBadge';
+import CurrencyValue from '../ui/CurrencyValue';
+
+export default function TodayBriefView({ 
+  portfolioData, 
+  sipAmount, 
+  setSipAmount, 
+  lumpsum, 
+  setLumpsum,
+  onFundClick,
+  isPrivate
+}: { 
+  portfolioData: any;
+  sipAmount: number;
+  setSipAmount: (val: number) => void;
+  lumpsum: number;
+  setLumpsum: (val: number) => void;
+  onFundClick: (schemeName: string) => void;
+  isPrivate: boolean;
+}) {
+  const dateStr = new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+  const payload = portfolioData.tacticalPayload || { sipPlan: [], opportunisticSignals: [], exitQueue: [] };
+
+  const container = {
+    hidden: { opacity: 0 },
+    show: {
+      opacity: 1,
+      transition: { staggerChildren: 0.05 }
+    }
+  };
+
+  const item = {
+    hidden: { opacity: 0, y: 10 },
+    show: { opacity: 1, y: 0 }
+  };
+
+  return (
+    <div className="space-y-12 pb-32">
+      <header>
+        <h2 className="text-muted text-[10px] font-medium uppercase tracking-[0.2em] mb-1">Decision Support</h2>
+        <p className="text-xl font-medium text-primary tracking-tight">Today's brief · {dateStr}</p>
+      </header>
+
+      {/* SECTION 1: MONTHLY SIP PLAN */}
+      <section className="space-y-6">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
+          <h3 className="text-muted text-[10px] font-medium uppercase tracking-widest flex items-center gap-2">
+            <Target size={12} className="text-accent" /> Monthly SIP Strategy
+          </h3>
+          <div className="flex flex-wrap items-center gap-8">
+            <div className="flex items-center gap-4">
+              <div className="flex items-center gap-2 text-[10px] uppercase tracking-widest text-muted">
+                <span>SIP Amount</span>
+                <CurrencyValue isPrivate={isPrivate} value={sipAmount} className="text-primary tabular-nums font-medium" />
+              </div>
+              <input 
+                type="range" min="0" max="200000" step="1000" 
+                value={sipAmount} 
+                onChange={(e) => setSipAmount(parseInt(e.target.value) || 0)}
+                className="w-32 h-1 bg-white/10 rounded-lg appearance-none cursor-pointer accent-accent"
+              />
+            </div>
+            <div className="flex items-center gap-3">
+              <label className="text-[10px] uppercase tracking-widest text-muted">Extra Lumpsum</label>
+              <input 
+                type="number" 
+                value={lumpsum || ''} 
+                onChange={(e) => setLumpsum(parseInt(e.target.value) || 0)}
+                placeholder="₹0"
+                className="bg-surface-elevated border border-white/10 rounded-md px-3 py-1.5 text-xs text-primary tabular-nums focus:outline-none focus:border-indigo-500/50 transition-colors w-28"
+              />
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-surface border border-white/5 rounded-xl overflow-hidden">
+          <table className="w-full text-left">
+            <thead className="bg-white/[0.02] text-muted text-[10px] uppercase tracking-widest border-b border-white/5">
+              <tr>
+                <th className="px-6 py-4 font-medium">Fund Name</th>
+                <th className="px-6 py-4 font-medium text-right">Strategy %</th>
+                <th className="px-6 py-4 font-medium text-right">Deploy Amount</th>
+                <th className="px-6 py-4 font-medium text-right">Status</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-white/5">
+              {payload.sipPlan.map((s: any) => (
+                <tr key={s.isin} className="hover:bg-white/[0.01] transition-colors group">
+                  <td className="px-6 py-4">
+                    <button onClick={() => onFundClick(s.schemeName)} className="text-[13px] text-primary hover:text-accent transition-colors truncate max-w-xs block text-left">
+                      {s.schemeName}
+                    </button>
+                  </td>
+                  <td className="px-6 py-4 text-right text-[12px] text-secondary tabular-nums">{s.sipPct}%</td>
+                  <td className="px-6 py-4 text-right text-[12px] text-buy font-medium tabular-nums">
+                    <CurrencyValue isPrivate={isPrivate} value={s.amount} />
+                  </td>
+                  <td className="px-6 py-4 text-right">
+                    <span className={`text-[9px] font-bold uppercase tracking-widest px-2 py-0.5 rounded ${
+                      s.deployFlag === 'DEPLOY' ? 'text-buy bg-buy/10' : 'text-warning bg-warning/10'
+                    }`}>
+                      {s.deployFlag === 'DEPLOY' ? 'Ready' : 'Expensive'}
+                    </span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      {/* SECTION 2: OPPORTUNISTIC TOP-UPS */}
+      <section className="space-y-6">
+        <h3 className="text-muted text-[10px] font-medium uppercase tracking-widest flex items-center gap-2">
+          <Zap size={12} className="text-warning" /> Opportunistic Signals
+        </h3>
+        <motion.div 
+          variants={container}
+          initial="hidden"
+          animate="show"
+          className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"
+        >
+          {payload.opportunisticSignals.map((signal: any) => (
+            <motion.div 
+              key={signal.schemeName}
+              variants={item}
+              onClick={() => onFundClick(signal.schemeName)}
+              className="p-5 rounded-xl border border-buy/10 bg-buy/[0.02] hover:border-buy/20 transition-all cursor-pointer group hover:bg-white/[0.02]"
+            >
+              <div className="flex items-center justify-between mb-4">
+                <span className="text-[10px] font-bold uppercase tracking-widest text-buy">BUY OPPORTUNITY</span>
+                <ConvictionBadge score={signal.convictionScore} />
+              </div>
+              <p className="text-[13px] font-medium text-primary mb-1 truncate group-hover:text-white transition-colors">{signal.schemeName}</p>
+              <div className="text-2xl font-medium tabular-nums mb-4 text-buy">
+                <CurrencyValue isPrivate={isPrivate} value={signal.amount} />
+              </div>
+              <p className="text-[11px] text-secondary leading-relaxed line-clamp-2">
+                {signal.justifications[0]}
+              </p>
+            </motion.div>
+          ))}
+          
+          {payload.opportunisticSignals.length === 0 && (
+            <div className="col-span-full py-8 flex items-center gap-3 bg-white/[0.02] border border-white/5 rounded-xl px-6">
+              <Info className="text-muted" size={16} />
+              <p className="text-muted text-[11px] font-medium uppercase tracking-widest">No opportunistic entry points detected at current NAV levels.</p>
+            </div>
+          )}
+        </motion.div>
+      </section>
+
+      {/* SECTION 3: EXIT QUEUE */}
+      {payload.exitQueue.length > 0 && (
+        <section className="space-y-6">
+          <h3 className="text-muted text-[10px] font-medium uppercase tracking-widest flex items-center gap-2">
+            <TrendingUp size={12} className="text-exit rotate-180" /> Priority Exit Queue
+          </h3>
+          <div className="bg-surface border border-white/5 rounded-xl overflow-hidden">
+            <div className="p-4 bg-exit/[0.03] border-b border-white/5 flex items-center justify-between">
+              <p className="text-[11px] text-secondary">
+                <span className="text-exit font-bold uppercase tracking-tighter mr-2">Warning:</span> 
+                {payload.droppedFundsCount} dropped funds holding <CurrencyValue isPrivate={isPrivate} value={payload.totalExitValue} /> identified for liquidation.
+              </p>
+              <div className="flex items-center gap-2">
+                <ShieldAlert size={14} className="text-warning" />
+                <span className="text-[10px] font-bold uppercase tracking-widest text-muted">Tax Efficiency Optimized</span>
+              </div>
+            </div>
+            <table className="w-full text-left">
+              <tbody className="divide-y divide-white/5">
+                {payload.exitQueue.map((s: any) => (
+                  <tr key={s.schemeName} className="hover:bg-white/[0.01]">
+                    <td className="px-6 py-4">
+                      <p className="text-[13px] text-primary font-medium">{s.schemeName}</p>
+                      <p className="text-[10px] text-muted uppercase tracking-widest mt-0.5">{s.fundStatus}</p>
+                    </td>
+                    <td className="px-6 py-4 text-right">
+                      <p className="text-[10px] text-muted uppercase mb-0.5">Liquidation</p>
+                      <div className="text-[13px] text-exit font-medium tabular-nums">
+                        <CurrencyValue isPrivate={isPrivate} value={s.amount} />
+                      </div>
+                    </td>
+                    <td className="px-6 py-4">
+                      <div className="flex items-start gap-2 max-w-xs">
+                        <Receipt size={12} className="text-muted mt-0.5 shrink-0" />
+                        <p className="text-[11px] text-secondary leading-relaxed">{s.justifications[0]}</p>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
+    </div>
+  );
+}
+</file>
+
+<file path="cas-injector/src/main/java/com/oreki/cas_injector/rebalancing/service/PortfolioOrchestrator.java">
+package com.oreki.cas_injector.rebalancing.service;
+
+import java.time.LocalDate;
+import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
+
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.stereotype.Service;
+
+import com.oreki.cas_injector.backfill.service.NavService;
+import com.oreki.cas_injector.convictionmetrics.dto.MarketMetrics;
+import com.oreki.cas_injector.convictionmetrics.service.ConvictionScoringService;
+import com.oreki.cas_injector.core.GoogleSheetService;
+import com.oreki.cas_injector.core.dto.AggregatedHolding;
+import com.oreki.cas_injector.core.dto.SchemeDetailsDTO;
+import com.oreki.cas_injector.core.model.Scheme;
+import com.oreki.cas_injector.core.repository.SchemeRepository;
+import com.oreki.cas_injector.core.service.SystemicRiskMonitorService;
+import com.oreki.cas_injector.core.utils.CommonUtils;
+import com.oreki.cas_injector.rebalancing.dto.SipLineItem;
+import com.oreki.cas_injector.rebalancing.dto.StrategyTarget;
+import com.oreki.cas_injector.rebalancing.dto.TacticalSignal;
+import com.oreki.cas_injector.taxmanagement.service.TaxSimulatorService;
+import com.oreki.cas_injector.transactions.model.TaxLot;
+import com.oreki.cas_injector.transactions.repository.TaxLotRepository;
+
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+
+@Service
+@Slf4j
+@RequiredArgsConstructor
+public class PortfolioOrchestrator {
+    
+    private final GoogleSheetService strategyService;
+    private final NavService amfiService; 
+    private final RebalanceEngine engine;
+    private final TaxLotRepository taxLotRepository; 
+    private final SchemeRepository schemeRepository;
+    private final TaxSimulatorService taxSimulator;
+    private final JdbcTemplate jdbcTemplate;
+    private final SystemicRiskMonitorService systemicRiskMonitor;
+    private final ConvictionScoringService convictionScoringService;
+
+    // ==========================================
+    // 🌟 MODE 1: MONTHLY SIP PLAN (Pure Sheet)
+    // ==========================================
+    public List<SipLineItem> computeSipPlan(String pan, double sipAmount) {
+        List<StrategyTarget> targets = strategyService.fetchLatestStrategy();
+        Map<String, MarketMetrics> metrics = fetchLiveMetricsMap(pan);
+
+        return targets.stream()
+            .filter(t -> t.sipPct() > 0 && !"dropped".equalsIgnoreCase(t.status()))
+            .map(t -> {
+                double amount = (t.sipPct() / 100.0) * sipAmount;
+                Scheme scheme = schemeRepository.findByIsin(t.isin()).orElse(null);
+                String amfiCode = scheme != null ? scheme.getAmfiCode() : "";
+                MarketMetrics m = metrics.getOrDefault(amfiCode, defaultMetrics());
+
+                String flag = m.navPercentile3yr() > 0.85 ? "CAUTION_EXPENSIVE" : "DEPLOY";
+                String note = flag.equals("CAUTION_EXPENSIVE")
+                    ? "Fund at " + Math.round(m.navPercentile3yr()*100) + "% of 3yr range. Consider deferring."
+                    : "Deploy as per strategy.";
+
+                return new SipLineItem(t.schemeName(), t.isin(), amfiCode,
+                    amount, t.sipPct(), t.status(), flag, note);
+            })
+            .sorted(Comparator.comparingDouble(SipLineItem::amount).reversed())
+            .collect(Collectors.toList());
+    }
+
+    // ==========================================
+    // 🌟 MODE 2: OPPORTUNISTIC (Accumulators & Extra)
+    // ==========================================
+    public List<TacticalSignal> computeOpportunisticSignals(String pan, double lumpsum) {
+        convictionScoringService.calculateAndSaveFinalScores(pan); 
+        
+        List<StrategyTarget> targets = strategyService.fetchLatestStrategy();
+        Map<String, MarketMetrics> metricsMap = fetchLiveMetricsMap(pan);
+        List<TaxLot> allLots = taxLotRepository.findByStatusAndSchemeFolioInvestorPan("OPEN", pan);
+        List<AggregatedHolding> holdings = aggregateLots(allLots);
+        
+        double totalPortfolioValue = holdings.stream().mapToDouble(AggregatedHolding::getCurrentValue).sum();
+        double deployableCash = lumpsum;
+        
+        // Add Arbitrage/Rebalancer value to deployable pool if entry points are good
+        double arbitrageValue = holdings.stream()
+            .filter(h -> h.getAssetCategory().contains("ARBITRAGE"))
+            .mapToDouble(AggregatedHolding::getCurrentValue)
+            .sum();
+
+        List<TacticalSignal> opportunisticDrafts = new ArrayList<>();
+
+        for (StrategyTarget target : targets) {
+            AggregatedHolding holding = findHolding(holdings, target);
+            MarketMetrics metrics = metricsMap.getOrDefault(amfiCodeFor(target), defaultMetrics());
+            double actualPct = (holding.getCurrentValue() / totalPortfolioValue) * 100;
+
+            // 1. ACCUMULATOR LOGIC (Buy on dips)
+            if ("accumulator".equalsIgnoreCase(target.status())) {
+                boolean isUnderTarget = actualPct < target.targetPortfolioPct();
+                boolean isNearLow = metrics.navPercentile3yr() < 0.40;
+                
+                if (isUnderTarget && isNearLow) {
+                    List<String> justs = List.of(String.format("🎯 Accumulator Entry: Fund at %d%% of 3yr range. Good opportunistic dip.", 
+                        Math.round(metrics.navPercentile3yr() * 100)));
+                    
+                    // Base amount is drift gap or 2x SIP default
+                    double baseAmount = Math.max(sipAmountFromTarget(target, 75000) * 2, (target.targetPortfolioPct() - actualPct) / 100.0 * totalPortfolioValue);
+                    opportunisticDrafts.add(new TacticalSignal(target.schemeName(), amfiCodeFor(target), "BUY", String.valueOf(baseAmount), 
+                        target.targetPortfolioPct(), actualPct, target.sipPct(), target.status(), metrics.convictionScore(), 
+                        metrics.sortinoRatio(), metrics.maxDrawdown(), metrics.navPercentile3yr(), metrics.drawdownFromAth(), 
+                        metrics.returnZScore(), metrics.lastBuyDate(), justs));
+                }
+            }
+
+            // 2. REBALANCER DEPLOY (Core/Strategy significant drift)
+            if ("core".equalsIgnoreCase(target.status()) || "strategy".equalsIgnoreCase(target.status())) {
+                double drift = actualPct - target.targetPortfolioPct();
+                if (drift < -5.0 && metrics.navPercentile3yr() < 0.60 && arbitrageValue > 10000) {
+                    double deployFromArb = Math.min(arbitrageValue * 0.4, Math.abs(drift/100.0) * totalPortfolioValue);
+                    List<String> justs = List.of(String.format("⚖️ Rebalancer Deploy: Fund is %.1f%% underweight. Redeploying ₹%,.0f from Arbitrage parking.", 
+                        Math.abs(drift), deployFromArb));
+                    
+                    opportunisticDrafts.add(new TacticalSignal(target.schemeName(), amfiCodeFor(target), "BUY", String.valueOf(deployFromArb), 
+                        target.targetPortfolioPct(), actualPct, target.sipPct(), target.status(), metrics.convictionScore(), 
+                        metrics.sortinoRatio(), metrics.maxDrawdown(), metrics.navPercentile3yr(), metrics.drawdownFromAth(), 
+                        metrics.returnZScore(), metrics.lastBuyDate(), justs));
+                }
+            }
+        }
+
+        // Apply conviction-based weighting to lumpsum if multiple signals exist
+        return weightSignalsByConviction(opportunisticDrafts, lumpsum);
+    }
+
+    // ==========================================
+    // 🌟 MODE 3: EXIT QUEUE (Dropped Funds)
+    // ==========================================
+    public List<TacticalSignal> computeExitQueue(String pan) {
+        List<StrategyTarget> targets = strategyService.fetchLatestStrategy();
+        List<TaxLot> allLots = taxLotRepository.findByStatusAndSchemeFolioInvestorPan("OPEN", pan);
+        List<AggregatedHolding> holdings = aggregateLots(allLots);
+        
+        // Find realized LTCG so far this FY
+        LocalDate fyStart = CommonUtils.getCurrentFyStart();
+        String ltcgSql = """
+            SELECT COALESCE(SUM(a.realized_gain), 0) 
+            FROM capital_gain_audit a
+            JOIN transaction t ON a.sell_transaction_id = t.id
+            JOIN scheme s ON t.scheme_id = s.id
+            JOIN folio f ON s.folio_id = f.id
+            WHERE a.tax_category LIKE '%LTCG%' 
+            AND t.transaction_date >= ?
+            AND f.investor_pan = ?
+            """;
+        double realizedLtcg = jdbcTemplate.queryForObject(ltcgSql, Double.class, fyStart, pan);
+        double ltcgHeadroom = Math.max(0, 125000 - realizedLtcg);
+
+        List<TacticalSignal> exitPlan = new ArrayList<>();
+
+        for (AggregatedHolding h : holdings) {
+            StrategyTarget target = targets.stream()
+                .filter(t -> t.schemeName().equalsIgnoreCase(h.getSchemeName()))
+                .findFirst().orElse(null);
+
+            if (target == null || "dropped".equalsIgnoreCase(target.status())) {
+                List<String> justs = new ArrayList<>();
+                double exitAmount = 0;
+                
+                // Debt funds: Exit immediately (no LTCG benefit post-2023)
+                if (h.getAssetCategory().contains("DEBT") || h.getAssetCategory().contains("GILT")) {
+                    exitAmount = h.getCurrentValue();
+                    justs.add("🚀 Priority Exit: Debt fund dropped from strategy. Slab-taxed anyway, exit now.");
+                } 
+                // Equity: Sequence by tax efficiency
+                else {
+                    if (h.getLtcgValue() > 0 && ltcgHeadroom > 0) {
+                        double amountToHarvest = Math.min(h.getLtcgValue(), ltcgHeadroom * 5); // Rough proxy
+                        exitAmount = amountToHarvest;
+                        justs.add(String.format("✅ Tax-Efficient: Exiting ₹%,.0f in LTCG lots (using remaining headroom).", exitAmount));
+                    } else if (h.getStcgValue() > 0) {
+                        justs.add(String.format("⏳ Deferred: %d days until next lot becomes LTCG. Holding to avoid 20%% tax.", h.getDaysToNextLtcg()));
+                    }
+                }
+
+                if (exitAmount > 0 || !justs.isEmpty()) {
+                    exitPlan.add(new TacticalSignal(h.getSchemeName(), amfiCodeFor(h), "EXIT", String.valueOf(exitAmount), 
+                        0, (h.getCurrentValue()/1000000), 0, "DROPPED", 0, 0, 0, 0, 0, 0, LocalDate.now(), justs));
+                }
+            }
+        }
+        return exitPlan;
+    }
+
+    // Helper: Legacy compatibility wrapper
+    public List<TacticalSignal> generateDailySignals(String investorPan, double monthlySip, double lumpsum) {
+        return computeOpportunisticSignals(investorPan, lumpsum);
+    }
+
+    private List<TacticalSignal> weightSignalsByConviction(List<TacticalSignal> signals, double cash) {
+        if (signals.isEmpty()) return signals;
+        
+        double totalDemand = signals.stream()
+            .mapToDouble(s -> Double.parseDouble(s.amount()) * (s.convictionScore() / 100.0))
+            .sum();
+
+        return signals.stream().map(sig -> {
+            double baseAmount = Double.parseDouble(sig.amount());
+            double scoreMult = sig.convictionScore() / 100.0;
+            double weightedAmount = (totalDemand > 0) ? (baseAmount * scoreMult / totalDemand) * cash : 0;
+            
+            // Cooldown check
+            long daysSinceLast = ChronoUnit.DAYS.between(sig.lastBuyDate(), LocalDate.now());
+            if (daysSinceLast < 21) {
+                List<String> justs = new ArrayList<>(sig.justifications());
+                justs.add("❄️ Cooldown Active (21d). Skipping for now.");
+                return createSignal(sig, "HOLD", "0", justs);
+            }
+
+            return createSignal(sig, "BUY", String.format("%.2f", weightedAmount), sig.justifications());
+        }).collect(Collectors.toList());
+    }
+
+    private AggregatedHolding findHolding(List<AggregatedHolding> holdings, StrategyTarget t) {
+        return holdings.stream()
+            .filter(h -> h.getSchemeName().equalsIgnoreCase(t.schemeName()))
+            .findFirst().orElse(new AggregatedHolding(t.schemeName(), 0,0,0,0,0,0,0,0,0,"UNKNOWN","DROPPED", t.isin()));
+    }
+
+    private String amfiCodeFor(StrategyTarget t) {
+        return schemeRepository.findByIsin(t.isin()).map(Scheme::getAmfiCode).orElse("");
+    }
+
+    private String amfiCodeFor(AggregatedHolding h) {
+        return schemeRepository.findByNameIgnoreCase(h.getSchemeName()).map(Scheme::getAmfiCode).orElse("");
+    }
+
+    private double sipAmountFromTarget(StrategyTarget t, double totalSip) {
+        return (t.sipPct() / 100.0) * totalSip;
+    }
+
+    private MarketMetrics defaultMetrics() {
+        return new MarketMetrics(0,0,0,0,0,0.5,0,0, LocalDate.of(1970,1,1));
+    }
+
+    private TacticalSignal createSignal(TacticalSignal s, String action, String amt, List<String> justs) {
+        return new TacticalSignal(s.schemeName(), s.amfiCode(), action, amt, s.plannedPercentage(), s.actualPercentage(), s.sipPercentage(), s.fundStatus(), s.convictionScore(), s.sortinoRatio(), s.maxDrawdown(), s.navPercentile3yr(), s.drawdownFromAth(), s.returnZScore(), s.lastBuyDate(), justs);
+    }
+
+   private Map<String, MarketMetrics> fetchLiveMetricsMap(String pan) {
+        // ... (existing implementation from previous turn)
+        String sql = """
+            SELECT m.amfi_code, m.sortino_ratio, m.cvar_5, m.win_rate, m.max_drawdown, 
+                   m.conviction_score, m.nav_percentile_3yr, m.drawdown_from_ath, m.return_z_score
+            FROM fund_conviction_metrics m
+            JOIN scheme s ON m.amfi_code = s.amfi_code 
+            JOIN folio f ON s.folio_id = f.id
+            WHERE f.investor_pan = ?
+            AND m.calculation_date = (SELECT MAX(calculation_date) FROM fund_conviction_metrics)
+            """;
+        
+        String lastBuySql = """
+            SELECT s.amfi_code, MAX(t.transaction_date) as last_buy
+            FROM transaction t
+            JOIN scheme s ON t.scheme_id = s.id
+            JOIN folio f ON s.folio_id = f.id
+            WHERE f.investor_pan = ? AND t.transaction_type = 'BUY'
+            GROUP BY s.amfi_code
+        """;
+
+        Map<String, LocalDate> lastBuyDates = jdbcTemplate.queryForList(lastBuySql, pan).stream()
+            .collect(Collectors.toMap(
+                r -> (String) r.get("amfi_code"),
+                r -> r.get("last_buy") != null ? ((java.sql.Date) r.get("last_buy")).toLocalDate() : LocalDate.of(1970, 1, 1)
+            ));
+
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList(sql, pan);
+        Map<String, MarketMetrics> map = new HashMap<>();
+        for (Map<String, Object> r : rows) {
+            String amfi = (String) r.get("amfi_code");
+            map.put(amfi, new MarketMetrics(
+                r.get("conviction_score") != null ? ((Number)r.get("conviction_score")).intValue() : 0,
+                r.get("sortino_ratio") != null ? ((Number)r.get("sortino_ratio")).doubleValue() : 0.0,
+                r.get("cvar_5") != null ? ((Number)r.get("cvar_5")).doubleValue() : 0.0,
+                r.get("win_rate") != null ? ((Number)r.get("win_rate")).doubleValue() : 0.0,
+                r.get("max_drawdown") != null ? ((Number)r.get("max_drawdown")).doubleValue() : 0.0,
+                r.get("nav_percentile_3yr") != null ? ((Number)r.get("nav_percentile_3yr")).doubleValue() : 0.5,
+                r.get("drawdown_from_ath") != null ? ((Number)r.get("drawdown_from_ath")).doubleValue() : 0.0,
+                r.get("return_z_score") != null ? ((Number)r.get("return_z_score")).doubleValue() : 0.0,
+                lastBuyDates.getOrDefault(amfi, LocalDate.of(1970, 1, 1))
+            ));
+        }
+        return map;
+    }
+
+    private List<AggregatedHolding> aggregateLots(List<TaxLot> lots) {
+        Map<Scheme, List<TaxLot>> groupedLots = lots.stream().collect(Collectors.groupingBy(TaxLot::getScheme));
+        return groupedLots.entrySet().stream().map(entry -> {
+            Scheme scheme = entry.getKey();
+            SchemeDetailsDTO details = amfiService.getLatestSchemeDetails(scheme.getAmfiCode());
+            double liveNav = (details != null && details.getNav() != null) ? details.getNav().doubleValue() : 0.0;
+
+            double units = 0, cost = 0, val = 0, ltcgGains = 0, stcgGains = 0;
+            double ltcgVal = 0, stcgVal = 0;
+            int minDaysToLtcg = 365; 
+            LocalDate oldest = LocalDate.now();
+
+            for (TaxLot lot : entry.getValue()) {
+                double lUnits = lot.getRemainingUnits().doubleValue();
+                double lCost = lot.getCostBasisPerUnit().doubleValue() * lUnits;
+                double lVal = lUnits * liveNav;
+                
+                units += lUnits; cost += lCost; val += lVal;
+                if (lot.getBuyDate().isBefore(oldest)) oldest = lot.getBuyDate();
+
+                long age = ChronoUnit.DAYS.between(lot.getBuyDate(), LocalDate.now());
+                double gain = lVal - lCost;
+                
+                boolean isLtcg = (age > 365); 
+
+                if (isLtcg) {
+                    ltcgVal += lVal;
+                    ltcgGains += Math.max(0, gain);
+                } else {
+                    stcgVal += lVal;
+                    stcgGains += Math.max(0, gain);
+                    int daysLeft = 365 - (int) age;
+                    if (daysLeft < minDaysToLtcg) minDaysToLtcg = daysLeft;
+                }
+            }
+            
+            int finalDaysToNext = (stcgVal > 0) ? minDaysToLtcg : 0;
+
+            return new AggregatedHolding(scheme.getName(), units, val, cost, ltcgVal, ltcgGains, 
+                stcgVal, stcgGains, finalDaysToNext, (int)ChronoUnit.DAYS.between(oldest, LocalDate.now()), 
+                scheme.getAssetCategory(), "ACTIVE", scheme.getIsin());
+        }).collect(Collectors.toList());
+    }
 }
 </file>
 

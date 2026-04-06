@@ -15,16 +15,40 @@ public class ConvictionMetricsRepository {
     private final JdbcTemplate jdbcTemplate;
 
     /**
-     * Ensures the new NAV signal columns exist in the database.
+     * Ensures the new NAV signal columns and sub-scores exist in the database.
      */
     public void ensureColumnsExist() {
         String sql = """
             ALTER TABLE fund_conviction_metrics
             ADD COLUMN IF NOT EXISTS nav_percentile_3yr DOUBLE PRECISION,
             ADD COLUMN IF NOT EXISTS drawdown_from_ath   DOUBLE PRECISION,
-            ADD COLUMN IF NOT EXISTS return_z_score      DOUBLE PRECISION;
+            ADD COLUMN IF NOT EXISTS return_z_score      DOUBLE PRECISION,
+            ADD COLUMN IF NOT EXISTS yield_score         DOUBLE PRECISION,
+            ADD COLUMN IF NOT EXISTS risk_score          DOUBLE PRECISION,
+            ADD COLUMN IF NOT EXISTS value_score         DOUBLE PRECISION,
+            ADD COLUMN IF NOT EXISTS pain_score          DOUBLE PRECISION,
+            ADD COLUMN IF NOT EXISTS friction_score       DOUBLE PRECISION;
         """;
         jdbcTemplate.execute(sql);
+    }
+
+    /**
+     * Updates the calculated conviction score and its component breakdown.
+     */
+    public void updateConvictionBreakdown(int finalScore, double yield, double risk, 
+                                        double value, double pain, double friction, String amfiCode) {
+        String updateSql = """
+            UPDATE fund_conviction_metrics 
+            SET conviction_score = ?,
+                yield_score = ?,
+                risk_score = ?,
+                value_score = ?,
+                pain_score = ?,
+                friction_score = ?
+            WHERE amfi_code = ? 
+            AND calculation_date = (SELECT MAX(calculation_date) FROM fund_conviction_metrics)
+        """;
+        jdbcTemplate.update(updateSql, finalScore, yield, risk, value, pain, friction, amfiCode);
     }
 
     /**

@@ -119,6 +119,7 @@ export default function RebalanceView({
           <thead className="bg-white/[0.02] text-muted text-[10px] uppercase tracking-widest border-b border-white/5">
             <tr>
               <th className="px-6 py-4 font-medium">Fund Name</th>
+              <th className="px-6 py-4 font-medium">Mode</th>
               <th className="px-6 py-4 font-medium text-right">Target %</th>
               <th className="px-6 py-4 font-medium text-right">Actual %</th>
               <th className="px-6 py-4 font-medium text-right">Drift</th>
@@ -129,6 +130,18 @@ export default function RebalanceView({
             {data.map((s: any) => (
               <tr key={s.schemeName} className="hover:bg-white/[0.01] transition-colors group">
                 <td className="px-6 py-4 text-[13px] text-primary truncate max-w-md">{s.schemeName}</td>
+                <td className="px-6 py-4">
+                  <span className={`text-[9px] font-bold uppercase tracking-widest px-2 py-0.5 rounded ${
+                    s.signalType === 'core' ? 'bg-teal-500/10 text-teal-400' :
+                    s.signalType === 'strategy' ? 'bg-purple-500/10 text-purple-400' :
+                    s.signalType === 'satellite' ? 'bg-amber-500/10 text-amber-400' :
+                    s.signalType === 'rebalancer' ? 'bg-blue-500/10 text-blue-400' :
+                    s.signalType === 'dropped' ? 'bg-zinc-500/10 text-zinc-400' :
+                    'bg-white/5 text-muted'
+                  }`}>
+                    {s.signalType || 'unknown'}
+                  </span>
+                </td>
                 <td className="px-6 py-4 text-right text-[13px] text-secondary tabular-nums">{(s.plannedPercentage || 0).toFixed(1)}%</td>
                 <td className="px-6 py-4 text-right text-[13px] text-secondary tabular-nums">{(s.allocationPercentage || 0).toFixed(1)}%</td>
                 <td className={`px-6 py-4 text-right text-[13px] font-medium tabular-nums ${

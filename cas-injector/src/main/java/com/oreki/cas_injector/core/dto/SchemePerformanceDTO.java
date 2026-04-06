@@ -52,11 +52,23 @@ public class SchemePerformanceDTO {
     private int convictionScore;
     private double sortinoRatio;
     private double maxDrawdown;
+    private double cvar5; // Added for Bug 1
     private double allocationPercentage;
     private double plannedPercentage;
     private double navPercentile3yr;
     private double drawdownFromAth;
     private double returnZScore;
+
+    // Tax Efficiency Metrics (Added for Bug 4)
+    private double ltcgUnrealizedGain;
+    private double stcgUnrealizedGain;
+
+    // Conviction Sub-scores (Added for Design Improvement 5)
+    private double yieldScore;
+    private double riskScore;
+    private double valueScore;
+    private double painScore;
+    private double frictionScore;
     
     // Tactical Signal Details
     private String signalType;

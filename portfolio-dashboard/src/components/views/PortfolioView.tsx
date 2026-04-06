@@ -24,26 +24,44 @@ export default function PortfolioView({
 }) {
   const breakdown = portfolioData.schemeBreakdown || [];
   
-  const avgConviction = breakdown.reduce((acc: number, s: any) => acc + (s.convictionScore || 0), 0) / (breakdown.length || 1);
   const totalValue = portfolioData.currentValueAmount || 0;
   const weightedCVaR = breakdown.reduce((acc: number, s: any) => {
     const weight = (s.currentValue || 0) / (totalValue || 1);
     return acc + (s.cvar5 || 0) * weight;
   }, 0);
 
-  const totalLTCG = portfolioData.totalLTCG || 0;
-  const totalSTCG = portfolioData.totalSTCG || 0;
-  const taxEfficiency = totalLTCG / (totalLTCG + totalSTCG || 1);
+  // Bug 4 Fix: Tax efficiency using unrealized LTCG ratio
+  const totalUnrealizedLTCG = breakdown.reduce((a: number, s: any) => a + (s.ltcgUnrealizedGain || 0), 0);
+  const totalUnrealizedGainPos = breakdown.reduce((a: number, s: any) => a + Math.max(0, (s.unrealizedGain || 0)), 0);
+  const taxEfficiency = totalUnrealizedGainPos > 0 ? totalUnrealizedLTCG / totalUnrealizedGainPos : 0;
+
+  // Design Improvement 3: Conviction distribution
+  const highConv = breakdown.filter((s: any) => s.convictionScore >= 65).length;
+  const midConv = breakdown.filter((s: any) => s.convictionScore >= 45 && s.convictionScore < 65).length;
+  const lowConv = breakdown.filter((s: any) => s.convictionScore < 45).length;
+  const totalFunds = breakdown.length || 1;
+
+  // Bug 3 Fix: Unrealized Gain % gauge
+  const unrealizedPct = portfolioData.totalInvestedAmount 
+    ? (portfolioData.totalUnrealizedGain / portfolioData.totalInvestedAmount) * 100 
+    : 0;
+  const unrealizedAbsPct = Math.min(100, Math.abs(unrealizedPct));
+  const isUnrealizedNegative = unrealizedPct < 0;
 
   const bucketMap: Record<string, number> = {};
   breakdown.forEach((s: any) => {
     bucketMap[s.bucket] = (bucketMap[s.bucket] || 0) + (s.currentValue || 0);
   });
-  const bucketData = Object.entries(bucketMap).map(([name, value]) => ({
-    name: name.replace(/_/g, ' '),
-    value: (value / totalValue) * 100,
-    color: BUCKET_COLORS[name] || "#94a3b8"
-  })).sort((a, b) => b.value - a.value);
+  
+  const bucketData = Object.entries(bucketMap).map(([name, value]) => {
+    const fundsInBucket = breakdown.filter((s: any) => s.bucket === name);
+    return {
+      name: name.replace(/_/g, ' '),
+      value: (value / (totalValue || 1)) * 100,
+      color: BUCKET_COLORS[name] || "#94a3b8",
+      count: fundsInBucket.length
+    };
+  }).sort((a, b) => b.value - a.value);
 
   const xirrData = breakdown
     .filter((s: any) => (s.currentValue || 0) > 0)
@@ -83,7 +101,7 @@ export default function PortfolioView({
         <div className="bg-surface border border-white/5 p-6 rounded-xl">
           <MetricWithTooltip 
             label="Tax Exposure (STCG)" 
-            value={<CurrencyValue isPrivate={isPrivate} value={totalSTCG} />}
+            value={<CurrencyValue isPrivate={isPrivate} value={portfolioData.totalSTCG} />}
             valueClass="text-warning"
             tooltip="Estimated tax if you sold all units held for less than 1 year today."
           />
@@ -130,7 +148,10 @@ export default function PortfolioView({
             {bucketData.map((b) => (
               <div key={b.name} className="space-y-1.5">
                 <div className="flex justify-between items-end">
-                  <span className="text-[10px] font-bold text-muted uppercase tracking-widest">{b.name}</span>
+                  <div className="flex items-center">
+                    <span className="text-[10px] font-bold text-muted uppercase tracking-widest">{b.name}</span>
+                    <span className="text-[9px] text-muted tabular-nums ml-2">{b.count} funds</span>
+                  </div>
                   <span className="text-[11px] font-medium tabular-nums" style={{ color: b.color }}>{b.value.toFixed(1)}%</span>
                 </div>
                 <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden">
@@ -153,24 +174,31 @@ export default function PortfolioView({
           <HeartPulse size={12} className="text-accent" /> Vital Signs
         </h3>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {/* CVaR: fills from right (worst) to left (best) */}
           <div className="bg-surface border border-white/5 p-6 rounded-xl space-y-4">
             <MetricWithTooltip 
               label="Portfolio CVaR" 
               value={`${weightedCVaR.toFixed(2)}%`}
               tooltip="Expected loss on the worst 5% of trading days. Closer to zero is safer."
             />
-            <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden">
+            <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden flex flex-row-reverse">
               <div 
                 className="h-full bg-accent transition-all duration-500" 
                 style={{ width: `${Math.min(100, Math.abs(weightedCVaR) * 10)}%` }} 
               />
             </div>
+            <div className="flex justify-between items-center text-[9px] text-muted uppercase tracking-tighter">
+              <span>Risky</span>
+              <span>Safe</span>
+            </div>
           </div>
+
+          {/* Tax Efficiency */}
           <div className="bg-surface border border-white/5 p-6 rounded-xl space-y-4">
             <MetricWithTooltip 
-              label="Tax Efficiency" 
+              label="Tax Efficiency (Unrealised)" 
               value={`${(taxEfficiency * 100).toFixed(1)}%`}
-              tooltip="Percentage of your total gains that are Long-Term (LTCG). Higher is better."
+              tooltip="Percentage of your current paper profits that are in Long-Term holdings (LTCG)."
             />
             <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden">
               <div 
@@ -178,31 +206,48 @@ export default function PortfolioView({
                 style={{ width: `${taxEfficiency * 100}%` }} 
               />
             </div>
-          </div>
-          <div className="bg-surface border border-white/5 p-6 rounded-xl space-y-4">
-            <MetricWithTooltip 
-              label="Average Conviction" 
-              value={Math.round(avgConviction)}
-              tooltip="Mean conviction score across all funds. Reflects system trust in current allocation."
-            />
-            <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden">
-              <div 
-                className={`h-full transition-all duration-500 ${avgConviction > 60 ? 'bg-buy' : 'bg-warning'}`} 
-                style={{ width: `${avgConviction}%` }} 
-              />
+            <div className="flex justify-between items-center text-[9px] text-muted uppercase tracking-tighter">
+              <span>Low LTCG</span>
+              <span>Tax Optimized</span>
             </div>
           </div>
+
+          {/* Average Conviction Distribution */}
+          <div className="bg-surface border border-white/5 p-6 rounded-xl space-y-4">
+            <MetricWithTooltip 
+              label="Conviction Distribution" 
+              value={`${highConv} High / ${midConv} Mid`}
+              tooltip="Distribution of conviction scores across your active funds."
+            />
+            <div className="h-2 w-full bg-white/5 rounded-full overflow-hidden flex">
+              <div style={{ width: `${(highConv/totalFunds)*100}%` }} className="h-full bg-buy" />
+              <div style={{ width: `${(midConv/totalFunds)*100}%` }} className="h-full bg-warning" />
+              <div style={{ width: `${(lowConv/totalFunds)*100}%` }} className="h-full bg-exit" />
+            </div>
+            <div className="flex gap-4">
+              <span className="text-[10px] text-buy">{highConv} high</span>
+              <span className="text-[10px] text-warning">{midConv} mid</span>
+              <span className="text-[10px] text-exit">{lowConv} low</span>
+            </div>
+          </div>
+
+          {/* Unrealised Gain % Gauge */}
           <div className="bg-surface border border-white/5 p-6 rounded-xl space-y-4">
             <MetricWithTooltip 
               label="Unrealised Gain %" 
-              value={`${((portfolioData.totalUnrealizedGain / (portfolioData.totalInvestedAmount || 1)) * 100).toFixed(1)}%`}
+              value={`${unrealizedPct.toFixed(1)}%`}
+              valueClass={isUnrealizedNegative ? "text-exit" : "text-buy"}
               tooltip="Absolute return on currently active capital."
             />
             <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden">
               <div 
-                className="h-full bg-buy transition-all duration-500" 
-                style={{ width: `${Math.min(100, (portfolioData.totalUnrealizedGain / (portfolioData.totalInvestedAmount || 1)) * 100)}%` }} 
+                className={`h-full transition-all duration-500 ${isUnrealizedNegative ? 'bg-exit' : 'bg-buy'}`}
+                style={{ width: `${unrealizedAbsPct}%` }} 
               />
+            </div>
+            <div className="flex justify-between items-center text-[9px] text-muted uppercase tracking-tighter">
+              <span>0%</span>
+              <span>{Math.max(10, Math.ceil(unrealizedAbsPct / 10) * 10)}%</span>
             </div>
           </div>
         </div>

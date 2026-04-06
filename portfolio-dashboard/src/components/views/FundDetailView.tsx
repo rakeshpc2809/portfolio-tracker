@@ -19,12 +19,40 @@ export default function FundDetailView({
 }) {
   if (!fund) return null;
 
+  // Design Improvement 5: Use real sub-scores if available, otherwise estimate
+  const hasRealScores = fund.yieldScore > 0 || fund.riskScore > 0 || fund.valueScore > 0;
+  
   const components = [
-    { label: 'Yield', score: (fund.convictionScore || 0) * 0.8, weight: '20%', tooltip: 'Your personal CAGR from tax lots.' },
-    { label: 'Risk', score: (fund.sortinoRatio || 0) * 40, weight: '25%', tooltip: 'Sortino ratio - return relative to downside risk.' },
-    { label: 'Value', score: (1 - (fund.navPercentile3yr || 0)) * 100, weight: '25%', tooltip: 'NAV position + drawdown from ATH.' },
-    { label: 'Pain', score: (1 - Math.abs((fund.maxDrawdown || 0) / 100)) * 100, weight: '15%', tooltip: 'Max drawdown resilience.' },
-    { label: 'Friction', score: 85, weight: '15%', tooltip: 'Tax drag simulation results.' },
+    { 
+      label: 'Yield', 
+      score: hasRealScores ? fund.yieldScore : (fund.convictionScore || 0) * 0.8, 
+      weight: '20%', 
+      tooltip: 'Your personal CAGR from tax lots.' 
+    },
+    { 
+      label: 'Risk', 
+      score: hasRealScores ? fund.riskScore : (fund.sortinoRatio || 0) * 40, 
+      weight: '25%', 
+      tooltip: 'Sortino ratio - return relative to downside risk.' 
+    },
+    { 
+      label: 'Value', 
+      score: hasRealScores ? fund.valueScore : (1 - (fund.navPercentile3yr || 0)) * 100, 
+      weight: '25%', 
+      tooltip: 'NAV position + drawdown from ATH.' 
+    },
+    { 
+      label: 'Pain', 
+      score: hasRealScores ? fund.painScore : (1 - Math.abs((fund.maxDrawdown || 0) / 100)) * 100, 
+      weight: '15%', 
+      tooltip: 'Max drawdown resilience.' 
+    },
+    { 
+      label: 'Friction', 
+      score: hasRealScores ? fund.frictionScore : 85, 
+      weight: '15%', 
+      tooltip: 'Tax drag simulation results.' 
+    },
   ];
 
   return (
@@ -115,9 +143,14 @@ export default function FundDetailView({
               </section>
 
               <section className="space-y-4">
-                <h3 className="text-muted text-[10px] font-medium uppercase tracking-widest flex items-center gap-2">
-                  <Zap size={12} className="text-warning" /> Scoring Engine Diagnostics
-                </h3>
+                <div className="flex items-center justify-between">
+                  <h3 className="text-muted text-[10px] font-medium uppercase tracking-widest flex items-center gap-2">
+                    <Zap size={12} className="text-warning" /> Scoring Engine Diagnostics
+                  </h3>
+                  {!hasRealScores && (
+                    <span className="text-[9px] text-muted italic">Showing estimates</span>
+                  )}
+                </div>
                 <div className="space-y-3">
                   {components.map((c) => (
                     <div key={c.label} className="bg-white/[0.02] border border-white/5 p-4 rounded-lg flex items-center gap-6">
@@ -153,6 +186,11 @@ export default function FundDetailView({
                     </div>
                   ))}
                 </div>
+                {!hasRealScores && (
+                  <p className="text-[10px] text-muted italic mt-1 px-1">
+                    Component scores are estimated from available metrics. Run a full scan to update.
+                  </p>
+                )}
               </section>
 
               <section className="grid grid-cols-2 md:grid-cols-3 gap-4">
