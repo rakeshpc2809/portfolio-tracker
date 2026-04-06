@@ -48,7 +48,6 @@ export default function TodayBriefView({
           <p className="text-xl font-medium text-primary tracking-tight">Today's brief · {dateStr}</p>
         </div>
 
-        {/* Design Improvement 4: Portfolio Health Banner */}
         <div className="flex flex-wrap items-center gap-6 px-6 py-4 bg-white/[0.02] border border-white/5 rounded-xl">
           <div className="flex items-center gap-3">
             <div className={`w-2 h-2 rounded-full ${exitCount > 0 ? 'bg-exit' : 'bg-buy'}`} />
@@ -173,8 +172,11 @@ export default function TodayBriefView({
                 <ConvictionBadge score={signal.convictionScore} />
               </div>
               <p className="text-[13px] font-medium text-primary mb-1 truncate group-hover:text-white transition-colors">{signal.schemeName}</p>
-              <div className="text-2xl font-medium tabular-nums mb-4 text-buy">
-                <CurrencyValue isPrivate={isPrivate} value={signal.amount} />
+              <div className="text-xl font-medium tabular-nums mb-3 text-buy">
+                {parseFloat(signal.amount) > 0 
+                  ? <CurrencyValue isPrivate={isPrivate} value={parseFloat(signal.amount)} />
+                  : <span className="text-warning text-sm">Suggested entry — set lumpsum to size</span>
+                }
               </div>
               <p className="text-[11px] text-secondary leading-relaxed line-clamp-2">
                 {signal.justifications[0]}
@@ -183,9 +185,14 @@ export default function TodayBriefView({
           ))}
           
           {payload.opportunisticSignals.length === 0 && (
-            <div className="col-span-full py-8 flex items-center gap-3 bg-white/[0.02] border border-white/5 rounded-xl px-6">
-              <Info className="text-muted" size={16} />
-              <p className="text-muted text-[11px] font-medium uppercase tracking-widest">No opportunistic entry points detected at current NAV levels.</p>
+            <div className="col-span-full py-6 px-6 bg-white/[0.02] border border-white/5 rounded-xl space-y-2">
+              <p className="text-muted text-[11px] font-medium uppercase tracking-widest">
+                No dip entries or rebalancer deploys triggered today
+              </p>
+              <p className="text-[11px] text-muted leading-relaxed">
+                Accumulator funds (NASDAQ, Gold) fire when NAV is below 45% of 3yr range or 15%+ below ATH.
+                Rebalancer deploys fire when core/strategy funds are 5%+ underweight and below 60% of 3yr NAV range.
+              </p>
             </div>
           )}
         </motion.div>
@@ -224,7 +231,13 @@ export default function TodayBriefView({
                     </td>
                     <td className="px-6 py-4">
                       <div className="flex items-start gap-2 max-w-xs">
-                        <Receipt size={12} className="text-muted mt-0.5 shrink-0" />
+                        {s.justifications[0]?.includes('slab') || s.justifications[0]?.includes('Debt') ? (
+                          <span className="shrink-0 text-[9px] font-bold uppercase tracking-widest px-1.5 py-0.5 rounded bg-warning/10 text-warning border border-warning/20">
+                            SLAB TAX
+                          </span>
+                        ) : (
+                          <Receipt size={12} className="text-muted mt-0.5 shrink-0" />
+                        )}
                         <p className="text-[11px] text-secondary leading-relaxed">{s.justifications[0]}</p>
                       </div>
                     </td>

@@ -99,12 +99,15 @@ public class TaxSimulatorService {
             estimatedTax += Math.max(0, stcgProfit) * EQUITY_STCG_RATE;
             estimatedTax += Math.max(0, ltcgProfit) * EQUITY_LTCG_RATE;
         } else {
-            estimatedTax += Math.max(0, stcgProfit) * 0.30; 
+            // Post-April 2023: Debt gains are always slab-taxed regardless of holding period.
+            // We use 30% as the conservative upper bound — actual rate depends on investor's slab.
+            double slabRate = 0.30; 
+            estimatedTax += Math.max(0, stcgProfit) * slabRate;
         }
 
         double taxDragPercentage = estimatedTax / targetSellAmount;
         boolean isTaxLocked = taxDragPercentage > MAX_ACCEPTABLE_TAX_DRAG;
 
-        return new TaxSimulationResult(targetSellAmount, stcgProfit, ltcgProfit, estimatedTax, taxDragPercentage, isTaxLocked);
+        return new TaxSimulationResult(targetSellAmount, stcgProfit, ltcgProfit, estimatedTax, taxDragPercentage, isTaxLocked, !isEquity);
     }
 }
