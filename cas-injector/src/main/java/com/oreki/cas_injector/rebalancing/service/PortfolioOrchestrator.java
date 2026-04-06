@@ -220,9 +220,9 @@ public class PortfolioOrchestrator {
             
             // Cooldown check
             long daysSinceLast = ChronoUnit.DAYS.between(sig.lastBuyDate(), LocalDate.now());
-            if (daysSinceLast < 21) {
+            if (daysSinceLast < 3) {
                 List<String> justs = new ArrayList<>(sig.justifications());
-                justs.add("❄️ Cooldown Active (21d). Skipping for now.");
+                justs.add("❄️ Cooldown Active (3d). Skipping for now.");
                 return createSignal(sig, "HOLD", "0", justs);
             }
 
