@@ -308,10 +308,11 @@ public class PortfolioOrchestrator {
             Scheme scheme = entry.getKey();
             SchemeDetailsDTO details = amfiService.getLatestSchemeDetails(scheme.getAmfiCode());
             double liveNav = (details != null && details.getNav() != null) ? details.getNav().doubleValue() : 0.0;
+            String category = scheme.getAssetCategory() != null ? scheme.getAssetCategory() : details.getCategory();
 
             double units = 0, cost = 0, val = 0, ltcgGains = 0, stcgGains = 0;
             double ltcgVal = 0, stcgVal = 0;
-            int minDaysToLtcg = 365; 
+            int minDaysToLtcg = 1095; // Default to 3 years for non-equity
             LocalDate oldest = LocalDate.now();
 
             for (TaxLot lot : entry.getValue()) {
@@ -322,10 +323,10 @@ public class PortfolioOrchestrator {
                 units += lUnits; cost += lCost; val += lVal;
                 if (lot.getBuyDate().isBefore(oldest)) oldest = lot.getBuyDate();
 
-                long age = ChronoUnit.DAYS.between(lot.getBuyDate(), LocalDate.now());
                 double gain = lVal - lCost;
+                String taxCat = CommonUtils.DETERMINE_TAX_CATEGORY.apply(lot.getBuyDate(), LocalDate.now(), category);
                 
-                boolean isLtcg = (age > 365); 
+                boolean isLtcg = taxCat.contains("LTCG"); 
 
                 if (isLtcg) {
                     ltcgVal += lVal;
@@ -333,16 +334,26 @@ public class PortfolioOrchestrator {
                 } else {
                     stcgVal += lVal;
                     stcgGains += Math.max(0, gain);
-                    int daysLeft = 365 - (int) age;
-                    if (daysLeft < minDaysToLtcg) minDaysToLtcg = daysLeft;
+                    
+                    // Logic to estimate days to next LTCG event
+                    int waitDays = 0;
+                    if (taxCat.contains("EQUITY")) waitDays = 365;
+                    else if (taxCat.contains("HYBRID")) waitDays = 730;
+                    else if (lot.getBuyDate().isBefore(LocalDate.of(2023, 4, 1))) waitDays = 1095;
+                    
+                    if (waitDays > 0) {
+                        long age = ChronoUnit.DAYS.between(lot.getBuyDate(), LocalDate.now());
+                        int daysLeft = waitDays - (int) age;
+                        if (daysLeft > 0 && daysLeft < minDaysToLtcg) minDaysToLtcg = daysLeft;
+                    }
                 }
             }
             
-            int finalDaysToNext = (stcgVal > 0) ? minDaysToLtcg : 0;
+            int finalDaysToNext = (stcgVal > 0 && minDaysToLtcg < 1095) ? minDaysToLtcg : 0;
 
             return new AggregatedHolding(scheme.getName(), units, val, cost, ltcgVal, ltcgGains, 
                 stcgVal, stcgGains, finalDaysToNext, (int)ChronoUnit.DAYS.between(oldest, LocalDate.now()), 
-                scheme.getAssetCategory(), "ACTIVE", scheme.getIsin());
+                category, "ACTIVE", scheme.getIsin());
         }).collect(Collectors.toList());
     }
 }

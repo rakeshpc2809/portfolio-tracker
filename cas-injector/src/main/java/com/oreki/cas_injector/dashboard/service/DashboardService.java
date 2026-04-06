@@ -135,20 +135,26 @@ public class DashboardService {
                 // Compute unrealized LTCG vs STCG (Bug 4 fix)
                 double ltcgUnrealized = allLots.stream()
                     .filter(lot -> "OPEN".equalsIgnoreCase(lot.getStatus()))
-                    .filter(lot -> java.time.temporal.ChronoUnit.DAYS.between(lot.getBuyDate(), LocalDate.now()) > 365)
                     .mapToDouble(lot -> {
-                        double val = lot.getRemainingUnits().doubleValue() * currentNav.doubleValue();
-                        double cost = lot.getRemainingUnits().doubleValue() * lot.getCostBasisPerUnit().doubleValue();
-                        return Math.max(0, val - cost);
+                        String taxCat = CommonUtils.DETERMINE_TAX_CATEGORY.apply(lot.getBuyDate(), LocalDate.now(), amfiCategory);
+                        if (taxCat.contains("LTCG")) {
+                            double val = lot.getRemainingUnits().doubleValue() * currentNav.doubleValue();
+                            double cost = lot.getRemainingUnits().doubleValue() * lot.getCostBasisPerUnit().doubleValue();
+                            return Math.max(0, val - cost);
+                        }
+                        return 0.0;
                     }).sum();
 
                 double stcgUnrealized = allLots.stream()
                     .filter(lot -> "OPEN".equalsIgnoreCase(lot.getStatus()))
-                    .filter(lot -> java.time.temporal.ChronoUnit.DAYS.between(lot.getBuyDate(), LocalDate.now()) <= 365)
                     .mapToDouble(lot -> {
-                        double val = lot.getRemainingUnits().doubleValue() * currentNav.doubleValue();
-                        double cost = lot.getRemainingUnits().doubleValue() * lot.getCostBasisPerUnit().doubleValue();
-                        return Math.max(0, val - cost);
+                        String taxCat = CommonUtils.DETERMINE_TAX_CATEGORY.apply(lot.getBuyDate(), LocalDate.now(), amfiCategory);
+                        if (!taxCat.contains("LTCG")) {
+                            double val = lot.getRemainingUnits().doubleValue() * currentNav.doubleValue();
+                            double cost = lot.getRemainingUnits().doubleValue() * lot.getCostBasisPerUnit().doubleValue();
+                            return Math.max(0, val - cost);
+                        }
+                        return 0.0;
                     }).sum();
 
                 // Unrealized Gain = Current Value - What you paid for these specific units
