@@ -66,7 +66,7 @@ public class TaxSimulatorService {
         // Safety check: If no lots found, abort simulation
         if (openLots.isEmpty()) {
             log.warn("No OPEN tax lots found for scheme: {}", schemeName);
-            return new TaxSimulationResult(targetSellAmount, 0, 0, 0, 0, false);
+            return new TaxSimulationResult(targetSellAmount, 0, 0, 0, 0, false, false);
         }
 
         // Determine if equity or debt for tax bracket routing

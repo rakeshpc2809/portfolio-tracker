@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion';
-import { Zap, Info, ShieldAlert, TrendingUp, Receipt, Target } from 'lucide-react';
+import { Zap, ShieldAlert, TrendingUp, Receipt, Target } from 'lucide-react';
 import ConvictionBadge from '../ui/ConvictionBadge';
 import CurrencyValue from '../ui/CurrencyValue';
 
