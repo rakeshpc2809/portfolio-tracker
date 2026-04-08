@@ -12,7 +12,7 @@ import java.util.function.Function;
 
 import com.oreki.cas_injector.transactions.dto.TransactionDTO;
 
-import tools.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.JsonNode;
 
 public class CommonUtils {
 

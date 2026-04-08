@@ -32,18 +32,26 @@ public class PortfolioFullService {
         
         DashboardSummaryDTO summary = dashboardService.getInvestorSummary(pan);
         
-        // 🚀 NEW: Compute the Three Rebalance Modes
+        // 🚀 NEW: Compute the Three Rebalance Modes + Active Sell Gate (Gate B)
         List<SipLineItem> sipPlan = orchestrator.computeSipPlan(pan, monthlySip);
         List<TacticalSignal> opportunistic = orchestrator.computeOpportunisticSignals(pan, lumpsum);
+        List<TacticalSignal> activeSells = orchestrator.computeActiveSellSignals(pan);
         List<TacticalSignal> exitQueue = orchestrator.computeExitQueue(pan);
 
         double totalExitValue = exitQueue.stream()
-            .mapToDouble(s -> Double.parseDouble(s.amount()))
+            .mapToDouble(s -> {
+                try {
+                    return s.amount() != null ? Double.parseDouble(s.amount().replace(",", "")) : 0.0;
+                } catch (Exception e) {
+                    return 0.0;
+                }
+            })
             .sum();
 
         UnifiedTacticalPayload tacticalPayload = UnifiedTacticalPayload.builder()
             .sipPlan(sipPlan)
             .opportunisticSignals(opportunistic)
+            .activeSellSignals(activeSells)
             .exitQueue(exitQueue)
             .totalExitValue(totalExitValue)
             .droppedFundsCount(exitQueue.size())
@@ -117,7 +125,7 @@ public class PortfolioFullService {
             // 3. Override with tactical signal if present
             TacticalSignal signal = signalByAmfi.get(code);
             if (signal != null) {
-                scheme.setAction(signal.action());
+                scheme.setAction(signal.action().name());
                 scheme.setSignalAmount(new BigDecimal(signal.amount().replace(",", "")));
                 scheme.setJustifications(signal.justifications());
                 scheme.setLastBuyDate(signal.lastBuyDate());

@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion';
-import { Zap, ShieldAlert, TrendingUp, Receipt, Target } from 'lucide-react';
+import { Zap, TrendingUp, Receipt, Target, ArrowDownRight, Scissors } from 'lucide-react';
 import ConvictionBadge from '../ui/ConvictionBadge';
 import CurrencyValue from '../ui/CurrencyValue';
 
@@ -21,11 +21,21 @@ export default function TodayBriefView({
   isPrivate: boolean;
 }) {
   const dateStr = new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
-  const payload = portfolioData.tacticalPayload || { sipPlan: [], opportunisticSignals: [], exitQueue: [] };
+  const payload = portfolioData.tacticalPayload || { 
+    sipPlan: [], 
+    opportunisticSignals: [], 
+    activeSellSignals: [],
+    exitQueue: [],
+    harvestOpportunities: [],
+    totalExitValue: 0,
+    totalHarvestValue: 0,
+    droppedFundsCount: 0
+  };
 
   const exitCount = payload.exitQueue?.length || 0;
+  const sellCount = payload.activeSellSignals?.length || 0;
+  const harvestCount = payload.harvestOpportunities?.length || 0;
   const sipTotal = payload.sipPlan?.reduce((a: number, s: any) => a + s.amount, 0) || 0;
-  const opCount = payload.opportunisticSignals?.length || 0;
 
   const container = {
     hidden: { opacity: 0 },
@@ -44,29 +54,29 @@ export default function TodayBriefView({
     <div className="space-y-12 pb-32">
       <header className="space-y-6">
         <div>
-          <h2 className="text-muted text-[10px] font-medium uppercase tracking-[0.2em] mb-1">Decision Support</h2>
+          <h2 className="text-muted text-[10px] font-medium uppercase tracking-[0.2em] mb-1">Intelligent Tactical Orchestrator</h2>
           <p className="text-xl font-medium text-primary tracking-tight">Today's brief · {dateStr}</p>
         </div>
 
         <div className="flex flex-wrap items-center gap-6 px-6 py-4 bg-white/[0.02] border border-white/5 rounded-xl">
           <div className="flex items-center gap-3">
-            <div className={`w-2 h-2 rounded-full ${exitCount > 0 ? 'bg-exit' : 'bg-buy'}`} />
+            <div className={`w-2 h-2 rounded-full ${exitCount + sellCount > 0 ? 'bg-exit' : 'bg-buy'}`} />
             <span className="text-[11px] text-secondary">
-              {exitCount > 0 
-                ? `${exitCount} dropped funds need clearing` 
-                : 'No exit actions pending'}
+              {exitCount + sellCount > 0 
+                ? `${exitCount + sellCount} funds need attention/exit` 
+                : 'No urgent sell actions'}
             </span>
           </div>
           <div className="flex items-center gap-3 border-l border-white/5 pl-6">
             <div className="w-2 h-2 rounded-full bg-accent" />
             <span className="text-[11px] text-secondary">
-              SIP this month: <CurrencyValue isPrivate={isPrivate} value={sipTotal} className="text-primary font-medium" />
+              SIP Budget: <CurrencyValue isPrivate={isPrivate} value={sipTotal} className="text-primary font-medium" />
             </span>
           </div>
-          {opCount > 0 && (
+          {harvestCount > 0 && (
             <div className="flex items-center gap-3 border-l border-white/5 pl-6">
-              <div className="w-2 h-2 rounded-full bg-warning" />
-              <span className="text-[11px] text-secondary">{opCount} opportunistic signals active</span>
+              <div className="w-2 h-2 rounded-full bg-buy" />
+              <span className="text-[11px] text-secondary">{harvestCount} TLH opportunities identified</span>
             </div>
           )}
         </div>
@@ -119,7 +129,6 @@ export default function TodayBriefView({
                 <tr>
                   <td colSpan={4} className="px-6 py-12 text-center text-muted text-xs italic">
                     <p className="mb-2">SIP plan not loaded.</p>
-                    <p className="text-[10px] uppercase tracking-widest non-italic">Check Google Sheet strategy & ensure funds have sip% &gt; 0</p>
                   </td>
                 </tr>
               ) : (
@@ -149,10 +158,10 @@ export default function TodayBriefView({
         </div>
       </section>
 
-      {/* SECTION 2: OPPORTUNISTIC TOP-UPS */}
+      {/* SECTION 2: OPPORTUNISTIC TOP-UPS (BUY) */}
       <section className="space-y-6">
         <h3 className="text-muted text-[10px] font-medium uppercase tracking-widest flex items-center gap-2">
-          <Zap size={12} className="text-warning" /> Opportunistic Signals
+          <Zap size={12} className="text-warning" /> Opportunistic Signals (Half-Kelly Sized)
         </h3>
         <motion.div 
           variants={container}
@@ -168,15 +177,12 @@ export default function TodayBriefView({
               className="p-5 rounded-xl border border-buy/10 bg-buy/[0.02] hover:border-buy/20 transition-all cursor-pointer group hover:bg-white/[0.02]"
             >
               <div className="flex items-center justify-between mb-4">
-                <span className="text-[10px] font-bold uppercase tracking-widest text-buy">BUY OPPORTUNITY</span>
+                <span className="text-[10px] font-bold uppercase tracking-widest text-buy">{signal.action}</span>
                 <ConvictionBadge score={signal.convictionScore} />
               </div>
               <p className="text-[13px] font-medium text-primary mb-1 truncate group-hover:text-white transition-colors">{signal.schemeName}</p>
               <div className="text-xl font-medium tabular-nums mb-3 text-buy">
-                {parseFloat(signal.amount) > 0 
-                  ? <CurrencyValue isPrivate={isPrivate} value={parseFloat(signal.amount)} />
-                  : <span className="text-warning text-sm">Suggested entry — set lumpsum to size</span>
-                }
+                <CurrencyValue isPrivate={isPrivate} value={parseFloat(signal.amount)} />
               </div>
               <p className="text-[11px] text-secondary leading-relaxed line-clamp-2">
                 {signal.justifications[0]}
@@ -189,17 +195,99 @@ export default function TodayBriefView({
               <p className="text-muted text-[11px] font-medium uppercase tracking-widest">
                 No dip entries or rebalancer deploys triggered today
               </p>
-              <p className="text-[11px] text-muted leading-relaxed">
-                Accumulator funds (NASDAQ, Gold) fire when NAV is below 45% of 3yr range or 15%+ below ATH.
-                Rebalancer deploys fire when core/strategy funds are 5%+ underweight and below 60% of 3yr NAV range.
-              </p>
             </div>
           )}
         </motion.div>
       </section>
 
-      {/* SECTION 3: EXIT QUEUE */}
-      {payload.exitQueue.length > 0 && (
+      {/* SECTION 3: ACTIVE SELL/HOLD SIGNALS (Gate B) */}
+      {payload.activeSellSignals?.length > 0 && (
+        <section className="space-y-6">
+          <h3 className="text-muted text-[10px] font-medium uppercase tracking-widest flex items-center gap-2">
+            <ArrowDownRight size={12} className="text-exit" /> Active Rebalance (Gate B)
+          </h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {payload.activeSellSignals.map((signal: any) => (
+              <div 
+                key={signal.schemeName}
+                onClick={() => onFundClick(signal.schemeName)}
+                className={`p-5 rounded-xl border transition-all cursor-pointer group hover:bg-white/[0.02] ${
+                  signal.action === 'SELL' ? 'border-exit/20 bg-exit/[0.02]' : 'border-warning/20 bg-warning/[0.02]'
+                }`}
+              >
+                <div className="flex items-center justify-between mb-4">
+                  <span className={`text-[10px] font-bold uppercase tracking-widest ${
+                    signal.action === 'SELL' ? 'text-exit' : 'text-warning'
+                  }`}>{signal.action} SIGNAL</span>
+                  <ConvictionBadge score={signal.convictionScore} />
+                </div>
+                <p className="text-[13px] font-medium text-primary mb-1 truncate">{signal.schemeName}</p>
+                <div className={`text-xl font-medium tabular-nums mb-3 ${
+                  signal.action === 'SELL' ? 'text-exit' : 'text-warning'
+                }`}>
+                  {signal.action === 'SELL' 
+                    ? <CurrencyValue isPrivate={isPrivate} value={parseFloat(signal.amount)} />
+                    : 'TAX-LOCKED'
+                  }
+                </div>
+                <div className="space-y-2">
+                  {signal.justifications.slice(0, 2).map((j: string, idx: number) => (
+                    <p key={idx} className="text-[10px] text-secondary leading-relaxed border-l border-white/10 pl-2">
+                      {j}
+                    </p>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {/* SECTION 4: TAX-LOSS HARVESTING (HARVEST) */}
+      {payload.harvestOpportunities?.length > 0 && (
+        <section className="space-y-6">
+          <h3 className="text-muted text-[10px] font-medium uppercase tracking-widest flex items-center gap-2">
+            <Scissors size={12} className="text-buy" /> Tax-Loss Harvesting (HARVEST)
+          </h3>
+          <div className="bg-surface border border-white/5 rounded-xl overflow-hidden">
+            <div className="p-4 bg-buy/[0.03] border-b border-white/5 flex items-center justify-between">
+              <p className="text-[11px] text-secondary">
+                <span className="text-buy font-bold uppercase tracking-tighter mr-2">Opportunity:</span> 
+                Harvest <CurrencyValue isPrivate={isPrivate} value={payload.totalHarvestValue} /> in losses to offset future gains.
+              </p>
+            </div>
+            <table className="w-full text-left">
+              <tbody className="divide-y divide-white/5">
+                {payload.harvestOpportunities.map((opp: any) => (
+                  <tr key={opp.amfiCode} className="hover:bg-white/[0.01]">
+                    <td className="px-6 py-4">
+                      <p className="text-[13px] text-primary font-medium">{opp.schemeName}</p>
+                      <p className="text-[9px] text-muted uppercase tracking-widest mt-0.5">Bucket: {opp.taxBucket}</p>
+                    </td>
+                    <td className="px-6 py-4 text-right">
+                      <p className="text-[10px] text-muted uppercase mb-0.5">Harvestable</p>
+                      <div className="text-[13px] text-buy font-medium tabular-nums">
+                        <CurrencyValue isPrivate={isPrivate} value={opp.harvestableAmount} />
+                      </div>
+                    </td>
+                    <td className="px-6 py-4">
+                      <div className="flex items-start gap-3">
+                        <div>
+                          <p className="text-[10px] text-muted uppercase mb-0.5">Proxy Recommendation</p>
+                          <p className="text-[11px] text-accent font-medium">{opp.proxySchemeRecommendation}</p>
+                        </div>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
+
+      {/* SECTION 5: EXIT QUEUE */}
+      {payload.exitQueue?.length > 0 && (
         <section className="space-y-6">
           <h3 className="text-muted text-[10px] font-medium uppercase tracking-widest flex items-center gap-2">
             <TrendingUp size={12} className="text-exit rotate-180" /> Priority Exit Queue
@@ -208,12 +296,8 @@ export default function TodayBriefView({
             <div className="p-4 bg-exit/[0.03] border-b border-white/5 flex items-center justify-between">
               <p className="text-[11px] text-secondary">
                 <span className="text-exit font-bold uppercase tracking-tighter mr-2">Warning:</span> 
-                {payload.droppedFundsCount} dropped funds holding <CurrencyValue isPrivate={isPrivate} value={payload.totalExitValue} /> identified for liquidation.
+                {payload.droppedFundsCount} dropped funds identified for liquidation.
               </p>
-              <div className="flex items-center gap-2">
-                <ShieldAlert size={14} className="text-warning" />
-                <span className="text-[10px] font-bold uppercase tracking-widest text-muted">Tax Efficiency Optimized</span>
-              </div>
             </div>
             <table className="w-full text-left">
               <tbody className="divide-y divide-white/5">
@@ -231,13 +315,7 @@ export default function TodayBriefView({
                     </td>
                     <td className="px-6 py-4">
                       <div className="flex items-start gap-2 max-w-xs">
-                        {s.justifications[0]?.includes('slab') || s.justifications[0]?.includes('Debt') ? (
-                          <span className="shrink-0 text-[9px] font-bold uppercase tracking-widest px-1.5 py-0.5 rounded bg-warning/10 text-warning border border-warning/20">
-                            SLAB TAX
-                          </span>
-                        ) : (
-                          <Receipt size={12} className="text-muted mt-0.5 shrink-0" />
-                        )}
+                        <Receipt size={12} className="text-muted mt-0.5 shrink-0" />
                         <p className="text-[11px] text-secondary leading-relaxed">{s.justifications[0]}</p>
                       </div>
                     </td>

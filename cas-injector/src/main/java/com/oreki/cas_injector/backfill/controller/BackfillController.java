@@ -12,8 +12,7 @@ import com.oreki.cas_injector.convictionmetrics.service.ConvictionScoringService
 import com.oreki.cas_injector.convictionmetrics.service.QuantitativeEngineService;
 
 import lombok.RequiredArgsConstructor;
-
-
+import java.util.Map;
 
 @RestController
 @RequestMapping("/admin")
@@ -26,19 +25,39 @@ public class BackfillController {
 
     @PostMapping("/trigger-historical-backfill")
     public ResponseEntity<String> triggerBackfill() {
-        // Note: Because this takes ~4 minutes, the HTTP request might timeout in Postman, 
-        // but the Spring Boot logs will show it running perfectly in the background.
-        // For a production app you'd run this Async, but for this one-time script, sync is fine.
-        
+        if (backfillerService.getIsRunning().get()) {
+            return ResponseEntity.badRequest().body("Backfill is already in progress.");
+        }
         new Thread(() -> backfillerService.executeOneShotBackfill()).start();
-        
-        return ResponseEntity.ok("🚀 Backsfill started in the background! Check your Spring Boot console logs.");
+        return ResponseEntity.ok("Historical backfill started.");
     }
 
-    @GetMapping("/force-sync")
-public String forceSync() {
-    quantitativeEngineService.runNightlyMathEngine();
-    convictionScoringService.calculateAndSaveFinalScores("CFXPR4533R");
-    return "Engine Processed Successfully";
-}
+    @PostMapping("/force-sync")
+    public ResponseEntity<String> forceSync() {
+        if (quantitativeEngineService.getIsRunning().get()) {
+            return ResponseEntity.badRequest().body("Engine sync is already in progress.");
+        }
+        new Thread(() -> {
+            quantitativeEngineService.runNightlyMathEngine();
+            convictionScoringService.calculateAndSaveFinalScores("CFXPR4533R");
+        }).start();
+        return ResponseEntity.ok("Quantitative engine sync started.");
+    }
+
+    @GetMapping("/status")
+    public ResponseEntity<Map<String, Object>> getStatus() {
+        return ResponseEntity.ok(Map.of(
+            "backfill", Map.of(
+                "isRunning", backfillerService.getIsRunning().get(),
+                "progress", backfillerService.getCurrentProgress().get(),
+                "total", backfillerService.getTotalToProcess().get(),
+                "message", backfillerService.getLastStatusMessage()
+            ),
+            "engine", Map.of(
+                "isRunning", quantitativeEngineService.getIsRunning().get(),
+                "step", quantitativeEngineService.getCurrentStep().get(),
+                "message", quantitativeEngineService.getLastStatusMessage()
+            )
+        ));
+    }
 }

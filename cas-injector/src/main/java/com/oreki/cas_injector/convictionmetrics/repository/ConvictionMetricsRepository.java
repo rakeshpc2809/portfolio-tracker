@@ -15,10 +15,24 @@ public class ConvictionMetricsRepository {
     private final JdbcTemplate jdbcTemplate;
 
     /**
-     * Ensures the new NAV signal columns and sub-scores exist in the database.
+     * Ensures the fund_conviction_metrics table and its columns exist.
      */
     public void ensureColumnsExist() {
-        String sql = """
+        String createTableSql = """
+            CREATE TABLE IF NOT EXISTS fund_conviction_metrics (
+                amfi_code VARCHAR(255) NOT NULL,
+                calculation_date DATE NOT NULL,
+                sortino_ratio DOUBLE PRECISION,
+                cvar_5 DOUBLE PRECISION,
+                win_rate DOUBLE PRECISION,
+                max_drawdown DOUBLE PRECISION,
+                conviction_score INT,
+                PRIMARY KEY (amfi_code, calculation_date)
+            );
+        """;
+        jdbcTemplate.execute(createTableSql);
+
+        String addColumnsSql = """
             ALTER TABLE fund_conviction_metrics
             ADD COLUMN IF NOT EXISTS nav_percentile_3yr DOUBLE PRECISION,
             ADD COLUMN IF NOT EXISTS drawdown_from_ath   DOUBLE PRECISION,
@@ -27,9 +41,11 @@ public class ConvictionMetricsRepository {
             ADD COLUMN IF NOT EXISTS risk_score          DOUBLE PRECISION,
             ADD COLUMN IF NOT EXISTS value_score         DOUBLE PRECISION,
             ADD COLUMN IF NOT EXISTS pain_score          DOUBLE PRECISION,
-            ADD COLUMN IF NOT EXISTS friction_score       DOUBLE PRECISION;
+            ADD COLUMN IF NOT EXISTS friction_score      DOUBLE PRECISION,
+            ADD COLUMN IF NOT EXISTS composite_quant_score INT DEFAULT 50,
+            ADD COLUMN IF NOT EXISTS bucket_peer_count   INT DEFAULT 0;
         """;
-        jdbcTemplate.execute(sql);
+        jdbcTemplate.execute(addColumnsSql);
     }
 
     /**
@@ -207,6 +223,7 @@ public class ConvictionMetricsRepository {
         String fetchSql = """
            SELECT m.amfi_code, m.sortino_ratio, m.max_drawdown, m.calculation_date,
                   m.nav_percentile_3yr, m.drawdown_from_ath, m.return_z_score,
+                  m.composite_quant_score,
                   s.asset_category
            FROM fund_conviction_metrics m
            JOIN scheme s ON m.amfi_code = s.amfi_code

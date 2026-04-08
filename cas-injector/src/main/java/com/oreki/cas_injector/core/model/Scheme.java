@@ -37,6 +37,7 @@ public class Scheme {
     
     private String name;
 
+    @Column(name = "amfi_code")
     private String amfiCode;
 
     @Column(name = "asset_category")

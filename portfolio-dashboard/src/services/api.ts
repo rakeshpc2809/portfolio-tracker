@@ -1,6 +1,7 @@
 import { normalizeCategory } from '../utils/formatters';
 
 const BASE_URL = '/api';
+const PARSER_URL = '/parser';
 const API_KEY = 'dev-secret-key'; 
 
 const authenticatedFetch = (url: string, options: RequestInit = {}) => {
@@ -51,10 +52,65 @@ export const fetchTransactions = async (
   return response.json();
 };
 
+export const fetchUnifiedDashboard = async (pan: string, monthlySip: number = 75000, lumpsum: number = 0) => {
+  const response = await authenticatedFetch(
+    `${BASE_URL}/portfolio/${pan}/unified-dashboard?monthlySip=${monthlySip}&lumpsum=${lumpsum}`
+  );
+  if (!response.ok) throw new Error("Unified dashboard synchronization failed");
+  return response.json();
+};
+
 export const fetchTlhOpportunities = async (pan: string) => {
   const response = await authenticatedFetch(
     `${BASE_URL}/portfolio/${pan}/tax-loss-harvesting`
   );
   if (!response.ok) return [];
+  return response.json();
+};
+
+export const uploadCas = async (file: File, password: string) => {
+  const formData = new FormData();
+  formData.append('file', file);
+  formData.append('password', password);
+
+  const response = await fetch(`${PARSER_URL}/api/parse`, {
+    method: 'POST',
+    body: formData,
+    // Note: Don't set Content-Type header for FormData, browser will set it with boundary
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({ detail: 'Unknown error occurred during parsing' }));
+    throw new Error(errorData.detail || 'CAS Parsing failed');
+  }
+
+  return response.json();
+};
+
+export const triggerBackfill = async () => {
+  const response = await authenticatedFetch(`${BASE_URL}/admin/trigger-historical-backfill`, {
+    method: 'POST'
+  });
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(text || "Failed to trigger backfill");
+  }
+  return response.text();
+};
+
+export const triggerForceSync = async () => {
+  const response = await authenticatedFetch(`${BASE_URL}/admin/force-sync`, {
+    method: 'POST'
+  });
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(text || "Failed to trigger sync");
+  }
+  return response.text();
+};
+
+export const fetchAdminStatus = async () => {
+  const response = await authenticatedFetch(`${BASE_URL}/admin/status`);
+  if (!response.ok) throw new Error("Failed to fetch admin status");
   return response.json();
 };

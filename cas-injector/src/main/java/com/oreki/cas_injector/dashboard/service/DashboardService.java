@@ -45,8 +45,23 @@ public class DashboardService {
     private final HistoricalNavRepository historicalNavRepo;
 
     public DashboardSummaryDTO getInvestorSummary(String pan) {
-        Investor investor = investorRepo.findById(pan)
-            .orElseThrow(() -> new RuntimeException("Investor not found"));
+        Optional<Investor> investorOpt = investorRepo.findById(pan);
+        if (investorOpt.isEmpty()) {
+            return DashboardSummaryDTO.builder()
+                .investorName("New Investor")
+                .schemeBreakdown(List.of())
+                .totalInvestedAmount(BigDecimal.ZERO)
+                .totalRealizedGain(BigDecimal.ZERO)
+                .totalLTCG(BigDecimal.ZERO)
+                .totalSTCG(BigDecimal.ZERO)
+                .currentInvestedAmount(BigDecimal.ZERO)
+                .currentValueAmount(BigDecimal.ZERO)
+                .totalUnrealizedGain(BigDecimal.ZERO)
+                .overallReturn("0%")
+                .overallXirr("0%")
+                .build();
+        }
+        Investor investor = investorOpt.get();
 
         List<TransactionDTO> totalCashFlow=new ArrayList<>();
         

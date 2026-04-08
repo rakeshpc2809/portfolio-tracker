@@ -15,8 +15,8 @@ import java.util.stream.Collectors;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.stereotype.Service;
 
-import tools.jackson.core.type.TypeReference;
-import tools.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.oreki.cas_injector.backfill.service.NavService;
 import com.oreki.cas_injector.core.model.Scheme;
 import com.oreki.cas_injector.taxmanagement.dto.TlhOpportunity;

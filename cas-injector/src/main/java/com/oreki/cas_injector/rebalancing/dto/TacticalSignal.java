@@ -2,11 +2,12 @@ package com.oreki.cas_injector.rebalancing.dto;
 
 import java.time.LocalDate;
 import java.util.List;
+import com.oreki.cas_injector.core.utils.SignalType;
 
 public record TacticalSignal(
     String schemeName,
     String amfiCode,
-    String action,
+    SignalType action,
     String amount,
     double plannedPercentage,
     double actualPercentage,

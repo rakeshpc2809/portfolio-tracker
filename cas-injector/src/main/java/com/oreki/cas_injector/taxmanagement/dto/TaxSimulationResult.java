@@ -7,5 +7,9 @@ public record TaxSimulationResult(
     double estimatedTax,
     double taxDragPercentage,
     boolean isTaxLocked,
-    boolean isDebt  // NEW: true for non-equity funds
-) {}
+    boolean isDebt  // true for non-equity funds
+) {
+    public boolean hasStcg() {
+        return stcgProfit > 0;
+    }
+}

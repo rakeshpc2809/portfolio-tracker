@@ -48,72 +48,100 @@ public class ConvictionScoringService {
 
         for (Map<String, Object> fund : fundMetrics) {
             String amfiCode = (String) fund.get("amfi_code");
-            
             try {
-                double sortino = fund.get("sortino_ratio") != null ? ((Number) fund.get("sortino_ratio")).doubleValue() : 0.0;
-                double maxDrawdown = fund.get("max_drawdown") != null ? Math.abs(((Number) fund.get("max_drawdown")).doubleValue()) : 0.0;
-                
-                double navPercentile  = fund.get("nav_percentile_3yr")  != null
-                    ? ((Number) fund.get("nav_percentile_3yr")).doubleValue()  : 0.5;
-                double athDrawdown    = fund.get("drawdown_from_ath")    != null
-                    ? ((Number) fund.get("drawdown_from_ath")).doubleValue()   : 0.0;
-                double returnZScore   = fund.get("return_z_score")       != null
-                    ? ((Number) fund.get("return_z_score")).doubleValue()      : 0.0;
-                String assetCategory  = (String) fund.get("asset_category");
+                String assetCategory = safeStr(fund.get("asset_category"));
+                boolean isDebtLike = isDebtLikeCategory(assetCategory);
 
-                double valueScore = calculateValueScore(navPercentile, athDrawdown, returnZScore, assetCategory);
+                double sortino     = safeNum(fund.get("sortino_ratio"));
+                double maxDrawdown = Math.abs(safeNum(fund.get("max_drawdown")));
+                double navPercentile = safeNumDefault(fund.get("nav_percentile_3yr"), 0.5);
+                double athDrawdown   = safeNum(fund.get("drawdown_from_ath"));
+                double returnZScore  = safeNum(fund.get("return_z_score"));
+                double cqs           = safeNumDefault(fund.get("composite_quant_score"), -1.0);
 
                 double dynamicPersonalCagr = 0.0;
                 double dynamicTaxDrag = 0.0;
-                
+
                 List<TaxLot> fundLots = lotsByAmfi.get(amfiCode);
                 if (fundLots != null && !fundLots.isEmpty()) {
                     var details = navService.getLatestSchemeDetails(amfiCode);
                     double currentNav = (details != null && details.getNav() != null) ? details.getNav().doubleValue() : 0.0;
-                    
                     if (currentNav > 0) {
-                        double totalCost = 0;
-                        double totalValue = 0;
+                        double totalCost = 0, totalValue = 0;
                         LocalDate oldestDate = LocalDate.now();
-                        
                         for (TaxLot lot : fundLots) {
-                            double lotCost = lot.getRemainingUnits().doubleValue() * lot.getCostBasisPerUnit().doubleValue();
-                            totalCost += lotCost;
+                            double lCost = lot.getRemainingUnits().doubleValue() * lot.getCostBasisPerUnit().doubleValue();
+                            totalCost  += lCost;
                             totalValue += lot.getRemainingUnits().doubleValue() * currentNav;
                             if (lot.getBuyDate().isBefore(oldestDate)) oldestDate = lot.getBuyDate();
                         }
-                        
-                        double absoluteReturn = (totalValue - totalCost) / totalCost;
+                        double absoluteReturn = totalCost > 0 ? (totalValue - totalCost) / totalCost : 0;
                         double yearsInvested = Math.max(0.5, ChronoUnit.DAYS.between(oldestDate, LocalDate.now()) / 365.0);
-                        dynamicPersonalCagr = Math.pow(1 + absoluteReturn, 1 / yearsInvested) - 1; 
-
+                        dynamicPersonalCagr = Math.pow(1 + absoluteReturn, 1.0 / yearsInvested) - 1;
                         try {
                             String schemeName = fundLots.get(0).getScheme().getName();
                             TaxSimulationResult taxFriction = taxSimulator.simulateSellOrder(schemeName, totalValue, currentNav);
                             dynamicTaxDrag = taxFriction.taxDragPercentage();
-                        } catch (Exception e) {
-                            // Ignored
-                        }
+                        } catch (Exception ignored) {}
                     }
                 }
 
-                // 3. BASE SCORING MATH
-                double yieldScore = normalize(dynamicPersonalCagr, 0.05, 0.25) * 100; 
-                double riskScore = normalize(sortino, 0.5, 2.5) * 100; 
-                double painScore = invertNormalize(maxDrawdown, 0.05, 0.35) * 100; 
-                double frictionScore = invertNormalize(dynamicTaxDrag, 0.0, 0.15) * 100; 
+                double yieldScore, riskScore, valueScore, painScore, frictionScore;
 
-                double baseConviction = (yieldScore * WEIGHT_YIELD) + (riskScore * WEIGHT_RISK) + 
-                                        (valueScore * WEIGHT_VALUE) +
-                                        (painScore * WEIGHT_PAIN) + (frictionScore * WEIGHT_FRICTION);
+                if (isDebtLike) {
+                    // ══════════════════════════════════════════════════════
+                    // DEBT/ARBITRAGE SCORING MODEL
+                    // These funds: monotonically increase, low drawdown is expected,
+                    // their value is in stability + yield vs MAR, not price dips.
+                    // ══════════════════════════════════════════════════════
 
-                // 5. Final Calculation
+                    // Yield: calibrated for debt returns (3–9% CAGR range)
+                    yieldScore = normalize(dynamicPersonalCagr, 0.03, 0.09) * 100;
+
+                    // Risk: Sortino still valid — a stable debt fund should have VERY high Sortino
+                    // calibrate for 1–5 range (debt funds can have extremely high Sortino)
+                    riskScore = (cqs >= 0) ? cqs : normalize(sortino, 0.5, 5.0) * 100;
+
+                    // Value score for debt: Reward CONSISTENCY, not price dips.
+                    // A high NAV percentile means the fund has been steadily compounding — that's GOOD.
+                    // Use return Z-score instead: positive Z-score = outperforming peers = good.
+                    double debtReturnConsistency = returnZScore > 0
+                        ? Math.min(100, 50 + (returnZScore * 15))   // positive Z = above peer average
+                        : Math.max(0,  50 + (returnZScore * 15));
+                    valueScore = debtReturnConsistency;
+
+                    // Pain: debt funds rarely have significant drawdown. Reward low MDD heavily.
+                    // A debt fund with 0% drawdown should score 100 on this.
+                    painScore = invertNormalize(maxDrawdown, 0.0, 0.05) * 100; // 0–5% range for debt
+
+                    // Friction: same tax drag model, but debt funds have SLAB taxation post-Apr 2023
+                    // so friction naturally higher — but the system already simulates this correctly.
+                    frictionScore = invertNormalize(dynamicTaxDrag, 0.0, 0.30) * 100; // 0–30% slab drag range
+
+                } else {
+                    // ══════════════════════════════════════════════════════
+                    // EQUITY / HYBRID SCORING MODEL (unchanged)
+                    // ══════════════════════════════════════════════════════
+                    yieldScore    = normalize(dynamicPersonalCagr, 0.05, 0.25) * 100;
+                    riskScore     = (cqs >= 0) ? cqs : normalize(sortino, 0.5, 2.5) * 100;
+                    valueScore    = calculateValueScore(navPercentile, athDrawdown, returnZScore, assetCategory);
+                    painScore     = invertNormalize(maxDrawdown, 0.05, 0.35) * 100;
+                    frictionScore = invertNormalize(dynamicTaxDrag, 0.0, 0.15) * 100;
+                }
+
+                double baseConviction = (yieldScore * WEIGHT_YIELD) + (riskScore * WEIGHT_RISK) +
+                                        (valueScore * WEIGHT_VALUE) + (painScore * WEIGHT_PAIN) +
+                                        (frictionScore * WEIGHT_FRICTION);
+
                 int finalScore = (int) Math.round(baseConviction);
-                finalScore = Math.max(1, Math.min(100, finalScore)); 
+                finalScore = Math.max(1, Math.min(100, finalScore));
 
-                // 6. Repository Update (Enhanced Breakdown for Design 5)
-                convictionMetricsRepository.updateConvictionBreakdown(finalScore, yieldScore, riskScore, 
-                    valueScore, painScore, frictionScore, amfiCode);
+                convictionMetricsRepository.updateConvictionBreakdown(
+                    finalScore, yieldScore, riskScore, valueScore, painScore, frictionScore, amfiCode);
+
+                log.debug("Score [{}] cat={} debtLike={} → {}/100 (Y:{:.0f} R:{:.0f} V:{:.0f} P:{:.0f} F:{:.0f})",
+                    amfiCode, assetCategory, isDebtLike, finalScore,
+                    yieldScore, riskScore, valueScore, painScore, frictionScore);
 
             } catch (Exception e) {
                 log.error("❌ Crash scoring AMFI {}", amfiCode, e);
@@ -121,6 +149,25 @@ public class ConvictionScoringService {
         }
         log.info("🏁 [3/3] Dynamic Conviction Scoring completed.");
     }
+
+    /**
+     * Returns true for debt, gilt, bond, liquid, money market, banking&psu, arbitrage categories.
+     * These all share monotonically-increasing NAV behaviour and require different scoring.
+     */
+    private boolean isDebtLikeCategory(String assetCategory) {
+        if (assetCategory == null) return false;
+        String upper = assetCategory.toUpperCase();
+        return upper.contains("DEBT") || upper.contains("GILT") || upper.contains("BOND")
+            || upper.contains("LIQUID") || upper.contains("ARBITRAGE")
+            || upper.contains("MONEY MARKET") || upper.contains("BANKING AND PSU")
+            || upper.contains("CORPORATE") || upper.contains("OVERNIGHT")
+            || upper.contains("ULTRA SHORT") || upper.contains("LOW DURATION");
+    }
+
+    // Safe helpers to replace repetitive null checks
+    private double safeNum(Object o) { return o == null ? 0.0 : ((Number) o).doubleValue(); }
+    private double safeNumDefault(Object o, double def) { return o == null ? def : ((Number) o).doubleValue(); }
+    private String safeStr(Object o) { return o == null ? "" : o.toString(); }
 
     private double calculateValueScore(double navPercentile, double athDrawdown,
                                    double returnZScore, String assetCategory) {

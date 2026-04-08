@@ -1,10 +1,11 @@
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { fetchMasterPortfolio } from "./services/api";
+import { fetchMasterPortfolio, fetchUnifiedDashboard } from "./services/api";
 import Dashboard from "./components/layout/Dashboard";
 
 export default function App() {
   const [portfolioData, setPortfolioData] = useState<any>(null);
+  const [tacticalPayload, setTacticalPayload] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [sipAmount, setSipAmount] = useState(75000);
@@ -14,16 +15,47 @@ export default function App() {
 
   useEffect(() => {
     setLoading(true);
-    fetchMasterPortfolio(investorPan, sipAmount, lumpsum)
-      .then(data => {
-        setPortfolioData(data);
+    
+    const loadData = async () => {
+      try {
+        const [portfolio, tactical] = await Promise.all([
+          fetchMasterPortfolio(investorPan, sipAmount, lumpsum).catch(err => {
+            console.warn("Portfolio fetch failed, using fallback:", err);
+            return {
+              investorName: "New Investor",
+              schemeBreakdown: [],
+              totalInvestedAmount: 0,
+              currentValueAmount: 0,
+              totalUnrealizedGain: 0,
+              overallXirr: "0%",
+              totalSTCG: 0
+            };
+          }),
+          fetchUnifiedDashboard(investorPan, sipAmount, lumpsum).catch(err => {
+            console.warn("Tactical fetch failed, using fallback:", err);
+            return {
+              sipPlan: [],
+              opportunisticSignals: [],
+              exitQueue: [],
+              harvestOpportunities: [],
+              totalExitValue: 0,
+              totalHarvestValue: 0
+            };
+          })
+        ]);
+        
+        setPortfolioData(portfolio);
+        setTacticalPayload(tactical);
+        setError(null);
+      } catch (err) {
+        console.error("Critical System Failure:", err);
+        setError("Unable to initialize dashboard. Please try again later.");
+      } finally {
         setLoading(false);
-      })
-      .catch((err) => {
-        console.error("System Failure:", err);
-        setError("Unable to load portfolio data. Please check connection.");
-        setLoading(false);
-      });
+      }
+    };
+
+    loadData();
   }, [sipAmount, lumpsum]);
 
   return (
@@ -37,11 +69,17 @@ export default function App() {
           className="fixed inset-0 bg-[#09090f] flex flex-col items-center justify-center z-[200]"
         >
           <div className="w-10 h-10 border-2 border-indigo-500/20 border-t-indigo-500 rounded-full animate-spin mb-4" />
-          <p className="text-[10px] font-bold uppercase tracking-[0.3em] text-muted animate-pulse">Loading your portfolio...</p>
+          <p className="text-[10px] font-bold uppercase tracking-[0.3em] text-muted animate-pulse">Initializing your dashboard...</p>
         </motion.div>
       ) : error ? (
-        <div className="fixed inset-0 bg-[#09090f] flex items-center justify-center text-red-400 font-medium text-xs uppercase tracking-widest px-8 text-center">
-          {error}
+        <div className="fixed inset-0 bg-[#09090f] flex flex-col items-center justify-center gap-4 px-8 text-center">
+          <p className="text-red-400 font-medium text-xs uppercase tracking-widest">{error}</p>
+          <button 
+            onClick={() => window.location.reload()}
+            className="px-4 py-2 bg-white/5 border border-white/10 rounded text-[10px] font-bold uppercase tracking-widest text-muted hover:text-white transition-colors"
+          >
+            Retry Connection
+          </button>
         </div>
       ) : (
         <motion.div 
@@ -51,7 +89,7 @@ export default function App() {
           transition={{ duration: 0.4 }}
         >
           <Dashboard 
-            portfolioData={portfolioData} 
+            portfolioData={{ ...portfolioData, tacticalPayload }} 
             sipAmount={sipAmount} 
             setSipAmount={setSipAmount}
             lumpsum={lumpsum}

@@ -152,7 +152,9 @@ export default function RebalanceView({
                 <td className="px-6 py-4 text-right">
                   <span className={`text-[10px] font-bold uppercase tracking-widest ${
                     s.action === 'BUY' ? 'text-buy' : 
-                    s.action === 'EXIT' ? 'text-exit' : 'text-muted'
+                    s.action === 'EXIT' || s.action === 'SELL' ? 'text-exit' : 
+                    s.action === 'HOLD' || s.action === 'WATCH' ? 'text-warning' :
+                    'text-muted'
                   }`}>
                     {s.action}
                   </span>

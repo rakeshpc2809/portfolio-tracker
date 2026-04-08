@@ -21,7 +21,7 @@ import com.oreki.cas_injector.core.dto.SchemeDetailsDTO;
 
 import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
-import tools.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.JsonNode;
 
 
 @JsonIgnoreProperties(ignoreUnknown = true)

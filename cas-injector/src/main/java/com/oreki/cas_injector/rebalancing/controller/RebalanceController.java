@@ -10,6 +10,8 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.oreki.cas_injector.dashboard.dto.UnifiedTacticalPayload;
+import com.oreki.cas_injector.rebalancing.dto.SipLineItem;
 import com.oreki.cas_injector.rebalancing.dto.TacticalSignal;
 import com.oreki.cas_injector.rebalancing.service.PortfolioOrchestrator;
 import com.oreki.cas_injector.taxmanagement.dto.TlhOpportunity;
@@ -49,4 +51,39 @@ public class RebalanceController {
         public List<TlhOpportunity> getTlhOpportunities(@PathVariable String pan) {
             return taxLossHarvestingService.scanForOpportunities(pan);
         }
+
+    @GetMapping("/{pan}/unified-dashboard")
+    public ResponseEntity<UnifiedTacticalPayload> getUnifiedDashboard(
+            @PathVariable String pan,
+            @RequestParam(defaultValue = "75000") double monthlySip,
+            @RequestParam(defaultValue = "0") double lumpsum) {
+        
+        List<SipLineItem> sip         = orchestrator.computeSipPlan(pan, monthlySip);
+        List<TacticalSignal> oppBuys  = orchestrator.computeOpportunisticSignals(pan, lumpsum);
+        List<TacticalSignal> sellsigs = orchestrator.computeActiveSellSignals(pan);   
+        List<TacticalSignal> exits    = orchestrator.computeExitQueue(pan);
+        List<TlhOpportunity> harvest  = taxLossHarvestingService.scanForOpportunities(pan);
+        
+        double totalExit    = exits.stream().mapToDouble(s -> parseAmount(s.amount())).sum();
+        double totalHarvest = harvest.stream().mapToDouble(TlhOpportunity::harvestableAmount).sum();
+        
+        return ResponseEntity.ok(UnifiedTacticalPayload.builder()
+            .sipPlan(sip)
+            .opportunisticSignals(oppBuys)
+            .activeSellSignals(sellsigs)
+            .exitQueue(exits)
+            .harvestOpportunities(harvest)
+            .totalExitValue(totalExit)
+            .totalHarvestValue(totalHarvest)
+            .droppedFundsCount(exits.size())
+            .build());
+    }
+
+    private double parseAmount(String amt) {
+        try {
+            return Double.parseDouble(amt);
+        } catch (Exception e) {
+            return 0;
+        }
+    }
 }

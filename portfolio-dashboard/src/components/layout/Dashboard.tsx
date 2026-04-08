@@ -9,9 +9,11 @@ import {
   ShieldCheck,
   Lock,
   Unlock,
-  PieChart
+  PieChart,
+  Upload
 } from 'lucide-react';
 import * as Switch from '@radix-ui/react-switch';
+import * as Tabs from '@radix-ui/react-tabs';
 import { formatCurrencyShort } from '../../utils/formatters';
 
 // Views
@@ -22,6 +24,7 @@ import TaxView from '../views/TaxView';
 import LedgerView from '../views/LedgerView';
 import FundDetailView from '../views/FundDetailView';
 import FundsListView from '../views/FundsListView';
+import CasUploadView from '../views/CasUploadView';
 
 export default function Dashboard({ 
   portfolioData,
@@ -49,6 +52,7 @@ export default function Dashboard({
     { id: 'rebalance', label: 'Rebalance', icon: <ArrowLeftRight size={14}/> },
     { id: 'tax', label: 'Tax', icon: <ShieldCheck size={14}/> },
     { id: 'ledger', label: 'Ledger', icon: <Receipt size={14}/> },
+    { id: 'upload', label: 'Data', icon: <Upload size={14}/> },
   ];
 
   const selectedFund = portfolioData?.schemeBreakdown?.find((s: any) => s.schemeName === selectedFundName);
@@ -71,7 +75,7 @@ export default function Dashboard({
       <header className="sticky top-0 z-[90] border-b border-white/5 bg-[#09090f]/80 backdrop-blur-md px-8 py-4 flex justify-between items-center">
         <div className="flex items-center gap-10">
           <div className="flex items-center gap-2">
-            <div className="w-6 h-6 bg-accent rounded-md flex items-center justify-center">
+            <div className="w-6 h-6 bg-accent rounded-md flex items-center justify-center shadow-[0_0_15px_rgba(129,140,248,0.4)]">
               <TrendingUp size={14} className="text-white" />
             </div>
             <h1 className="text-[10px] font-bold uppercase tracking-[0.2em] text-accent">Portfolio OS</h1>
@@ -79,8 +83,8 @@ export default function Dashboard({
 
           <div className="hidden lg:flex items-center gap-8 border-l border-white/5 pl-8">
             {stats.map(s => (
-              <div key={s.label} className="space-y-0.5">
-                <p className="text-[9px] uppercase tracking-widest text-muted">{s.label}</p>
+              <div key={s.label} className="space-y-0.5 group cursor-default">
+                <p className="text-[9px] uppercase tracking-widest text-muted transition-colors group-hover:text-secondary">{s.label}</p>
                 <p className={`text-sm font-medium tabular-nums ${s.color || 'text-primary'}`}>{mask(s.value)}</p>
               </div>
             ))}
@@ -88,14 +92,14 @@ export default function Dashboard({
         </div>
 
         <div className="flex items-center gap-6">
-          <div className="flex items-center gap-3 bg-white/[0.03] border border-white/5 px-3 py-1.5 rounded-lg">
+          <div className="flex items-center gap-3 bg-white/[0.03] border border-white/5 px-3 py-1.5 rounded-lg hover:bg-white/[0.05] transition-colors">
             <span className="text-[9px] font-bold uppercase tracking-widest text-muted">{isPrivate ? 'Hidden' : 'Visible'}</span>
             <Switch.Root 
               checked={isPrivate} 
               onCheckedChange={setIsPrivate}
-              className="w-8 h-4 bg-white/10 rounded-full relative data-[state=checked]:bg-accent outline-none cursor-pointer transition-colors"
+              className="w-8 h-4 bg-white/10 rounded-full relative data-[state=checked]:bg-accent outline-none cursor-pointer transition-colors shadow-inner"
             >
-              <Switch.Thumb className="block w-3 h-3 bg-white rounded-full transition-transform duration-150 translate-x-0.5 will-change-transform data-[state=checked]:translate-x-[18px]" />
+              <Switch.Thumb className="block w-3 h-3 bg-white rounded-full transition-transform duration-150 translate-x-0.5 will-change-transform data-[state=checked]:translate-x-[18px] shadow-sm" />
             </Switch.Root>
             {isPrivate ? <Lock size={12} className="text-muted" /> : <Unlock size={12} className="text-muted" />}
           </div>
@@ -103,71 +107,75 @@ export default function Dashboard({
       </header>
 
       <main className="relative z-10 p-8 max-w-7xl mx-auto">
-        <nav className="flex flex-wrap items-center gap-1 mb-12 p-1 bg-white/[0.02] border border-white/5 rounded-xl w-fit">
-          {tabs.map((tab) => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              className={`flex items-center gap-2 px-5 py-2 rounded-lg text-[11px] font-bold uppercase tracking-wider transition-all duration-150 ${
-                activeTab === tab.id ? 'bg-accent/10 text-accent' : 'text-muted hover:text-secondary'
-              }`}
+        <Tabs.Root value={activeTab} onValueChange={setActiveTab} className="space-y-12">
+          <Tabs.List className="flex flex-wrap items-center gap-1 p-1 bg-white/[0.02] border border-white/5 rounded-xl w-fit backdrop-blur-sm">
+            {tabs.map((tab) => (
+              <Tabs.Trigger
+                key={tab.id}
+                value={tab.id}
+                className="flex items-center gap-2 px-5 py-2 rounded-lg text-[11px] font-bold uppercase tracking-wider transition-all duration-200 data-[state=active]:bg-accent/10 data-[state=active]:text-accent data-[state=inactive]:text-muted data-[state=inactive]:hover:text-secondary outline-none cursor-pointer"
+              >
+                {tab.icon}
+                {tab.label}
+              </Tabs.Trigger>
+            ))}
+          </Tabs.List>
+
+          <AnimatePresence mode="wait">
+            <motion.div
+              key={activeTab}
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              transition={{ duration: 0.2, ease: "easeOut" }}
             >
-              {tab.icon}
-              {tab.label}
-            </button>
-          ))}
-        </nav>
+              <Tabs.Content value="today" className="outline-none focus:ring-0">
+                <TodayBriefView 
+                  portfolioData={portfolioData}
+                  sipAmount={sipAmount}
+                  setSipAmount={setSipAmount}
+                  lumpsum={lumpsum}
+                  setLumpsum={setLumpsum}
+                  onFundClick={setSelectedFundName}
+                  isPrivate={isPrivate}
+                />
+              </Tabs.Content>
+              
+              <Tabs.Content value="portfolio" className="outline-none focus:ring-0">
+                <PortfolioView portfolioData={portfolioData} isPrivate={isPrivate} />
+              </Tabs.Content>
 
-        <AnimatePresence mode="wait">
-          <motion.div
-            key={activeTab}
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -10 }}
-            transition={{ duration: 0.2, ease: "easeOut" }}
-          >
-            {activeTab === 'today' && (
-              <TodayBriefView 
-                portfolioData={portfolioData}
-                sipAmount={sipAmount}
-                setSipAmount={setSipAmount}
-                lumpsum={lumpsum}
-                setLumpsum={setLumpsum}
-                onFundClick={setSelectedFundName}
-                isPrivate={isPrivate}
-              />
-            )}
-            
-            {activeTab === 'portfolio' && (
-              <PortfolioView portfolioData={portfolioData} isPrivate={isPrivate} />
-            )}
+              <Tabs.Content value="funds" className="outline-none focus:ring-0">
+                <FundsListView 
+                  portfolioData={portfolioData} 
+                  onFundClick={setSelectedFundName}
+                  isPrivate={isPrivate}
+                />
+              </Tabs.Content>
 
-            {activeTab === 'funds' && (
-              <FundsListView 
-                portfolioData={portfolioData} 
-                onFundClick={setSelectedFundName}
-                isPrivate={isPrivate}
-              />
-            )}
+              <Tabs.Content value="rebalance" className="outline-none focus:ring-0">
+                <RebalanceView 
+                  portfolioData={portfolioData}
+                  sipAmount={sipAmount}
+                  setSipAmount={setSipAmount}
+                  isPrivate={isPrivate}
+                />
+              </Tabs.Content>
+              
+              <Tabs.Content value="tax" className="outline-none focus:ring-0">
+                <TaxView portfolioData={portfolioData} isPrivate={isPrivate} pan={investorPan} />
+              </Tabs.Content>
+              
+              <Tabs.Content value="ledger" className="outline-none focus:ring-0">
+                <LedgerView investorPan={investorPan} isPrivate={isPrivate} />
+              </Tabs.Content>
 
-            {activeTab === 'rebalance' && (
-              <RebalanceView 
-                portfolioData={portfolioData}
-                sipAmount={sipAmount}
-                setSipAmount={setSipAmount}
-                isPrivate={isPrivate}
-              />
-            )}
-            
-            {activeTab === 'tax' && (
-              <TaxView portfolioData={portfolioData} isPrivate={isPrivate} pan={investorPan} />
-            )}
-            
-            {activeTab === 'ledger' && (
-              <LedgerView investorPan={investorPan} isPrivate={isPrivate} />
-            )}
-          </motion.div>
-        </AnimatePresence>
+              <Tabs.Content value="upload" className="outline-none focus:ring-0">
+                <CasUploadView />
+              </Tabs.Content>
+            </motion.div>
+          </AnimatePresence>
+        </Tabs.Root>
       </main>
 
       {selectedFundName && (

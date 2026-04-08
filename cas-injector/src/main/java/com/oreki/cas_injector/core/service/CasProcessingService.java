@@ -29,7 +29,7 @@ import com.oreki.cas_injector.transactions.repository.TransactionRepository;
 
 import jakarta.transaction.Transactional;
 import lombok.extern.slf4j.Slf4j;
-import tools.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.JsonNode;
 
 @Service
 @Slf4j
