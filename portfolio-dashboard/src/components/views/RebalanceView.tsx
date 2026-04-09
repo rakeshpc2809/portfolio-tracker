@@ -90,7 +90,7 @@ export default function RebalanceView({
                 />
               )}
               <ReferenceLine y={0} stroke="rgba(255,255,255,0.1)" />
-              <Bar dataKey="drift" radius={[4, 4, 0, 0]} barSize={30}>
+              <Bar dataKey="drift" radius={[4, 4, 0, 0]} barSize={20}>
                 {data.map((entry: any, index: number) => (
                   <Cell key={`cell-${index}`} fill={entry.color} />
                 ))}
@@ -100,23 +100,23 @@ export default function RebalanceView({
         </div>
         <div className="mt-8 pt-8 border-t border-white/5 flex items-center gap-6">
           <div className="flex items-center gap-2">
-            <div className="w-3 h-3 rounded-sm bg-exit" />
+            <div className="w-3 h-3 rounded-sm bg-exit shadow-[0_0_8px_rgba(248,113,113,0.4)]" />
             <span className="text-[10px] uppercase tracking-widest text-muted">Overweight</span>
           </div>
           <div className="flex items-center gap-2">
-            <div className="w-3 h-3 rounded-sm bg-buy" />
+            <div className="w-3 h-3 rounded-sm bg-buy shadow-[0_0_8px_rgba(52,211,153,0.4)]" />
             <span className="text-[10px] uppercase tracking-widest text-muted">Underweight</span>
           </div>
           <div className="ml-auto text-secondary text-[11px] font-medium">
-            Total drift: <span className="text-primary">{totalDrift.toFixed(1)}%</span> across your portfolio. {needsAttention} funds need rebalancing.
+            Total drift: <span className="text-primary font-bold">{totalDrift.toFixed(1)}%</span> across your portfolio. {needsAttention} funds need rebalancing.
           </div>
         </div>
       </section>
 
       {/* DETAILS TABLE */}
-      <section className="bg-surface border border-white/5 rounded-xl overflow-hidden">
+      <section className="bg-surface border border-border rounded-xl overflow-hidden shadow-lg">
         <table className="w-full text-left">
-          <thead className="bg-white/[0.02] text-muted text-[10px] uppercase tracking-widest border-b border-white/5">
+          <thead className="bg-white/[0.02] text-muted text-[10px] uppercase tracking-widest border-b border-border">
             <tr>
               <th className="px-6 py-4 font-medium">Fund Name</th>
               <th className="px-6 py-4 font-medium">Mode</th>
@@ -126,25 +126,31 @@ export default function RebalanceView({
               <th className="px-6 py-4 font-medium text-right">Action</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-white/5">
+          <tbody className="divide-y divide-border">
             {data.map((s: any) => (
               <tr key={s.schemeName} className="hover:bg-white/[0.01] transition-colors group">
-                <td className="px-6 py-4 text-[13px] text-primary truncate max-w-md">{s.schemeName}</td>
+                <td className="px-6 py-4 text-[13px] text-primary truncate max-w-md font-medium group-hover:text-white transition-colors">{s.schemeName}</td>
                 <td className="px-6 py-4">
-                  <span className={`text-[9px] font-bold uppercase tracking-widest px-2 py-0.5 rounded ${
-                    s.signalType === 'core' ? 'bg-teal-500/10 text-teal-400' :
-                    s.signalType === 'strategy' ? 'bg-purple-500/10 text-purple-400' :
-                    s.signalType === 'satellite' ? 'bg-amber-500/10 text-amber-400' :
-                    s.signalType === 'rebalancer' ? 'bg-blue-500/10 text-blue-400' :
-                    s.signalType === 'dropped' ? 'bg-zinc-500/10 text-zinc-400' :
-                    'bg-white/5 text-muted'
-                  }`}>
-                    {s.signalType || 'unknown'}
-                  </span>
+                  {(() => {
+                    const mode = (s.fundStatus || s.signalType || '').toLowerCase();
+                    const styles: Record<string, string> = {
+                      core:       'bg-teal-500/10 text-teal-400 border border-teal-500/20',
+                      strategy:   'bg-purple-500/10 text-purple-400 border border-purple-500/20',
+                      satellite:  'bg-amber-500/10 text-amber-400 border border-amber-500/20',
+                      rebalancer: 'bg-blue-500/10 text-blue-400 border border-blue-500/20',
+                      accumulator:'bg-indigo-500/10 text-indigo-400 border border-indigo-500/20',
+                      dropped:    'bg-zinc-500/10 text-zinc-500 border border-zinc-500/20',
+                    };
+                    return (
+                      <span className={`text-[9px] font-bold uppercase tracking-widest px-2 py-0.5 rounded ${styles[mode] ?? 'bg-white/5 text-muted'}`}>
+                        {mode || 'unknown'}
+                      </span>
+                    );
+                  })()}
                 </td>
-                <td className="px-6 py-4 text-right text-[13px] text-secondary tabular-nums">{(s.plannedPercentage || 0).toFixed(1)}%</td>
-                <td className="px-6 py-4 text-right text-[13px] text-secondary tabular-nums">{(s.allocationPercentage || 0).toFixed(1)}%</td>
-                <td className={`px-6 py-4 text-right text-[13px] font-medium tabular-nums ${
+                <td className="px-6 py-4 text-right text-[13px] text-secondary tabular-nums font-medium group-hover:text-primary">{(s.plannedPercentage || 0).toFixed(1)}%</td>
+                <td className="px-6 py-4 text-right text-[13px] text-secondary tabular-nums font-medium group-hover:text-primary">{(s.allocationPercentage || 0).toFixed(1)}%</td>
+                <td className={`px-6 py-4 text-right text-[13px] font-bold tabular-nums ${
                   s.drift > 1 ? 'text-exit' : s.drift < -1 ? 'text-buy' : 'text-hold'
                 }`}>
                   {s.drift > 0 ? '+' : ''}{s.drift}%
@@ -170,7 +176,7 @@ export default function RebalanceView({
         <div className="flex-1 space-y-4">
           <div className="flex justify-between items-center">
             <h3 className="text-primary text-sm font-medium tracking-tight">SIP Correction Simulator</h3>
-            <CurrencyValue isPrivate={isPrivate} value={sipAmount} className="text-primary tabular-nums font-medium" />
+            <CurrencyValue isPrivate={isPrivate} value={sipAmount} className="text-primary tabular-nums font-bold text-lg glow-accent" />
           </div>
           <input 
             type="range" min="0" max="200000" step="1000" 
@@ -188,26 +194,30 @@ export default function RebalanceView({
               This SIP of <CurrencyValue isPrivate={isPrivate} value={sipAmount} /> would be deployed as:
             </p>
             {sipAllocation.map((s: any) => (
-              <div key={s.name} className="flex items-center justify-between py-1.5">
-                <span className="text-[12px] text-secondary truncate flex-1">{s.name}</span>
-                <span className="text-[12px] text-buy tabular-nums font-medium ml-4">
+              <div key={s.name} className="flex items-center justify-between py-1.5 group">
+                <span className="text-[12px] text-secondary truncate flex-1 group-hover:text-primary transition-colors">{s.name}</span>
+                <span className="text-[12px] text-buy tabular-nums font-bold ml-4">
                   <CurrencyValue isPrivate={isPrivate} value={s.amount} />
                 </span>
               </div>
             ))}
             {etaMonths && (
               <p className="text-[11px] text-muted pt-3 border-t border-white/5 mt-3">
-                At this rate, portfolio drift normalises in approx. <span className="text-primary font-medium">{etaMonths} months</span>.
+                At this rate, portfolio drift normalises in approx. <span className="text-primary font-bold glow-buy">{etaMonths} months</span>.
               </p>
             )}
           </div>
         </div>
         
-        <div className="shrink-0 flex flex-col items-center justify-center p-6 bg-surface-elevated border border-white/5 rounded-2xl w-48 text-center sticky top-0">
-          <p className="text-muted text-[10px] uppercase tracking-widest mb-2">Portfolio Drift</p>
-          <p className="text-2xl font-medium text-primary">{(totalDrift || 0).toFixed(1)}%</p>
-          <p className={`text-[10px] font-bold mt-2 uppercase tracking-tighter ${totalDrift < 5 ? 'text-buy' : totalDrift < 10 ? 'text-warning' : 'text-exit'}`}>
-            {totalDrift < 5 ? 'Healthy Alignment' : totalDrift < 10 ? 'Moderate Drift' : 'High Variance'}
+        <div className="shrink-0 flex flex-col items-center justify-center p-6 bg-surface-elevated border border-border rounded-2xl w-48 text-center sticky top-0 shadow-2xl">
+          <p className="text-muted text-[10px] uppercase tracking-widest mb-2 font-bold">Portfolio Drift</p>
+          <p className="text-3xl font-bold text-primary tabular-nums">{(totalDrift || 0).toFixed(1)}%</p>
+          <p className={`text-[10px] font-black mt-3 uppercase tracking-wider px-3 py-1 rounded-full ${
+            totalDrift < 5 ? 'text-buy bg-buy/10 border border-buy/20' : 
+            totalDrift < 10 ? 'text-warning bg-warning/10 border border-warning/20' : 
+            'text-exit bg-exit/10 border border-exit/20'
+          }`}>
+            {totalDrift < 5 ? 'Healthy' : totalDrift < 10 ? 'Moderate' : 'Critical'}
           </p>
         </div>
       </section>

@@ -5,5 +5,6 @@ public record StrategyTarget(
     String schemeName,           
     double targetPortfolioPct,   
     double sipPct,
-    String status                // 🚀 ADD THIS: To detect "DROPPED" or "ACTIVE"
+    String status,
+    String bucket
 ) {}

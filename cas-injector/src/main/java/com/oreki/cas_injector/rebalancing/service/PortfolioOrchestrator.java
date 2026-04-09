@@ -18,9 +18,9 @@ import com.oreki.cas_injector.convictionmetrics.dto.MarketMetrics;
 import com.oreki.cas_injector.convictionmetrics.service.ConvictionScoringService;
 import com.oreki.cas_injector.core.GoogleSheetService;
 import com.oreki.cas_injector.core.dto.AggregatedHolding;
-import com.oreki.cas_injector.core.dto.SchemeDetailsDTO;
 import com.oreki.cas_injector.core.model.Scheme;
 import com.oreki.cas_injector.core.repository.SchemeRepository;
+import com.oreki.cas_injector.core.service.LotAggregationService;
 import com.oreki.cas_injector.core.service.SystemicRiskMonitorService;
 import com.oreki.cas_injector.core.utils.CommonUtils;
 import com.oreki.cas_injector.core.utils.SignalType;
@@ -50,6 +50,7 @@ public class PortfolioOrchestrator {
     private final SystemicRiskMonitorService systemicRiskMonitor;
     private final ConvictionScoringService convictionScoringService;
     private final PositionSizingService positionSizingService;
+    private final LotAggregationService lotAggregationService;
 
     // ==========================================
     // 🌟 MODE 1: MONTHLY SIP PLAN (Pure Sheet)
@@ -82,7 +83,6 @@ public class PortfolioOrchestrator {
     // 🌟 MODE 2: OPPORTUNISTIC (Accumulators & Extra)
     // ==========================================
     public List<TacticalSignal> computeOpportunisticSignals(String pan, double lumpsum) {
-        convictionScoringService.calculateAndSaveFinalScores(pan); 
         
         List<StrategyTarget> targets = strategyService.fetchLatestStrategy();
         Map<String, MarketMetrics> metricsMap = fetchLiveMetricsMap(pan);
@@ -99,7 +99,7 @@ public class PortfolioOrchestrator {
         }
 
         List<TaxLot> allLots = taxLotRepository.findByStatusAndSchemeFolioInvestorPan("OPEN", pan);
-        List<AggregatedHolding> holdings = aggregateLots(allLots);
+        List<AggregatedHolding> holdings = lotAggregationService.aggregate(allLots);
         
         double totalPortfolioValue = holdings.stream().mapToDouble(AggregatedHolding::getCurrentValue).sum();
         
@@ -216,7 +216,7 @@ public class PortfolioOrchestrator {
             .collect(Collectors.toSet());
 
         List<TaxLot> allLots = taxLotRepository.findByStatusAndSchemeFolioInvestorPan("OPEN", pan);
-        List<AggregatedHolding> holdings = aggregateLots(allLots);
+        List<AggregatedHolding> holdings = lotAggregationService.aggregate(allLots);
 
         // Find realized LTCG so far this FY
         LocalDate fyStart = CommonUtils.getCurrentFyStart();
@@ -358,7 +358,7 @@ public class PortfolioOrchestrator {
         Map<String, Integer> cqsMap = loadCqsMap();
 
         List<TaxLot> allLots = taxLotRepository.findByStatusAndSchemeFolioInvestorPan("OPEN", pan);
-        List<AggregatedHolding> holdings = aggregateLots(allLots);
+        List<AggregatedHolding> holdings = lotAggregationService.aggregate(allLots);
         double totalValue = holdings.stream().mapToDouble(AggregatedHolding::getCurrentValue).sum();
 
         List<TacticalSignal> sellSignals = new ArrayList<>();
@@ -384,7 +384,7 @@ public class PortfolioOrchestrator {
             // --- TAX-ALPHA HURDLE RATE ---
             double sellAmount = (drift / 100.0) * totalValue; 
             TaxSimulationResult taxResult = taxSimulator.simulateSellOrder(
-                holding.getSchemeName(), sellAmount, getCurrentNav(amfi));
+                holding.getSchemeName(), sellAmount, getCurrentNav(amfi), pan);
             
             double netRealizable = sellAmount - taxResult.estimatedTax();
             double taxDragPct = taxResult.taxDragPercentage();
@@ -622,68 +622,4 @@ public class PortfolioOrchestrator {
 
     private double getSafeDouble(Object obj) { return obj == null ? 0.0 : ((Number) obj).doubleValue(); }
     private int getSafeInt(Object obj) { return obj == null ? 0 : ((Number) obj).intValue(); }
-
-    private List<AggregatedHolding> aggregateLots(List<TaxLot> lots) {
-        Map<Scheme, List<TaxLot>> groupedLots = lots.stream().collect(Collectors.groupingBy(TaxLot::getScheme));
-        return groupedLots.entrySet().stream().map(entry -> {
-            Scheme scheme = entry.getKey();
-            SchemeDetailsDTO details = amfiService.getLatestSchemeDetails(scheme.getAmfiCode());
-            double liveNav = (details != null && details.getNav() != null) ? details.getNav().doubleValue() : 0.0;
-            String category = scheme.getAssetCategory() != null ? scheme.getAssetCategory() : details.getCategory();
-
-            double units = 0, cost = 0, val = 0, ltcgGains = 0, stcgGains = 0;
-            double ltcgVal = 0, stcgVal = 0;
-            int minDaysToLtcg = 1095; 
-            LocalDate oldest = LocalDate.now();
-
-            for (TaxLot lot : entry.getValue()) {
-                double lUnits = lot.getRemainingUnits().doubleValue();
-                double lCost = lot.getCostBasisPerUnit().doubleValue() * lUnits;
-                double lVal = lUnits * liveNav;
-                
-                units += lUnits; cost += lCost; val += lVal;
-                if (lot.getBuyDate().isBefore(oldest)) oldest = lot.getBuyDate();
-
-                double gain = lVal - lCost;
-                
-                boolean isDebtFund = category.contains("DEBT") || category.contains("GILT") 
-                    || category.contains("BOND") || category.contains("LIQUID")
-                    || category.contains("BANKING AND PSU") || category.contains("CORPORATE")
-                    || category.contains("MONEY MARKET");
-                if (isDebtFund) {
-                    stcgVal += lVal;
-                    stcgGains += Math.max(0, gain);
-                    continue; 
-                }
-
-                String taxCat = CommonUtils.DETERMINE_TAX_CATEGORY.apply(lot.getBuyDate(), LocalDate.now(), category);
-                boolean isLtcg = taxCat.contains("LTCG"); 
-
-                if (isLtcg) {
-                    ltcgVal += lVal;
-                    ltcgGains += Math.max(0, gain);
-                } else {
-                    stcgVal += lVal;
-                    stcgGains += Math.max(0, gain);
-                    
-                    int waitDays = 0;
-                    if (taxCat.contains("EQUITY")) waitDays = 365;
-                    else if (taxCat.contains("HYBRID")) waitDays = 730;
-                    else if (lot.getBuyDate().isBefore(LocalDate.of(2023, 4, 1))) waitDays = 1095;
-                    
-                    if (waitDays > 0) {
-                        long age = ChronoUnit.DAYS.between(lot.getBuyDate(), LocalDate.now());
-                        int daysLeft = waitDays - (int) age;
-                        if (daysLeft > 0 && daysLeft < minDaysToLtcg) minDaysToLtcg = daysLeft;
-                    }
-                }
-            }
-            
-            int finalDaysToNext = (stcgVal > 0 && minDaysToLtcg < 1095) ? minDaysToLtcg : 0;
-
-            return new AggregatedHolding(scheme.getName(), units, val, cost, ltcgVal, ltcgGains, 
-                stcgVal, stcgGains, finalDaysToNext, (int)ChronoUnit.DAYS.between(oldest, LocalDate.now()), 
-                category, "ACTIVE", scheme.getIsin());
-        }).collect(Collectors.toList());
-    }
 }

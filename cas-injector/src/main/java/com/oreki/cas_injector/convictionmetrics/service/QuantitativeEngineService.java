@@ -37,23 +37,18 @@ public class QuantitativeEngineService {
             log.info("🧮 Starting Advanced Quantitative Math Engine (Sortino, CVaR, MDD, NAV Signals)...");
             long startTime = System.currentTimeMillis();
 
-            // 1. Ensure new columns exist
+            // 1. Run existing Sortino/CVaR/MDD block
             currentStep.set(1);
-            lastStatusMessage = "Ensuring DB columns exist...";
-            convictionMetricsRepository.ensureColumnsExist();
-
-            // 2. Run existing Sortino/CVaR/MDD block
-            currentStep.set(2);
             lastStatusMessage = "Calculating main risk metrics (Sortino, CVaR)...";
             int mainMetricsRows = convictionMetricsRepository.runNightlyMathEngine();
 
-            // 3. Run new NAV Signals block (Percentile, ATH Drawdown, Return Z-Score)
-            currentStep.set(3);
+            // 2. Run new NAV Signals block (Percentile, ATH Drawdown, Return Z-Score)
+            currentStep.set(2);
             lastStatusMessage = "Updating NAV signals (Percentile, ATH)...";
             int navSignalRows = convictionMetricsRepository.updateNavSignals();
 
-            // 4. Run new Bucket Z-Scorer (CQS)
-            currentStep.set(4);
+            // 3. Run new Bucket Z-Scorer (CQS)
+            currentStep.set(3);
             lastStatusMessage = "Computing relative Bucket Z-Scores...";
             bucketZScorerService.computeBucketCqs();
 

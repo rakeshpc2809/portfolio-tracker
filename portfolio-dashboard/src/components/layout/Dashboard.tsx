@@ -15,6 +15,7 @@ import {
 import * as Switch from '@radix-ui/react-switch';
 import * as Tabs from '@radix-ui/react-tabs';
 import { formatCurrencyShort } from '../../utils/formatters';
+import StatusRing from '../ui/StatusRing';
 
 // Views
 import TodayBriefView from '../views/TodayBriefView';
@@ -60,39 +61,46 @@ export default function Dashboard({
   const mask = (val: string) => isPrivate ? "••••" : val;
 
   const stats = [
-    { label: 'Value', value: formatCurrencyShort(portfolioData.currentValueAmount || 0) },
-    { label: 'XIRR', value: portfolioData.overallXirr || '0%', color: parseFloat(portfolioData.overallXirr || '0') >= 0 ? 'text-buy' : 'text-exit' },
-    { label: 'P&L', value: ((portfolioData.totalUnrealizedGain || 0) >= 0 ? '+' : '') + formatCurrencyShort(portfolioData.totalUnrealizedGain || 0), color: (portfolioData.totalUnrealizedGain || 0) >= 0 ? 'text-buy' : 'text-exit' },
+    { label: 'Value', value: formatCurrencyShort(portfolioData.currentValueAmount || 0), glow: 'glow-accent' },
+    { label: 'XIRR', value: portfolioData.overallXirr || '0%', color: parseFloat(portfolioData.overallXirr || '0') >= 0 ? 'text-buy' : 'text-exit', glow: parseFloat(portfolioData.overallXirr || '0') >= 0 ? 'glow-buy' : 'glow-exit' },
+    { label: 'P&L', value: ((portfolioData.totalUnrealizedGain || 0) >= 0 ? '+' : '') + formatCurrencyShort(portfolioData.totalUnrealizedGain || 0), color: (portfolioData.totalUnrealizedGain || 0) >= 0 ? 'text-buy' : 'text-exit', glow: (portfolioData.totalUnrealizedGain || 0) >= 0 ? 'glow-buy' : 'glow-exit' },
     { label: 'Tax', value: formatCurrencyShort(portfolioData.totalSTCG || 0), color: 'text-warning' },
   ];
 
+  const avgConviction = Math.round(
+    (portfolioData?.schemeBreakdown ?? [])
+      .reduce((a: number, s: any) => a + (s.convictionScore ?? 0), 0) /
+    Math.max(1, (portfolioData?.schemeBreakdown ?? []).length)
+  );
+
   return (
-    <div className="min-h-screen bg-[#09090f] text-primary font-sans selection:bg-accent/30">
+    <div className="min-h-screen bg-background text-primary font-sans selection:bg-accent/30">
       <div className="fixed inset-0 pointer-events-none opacity-40" 
-           style={{ background: 'radial-gradient(ellipse 80% 50% at 20% 0%, rgba(129,140,248,0.08) 0%, transparent 60%)' }} 
+           style={{ background: 'radial-gradient(ellipse 70% 40% at 15% 0%, rgba(129,140,248,0.07) 0%, transparent 55%), radial-gradient(ellipse 50% 30% at 85% 100%, rgba(52,211,153,0.04) 0%, transparent 50%)' }} 
       />
 
-      <header className="sticky top-0 z-[90] border-b border-white/5 bg-[#09090f]/80 backdrop-blur-md px-8 py-4 flex justify-between items-center">
+      <header className="sticky top-0 z-[90] border-b border-border bg-background/80 backdrop-blur-md px-8 py-4 flex justify-between items-center">
         <div className="flex items-center gap-10">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-3">
             <div className="w-6 h-6 bg-accent rounded-md flex items-center justify-center shadow-[0_0_15px_rgba(129,140,248,0.4)]">
               <TrendingUp size={14} className="text-white" />
             </div>
+            <StatusRing score={avgConviction} size={28} />
             <h1 className="text-[10px] font-bold uppercase tracking-[0.2em] text-accent">Portfolio OS</h1>
           </div>
 
-          <div className="hidden lg:flex items-center gap-8 border-l border-white/5 pl-8">
+          <div className="hidden lg:flex items-center gap-8 border-l border-border pl-8">
             {stats.map(s => (
               <div key={s.label} className="space-y-0.5 group cursor-default">
                 <p className="text-[9px] uppercase tracking-widest text-muted transition-colors group-hover:text-secondary">{s.label}</p>
-                <p className={`text-sm font-medium tabular-nums ${s.color || 'text-primary'}`}>{mask(s.value)}</p>
+                <p className={`text-sm font-medium tabular-nums ${s.color || 'text-primary'} ${s.glow || ''}`}>{mask(s.value)}</p>
               </div>
             ))}
           </div>
         </div>
 
         <div className="flex items-center gap-6">
-          <div className="flex items-center gap-3 bg-white/[0.03] border border-white/5 px-3 py-1.5 rounded-lg hover:bg-white/[0.05] transition-colors">
+          <div className="flex items-center gap-3 bg-white/[0.03] border border-border px-3 py-1.5 rounded-lg hover:bg-white/[0.05] transition-colors">
             <span className="text-[9px] font-bold uppercase tracking-widest text-muted">{isPrivate ? 'Hidden' : 'Visible'}</span>
             <Switch.Root 
               checked={isPrivate} 
@@ -108,15 +116,19 @@ export default function Dashboard({
 
       <main className="relative z-10 p-8 max-w-7xl mx-auto">
         <Tabs.Root value={activeTab} onValueChange={setActiveTab} className="space-y-12">
-          <Tabs.List className="flex flex-wrap items-center gap-1 p-1 bg-white/[0.02] border border-white/5 rounded-xl w-fit backdrop-blur-sm">
+          <Tabs.List className="flex items-center gap-0.5 p-1 bg-surface border border-border rounded-xl w-full md:w-fit overflow-x-auto scrollbar-none backdrop-blur-sm">
             {tabs.map((tab) => (
               <Tabs.Trigger
                 key={tab.id}
                 value={tab.id}
-                className="flex items-center gap-2 px-5 py-2 rounded-lg text-[11px] font-bold uppercase tracking-wider transition-all duration-200 data-[state=active]:bg-accent/10 data-[state=active]:text-accent data-[state=inactive]:text-muted data-[state=inactive]:hover:text-secondary outline-none cursor-pointer"
+                className="relative flex items-center gap-1.5 px-4 py-2 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all duration-200 whitespace-nowrap outline-none cursor-pointer
+                  data-[state=inactive]:text-muted data-[state=inactive]:hover:text-secondary data-[state=inactive]:hover:bg-white/[0.03]
+                  data-[state=active]:text-accent data-[state=active]:bg-accent/10"
               >
                 {tab.icon}
-                {tab.label}
+                <span className="hidden sm:inline">{tab.label}</span>
+                {/* active underline */}
+                <span className="data-[state=inactive]:hidden absolute bottom-0.5 left-3 right-3 h-px bg-accent/60 rounded-full" />
               </Tabs.Trigger>
             ))}
           </Tabs.List>

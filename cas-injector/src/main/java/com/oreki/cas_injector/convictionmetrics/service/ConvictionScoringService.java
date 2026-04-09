@@ -80,9 +80,10 @@ public class ConvictionScoringService {
                         dynamicPersonalCagr = Math.pow(1 + absoluteReturn, 1.0 / yearsInvested) - 1;
                         try {
                             String schemeName = fundLots.get(0).getScheme().getName();
-                            TaxSimulationResult taxFriction = taxSimulator.simulateSellOrder(schemeName, totalValue, currentNav);
+                            TaxSimulationResult taxFriction = taxSimulator.simulateSellOrder(schemeName, totalValue, currentNav, investorPan);
                             dynamicTaxDrag = taxFriction.taxDragPercentage();
                         } catch (Exception ignored) {}
+
                     }
                 }
 

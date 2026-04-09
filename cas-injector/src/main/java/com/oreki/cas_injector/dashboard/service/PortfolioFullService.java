@@ -27,6 +27,7 @@ public class PortfolioFullService {
     private final PortfolioOrchestrator orchestrator;
     private final JdbcTemplate jdbcTemplate;
 
+    @org.springframework.cache.annotation.Cacheable(value = "portfolioCache", key = "#pan + '-' + #monthlySip + '-' + #lumpsum")
     public DashboardSummaryDTO getFullPortfolio(String pan, double monthlySip, double lumpsum) {
         log.info("📊 Fetching Unified Portfolio Payload for {} (SIP: {}, Lumpsum: {})", pan, monthlySip, lumpsum);
         

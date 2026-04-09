@@ -114,47 +114,45 @@ export default function TodayBriefView({
           </div>
         </div>
 
-        <div className="bg-surface border border-white/5 rounded-xl overflow-hidden">
-          <table className="w-full text-left">
-            <thead className="bg-white/[0.02] text-muted text-[10px] uppercase tracking-widest border-b border-white/5">
-              <tr>
-                <th className="px-6 py-4 font-medium">Fund Name</th>
-                <th className="px-6 py-4 font-medium text-right">Strategy %</th>
-                <th className="px-6 py-4 font-medium text-right">Deploy Amount</th>
-                <th className="px-6 py-4 font-medium text-right">Status</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-white/5">
-              {payload.sipPlan.length === 0 ? (
-                <tr>
-                  <td colSpan={4} className="px-6 py-12 text-center text-muted text-xs italic">
-                    <p className="mb-2">SIP plan not loaded.</p>
-                  </td>
-                </tr>
-              ) : (
-                payload.sipPlan.map((s: any) => (
-                  <tr key={s.isin} className="hover:bg-white/[0.01] transition-colors group">
-                    <td className="px-6 py-4">
-                      <button onClick={() => onFundClick(s.schemeName)} className="text-[13px] text-primary hover:text-accent transition-colors truncate max-w-xs block text-left">
-                        {s.schemeName}
-                      </button>
-                    </td>
-                    <td className="px-6 py-4 text-right text-[12px] text-secondary tabular-nums">{s.sipPct}%</td>
-                    <td className="px-6 py-4 text-right text-[12px] text-buy font-medium tabular-nums">
-                      <CurrencyValue isPrivate={isPrivate} value={s.amount} />
-                    </td>
-                    <td className="px-6 py-4 text-right">
-                      <span className={`text-[9px] font-bold uppercase tracking-widest px-2 py-0.5 rounded ${
-                        s.deployFlag === 'DEPLOY' ? 'text-buy bg-buy/10' : 'text-warning bg-warning/10'
-                      }`}>
-                        {s.deployFlag === 'DEPLOY' ? 'Ready' : 'Expensive'}
-                      </span>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
+        <div className="space-y-2">
+          {payload.sipPlan.length === 0 ? (
+            <div className="py-10 text-center bg-surface border border-border rounded-xl">
+              <p className="text-muted text-xs italic">SIP plan not loaded. Check strategy sheet connection.</p>
+            </div>
+          ) : (
+            payload.sipPlan.map((s: any) => (
+              <div
+                key={s.isin}
+                onClick={() => onFundClick(s.schemeName)}
+                className="flex items-center gap-4 px-5 py-3.5 bg-surface border border-border rounded-xl hover:border-white/10 hover:bg-white/[0.015] cursor-pointer transition-all group"
+              >
+                {/* deploy status dot */}
+                <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${s.deployFlag === 'DEPLOY' ? 'bg-buy shadow-[0_0_8px_rgba(52,211,153,0.4)]' : 'bg-warning shadow-[0_0_8px_rgba(251,191,36,0.4)]'}`} />
+
+                {/* fund name */}
+                <p className="flex-1 text-[13px] text-primary group-hover:text-white transition-colors truncate font-medium">
+                  {s.schemeName}
+                </p>
+
+                {/* pct allocation */}
+                <span className="text-[10px] text-muted tabular-nums shrink-0 font-bold">{s.sipPct}%</span>
+
+                {/* amount */}
+                <div className="min-w-[90px] text-right">
+                  <span className={`text-[13px] font-bold tabular-nums ${s.deployFlag === 'DEPLOY' ? 'text-buy' : 'text-warning'}`}>
+                    {isPrivate ? '••••' : `₹${(s.amount / 1000).toFixed(0)}k`}
+                  </span>
+                </div>
+
+                {/* status badge */}
+                <span className={`text-[8px] font-bold uppercase tracking-widest px-2 py-0.5 rounded shrink-0 ${
+                  s.deployFlag === 'DEPLOY' ? 'bg-buy/10 text-buy border border-buy/20' : 'bg-warning/10 text-warning border border-warning/20'
+                }`}>
+                  {s.deployFlag === 'DEPLOY' ? 'GO' : 'HOLD'}
+                </span>
+              </div>
+            ))
+          )}
         </div>
       </section>
 

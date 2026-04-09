@@ -58,7 +58,7 @@ export default function LedgerView({
     if (node) observer.current.observe(node);
   }, [loading, hasMore]);
 
-  const fetchLedger = async (pageNum: number, type: string) => {
+  const fetchLedger = useCallback(async (pageNum: number, type: string) => {
     setLoading(true);
     try {
       const data = await fetchTransactions(investorPan, pageNum, type);
@@ -69,16 +69,16 @@ export default function LedgerView({
     } finally {
       setLoading(false);
     }
-  };
+  }, [investorPan]);
 
   useEffect(() => {
     setPage(0);
     fetchLedger(0, filterType);
-  }, [filterType, investorPan]);
+  }, [filterType, investorPan, fetchLedger]);
 
   useEffect(() => {
     if (page > 0) fetchLedger(page, filterType);
-  }, [page]);
+  }, [page, filterType, fetchLedger]);
 
   return (
     <div className="space-y-8 pb-32">

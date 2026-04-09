@@ -1,29 +1,47 @@
-export const Skeleton = ({ className }: { className?: string }) => {
-  return (
-    <div className={`animate-pulse bg-zinc-800/50 rounded-lg ${className}`} />
-  );
-};
+export const Skeleton = ({ className }: { className?: string }) => (
+  <div
+    className={`animate-pulse rounded-xl ${className}`}
+    style={{ background: 'rgba(255,255,255,0.04)' }}
+  />
+);
 
-export const OverviewSkeleton = () => {
-  return (
-    <div className="space-y-8 pb-32">
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        {[1, 2, 3, 4].map((i) => (
-          <Skeleton key={i} className="h-32 rounded-[2rem]" />
-        ))}
+export const StatCardSkeleton = () => (
+  <div className="bg-surface border border-white/5 p-6 rounded-xl space-y-3">
+    <Skeleton className="h-2.5 w-20" />
+    <Skeleton className="h-6 w-28" />
+  </div>
+);
+
+export const FundCardSkeleton = () => (
+  <div className="bg-surface border border-white/[0.06] rounded-xl p-5 space-y-4">
+    <div className="flex justify-between">
+      <div className="space-y-2">
+        <Skeleton className="h-2 w-16" />
+        <Skeleton className="h-3.5 w-36" />
+        <Skeleton className="h-3.5 w-24" />
       </div>
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        <Skeleton className="h-96 rounded-[3rem]" />
-        <Skeleton className="lg:col-span-2 h-96 rounded-[3rem]" />
-      </div>
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 pt-8 border-t border-zinc-800">
-        <div className="space-y-3">
-          {[1, 2, 3, 4, 5].map((i) => (
-            <Skeleton key={i} className="h-20 rounded-2xl" />
-          ))}
-        </div>
-        <Skeleton className="lg:col-span-2 h-[500px] rounded-[3rem]" />
-      </div>
+      <Skeleton className="h-8 w-16" />
     </div>
-  );
-};
+    <Skeleton className="h-1.5 w-full" />
+    <div className="grid grid-cols-3 gap-3">
+      {[...Array(6)].map((_, i) => (
+        <div key={i} className="space-y-1.5">
+          <Skeleton className="h-2 w-10" />
+          <Skeleton className="h-3 w-14" />
+        </div>
+      ))}
+    </div>
+    <Skeleton className="h-1 w-full" />
+  </div>
+);
+
+export const OverviewSkeleton = () => (
+  <div className="space-y-8 pb-32">
+    <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      {[...Array(4)].map((_, i) => <StatCardSkeleton key={i} />)}
+    </div>
+    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+      {[...Array(6)].map((_, i) => <FundCardSkeleton key={i} />)}
+    </div>
+  </div>
+);

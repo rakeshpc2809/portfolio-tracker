@@ -3,6 +3,15 @@ import { motion, AnimatePresence } from "framer-motion";
 import { fetchMasterPortfolio, fetchUnifiedDashboard } from "./services/api";
 import Dashboard from "./components/layout/Dashboard";
 
+function useDebounce<T>(value: T, delay: number): T {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    const t = setTimeout(() => setDebounced(value), delay);
+    return () => clearTimeout(t);
+  }, [value, delay]);
+  return debounced;
+}
+
 export default function App() {
   const [portfolioData, setPortfolioData] = useState<any>(null);
   const [tacticalPayload, setTacticalPayload] = useState<any>(null);
@@ -10,16 +19,19 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [sipAmount, setSipAmount] = useState(75000);
   const [lumpsum, setLumpsum] = useState(0);
-  
-  const investorPan = "CFXPR4533R"; 
+
+  // Debounce so slider drags don't fire API on every pixel
+  const debouncedSip = useDebounce(sipAmount, 600);
+  const debouncedLumpsum = useDebounce(lumpsum, 600);
+
+  const investorPan = "CFXPR4533R";
 
   useEffect(() => {
-    setLoading(true);
-    
     const loadData = async () => {
+      setLoading(true);
       try {
         const [portfolio, tactical] = await Promise.all([
-          fetchMasterPortfolio(investorPan, sipAmount, lumpsum).catch(err => {
+          fetchMasterPortfolio(investorPan, debouncedSip, debouncedLumpsum).catch((err) => {
             console.warn("Portfolio fetch failed, using fallback:", err);
             return {
               investorName: "New Investor",
@@ -28,22 +40,22 @@ export default function App() {
               currentValueAmount: 0,
               totalUnrealizedGain: 0,
               overallXirr: "0%",
-              totalSTCG: 0
+              totalSTCG: 0,
             };
           }),
-          fetchUnifiedDashboard(investorPan, sipAmount, lumpsum).catch(err => {
+          fetchUnifiedDashboard(investorPan, debouncedSip, debouncedLumpsum).catch((err) => {
             console.warn("Tactical fetch failed, using fallback:", err);
             return {
               sipPlan: [],
               opportunisticSignals: [],
+              activeSellSignals: [],
               exitQueue: [],
               harvestOpportunities: [],
               totalExitValue: 0,
-              totalHarvestValue: 0
+              totalHarvestValue: 0,
             };
-          })
+          }),
         ]);
-        
         setPortfolioData(portfolio);
         setTacticalPayload(tactical);
         setError(null);
@@ -56,7 +68,7 @@ export default function App() {
     };
 
     loadData();
-  }, [sipAmount, lumpsum]);
+  }, [debouncedSip, debouncedLumpsum]);
 
   return (
     <AnimatePresence mode="wait">

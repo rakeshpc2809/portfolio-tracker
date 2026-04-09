@@ -10,6 +10,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.cache.CacheManager;
 import org.springframework.context.event.EventListener;
 import org.springframework.jdbc.core.BatchPreparedStatementSetter;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -17,6 +18,7 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 
+import com.oreki.cas_injector.convictionmetrics.service.ConvictionScoringService;
 import com.oreki.cas_injector.convictionmetrics.service.QuantitativeEngineService;
 
 import lombok.extern.slf4j.Slf4j;
@@ -28,14 +30,21 @@ public class AmfiDailyDeltaService {
     private final JdbcTemplate jdbcTemplate;
     private final RestTemplate restTemplate;
     private final QuantitativeEngineService quantitativeEngineService;
+    private final ConvictionScoringService convictionScoringService;
+    private final CacheManager cacheManager;
 
     private static final String AMFI_TXT_URL = "https://www.amfiindia.com/spages/NAVAll.txt";
     private static final DateTimeFormatter DATE_FORMATTER = DateTimeFormatter.ofPattern("dd-MMM-yyyy");
 
-    public AmfiDailyDeltaService(JdbcTemplate jdbcTemplate, RestTemplate restTemplate,QuantitativeEngineService quantitativeEngineService) {
+    public AmfiDailyDeltaService(JdbcTemplate jdbcTemplate, RestTemplate restTemplate, 
+                                 QuantitativeEngineService quantitativeEngineService,
+                                 ConvictionScoringService convictionScoringService,
+                                 CacheManager cacheManager) {
         this.jdbcTemplate = jdbcTemplate;
         this.restTemplate = restTemplate;
         this.quantitativeEngineService = quantitativeEngineService;
+        this.convictionScoringService = convictionScoringService;
+        this.cacheManager = cacheManager;
     }
 
     // 🌟 THE NEW RESILIENCE FIX 🌟
@@ -51,13 +60,13 @@ public class AmfiDailyDeltaService {
     @Scheduled(cron = "0 30 23 * * MON-FRI", zone = "Asia/Kolkata")
     public void executeDailyNavSync() {
         log.info("📡 Fetching latest AMFI NAVs...");
-        
+
         try {
             String amfiData = restTemplate.getForObject(AMFI_TXT_URL, String.class);
             if (amfiData == null || amfiData.isBlank()) return;
 
             List<Object[]> batchArgs = new ArrayList<>();
-            
+
             try (BufferedReader reader = new BufferedReader(new StringReader(amfiData))) {
                 String line;
                 while ((line = reader.readLine()) != null) {
@@ -67,7 +76,7 @@ public class AmfiDailyDeltaService {
                             String amfiCode = parts[0].trim();
                             double nav = Double.parseDouble(parts[4].trim());
                             LocalDate date = LocalDate.parse(parts[5].trim(), DATE_FORMATTER);
-                            
+
                             batchArgs.add(new Object[]{amfiCode, date, nav});
                         } catch (Exception e) {} // Skip bad lines
                     }
@@ -76,7 +85,7 @@ public class AmfiDailyDeltaService {
 
             String sql = "INSERT INTO fund_history (amfi_code, nav_date, nav) VALUES (?, ?, ?) " +
                          "ON CONFLICT (amfi_code, nav_date) DO NOTHING";
-                         
+
             int[] results = jdbcTemplate.batchUpdate(sql, new BatchPreparedStatementSetter() {
                 @Override
                 public void setValues(PreparedStatement ps, int i) throws SQLException {
@@ -96,8 +105,21 @@ public class AmfiDailyDeltaService {
             } else {
                 log.info("⚡ Database is already up to date. No new records found.");
             }
-// Inside AmfiDailyDeltaService.java
-quantitativeEngineService.runNightlyMathEngine();
+
+            // Trigger engines
+            quantitativeEngineService.runNightlyMathEngine();
+            convictionScoringService.calculateAndSaveFinalScores("CFXPR4533R");
+
+            // Evict portfolio cache
+            if (cacheManager.getCache("portfolioCache") != null) {
+                cacheManager.getCache("portfolioCache").clear();
+                log.info("🧹 Portfolio cache evicted.");
+            }
+            if (cacheManager.getCache("dashboardSummary") != null) {
+                cacheManager.getCache("dashboardSummary").clear();
+                log.info("🧹 Dashboard summary cache evicted.");
+            }
+
         } catch (Exception e) {
             log.error("🚨 Failed to sync AMFI delta.", e);
         }

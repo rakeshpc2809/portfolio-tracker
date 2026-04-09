@@ -10,6 +10,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 
 import com.oreki.cas_injector.backfill.repository.HistoricalNavRepository;
@@ -44,6 +45,7 @@ public class DashboardService {
     private final NavService navService;
     private final HistoricalNavRepository historicalNavRepo;
 
+    @Cacheable(value = "dashboardSummary", key = "#pan")
     public DashboardSummaryDTO getInvestorSummary(String pan) {
         Optional<Investor> investorOpt = investorRepo.findById(pan);
         if (investorOpt.isEmpty()) {

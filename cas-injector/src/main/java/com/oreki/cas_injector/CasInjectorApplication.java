@@ -6,8 +6,8 @@ import org.springframework.cache.annotation.EnableCaching;
 import org.springframework.scheduling.annotation.EnableScheduling;
 
 @SpringBootApplication
-@EnableCaching // <--- Add this
-@EnableScheduling //
+@EnableCaching 
+@EnableScheduling 
 public class CasInjectorApplication {
 
 	public static void main(String[] args) {

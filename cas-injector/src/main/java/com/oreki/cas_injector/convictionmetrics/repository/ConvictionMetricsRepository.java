@@ -17,6 +17,7 @@ public class ConvictionMetricsRepository {
     /**
      * Ensures the fund_conviction_metrics table and its columns exist.
      */
+    @jakarta.annotation.PostConstruct
     public void ensureColumnsExist() {
         String createTableSql = """
             CREATE TABLE IF NOT EXISTS fund_conviction_metrics (

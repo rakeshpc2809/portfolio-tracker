@@ -25,13 +25,24 @@ public class GoogleSheetService {
 
     private final RestTemplate restTemplate;
 
+    private volatile List<StrategyTarget> cachedTargets = null;
+    private volatile long cacheTimestamp = 0;
+    private static final long CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
     public GoogleSheetService(RestTemplate restTemplate) {
         this.restTemplate = restTemplate;
     }
 
     public List<StrategyTarget> fetchLatestStrategy() {
+        long now = System.currentTimeMillis();
+        if (cachedTargets != null && (now - cacheTimestamp) < CACHE_TTL_MS) {
+            log.debug("Returning cached strategy targets.");
+            return cachedTargets;
+        }
+
         List<StrategyTarget> targets = new ArrayList<>();
         try {
+            log.info("📡 Fetching latest strategy targets from Google Sheets...");
             String csvData = restTemplate.getForObject(csvUrl, String.class);
             
             if (csvData == null || csvData.isBlank()) {
@@ -86,15 +97,22 @@ public class GoogleSheetService {
                     status = "ACTIVE"; // Default to ACTIVE if the column is empty
                 }
 
-                // ✅ Updated constructor with 5 arguments
-                targets.add(new StrategyTarget(isin.trim(), rawName, target, sip, status.trim().toUpperCase()));
+                String bucket = getFuzzyValue(recordMap, "Bucket", "Fund Bucket", "Type");
+                if (bucket == null || bucket.isBlank()) {
+                    bucket = "CORE";
+                }
+
+                // ✅ Updated constructor with 6 arguments
+                targets.add(new StrategyTarget(isin.trim(), rawName, target, sip, status.trim().toUpperCase(), bucket.trim().toUpperCase()));
             }
             
+            cachedTargets = targets;
+            cacheTimestamp = now;
             log.info("✅ Successfully loaded {} strategy targets from Google Sheets.", targets.size());
 
         } catch (Exception e) {
             log.error("🚨 Google Sheet Sync Failed. Details: {}", e.getMessage());
-            e.printStackTrace();
+            return cachedTargets != null ? cachedTargets : new ArrayList<>();
         }
         return targets;
     }

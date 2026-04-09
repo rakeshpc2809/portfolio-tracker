@@ -3,7 +3,6 @@ import { X, Zap, Info } from 'lucide-react';
 import { convictionColor, buildPlainEnglishReason } from '../../utils/formatters';
 import * as Dialog from '@radix-ui/react-dialog';
 import * as Tooltip from '@radix-ui/react-tooltip';
-import MetricWithTooltip from '../ui/MetricWithTooltip';
 import CurrencyValue from '../ui/CurrencyValue';
 
 export default function FundDetailView({ 
@@ -72,7 +71,7 @@ export default function FundDetailView({
             animate={{ x: 0 }} 
             exit={{ x: '100%' }}
             transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-            className="fixed right-0 top-0 bottom-0 w-full max-w-2xl bg-surface border-l border-white/5 z-[101] shadow-2xl overflow-y-auto focus:outline-none"
+            className="fixed right-0 top-0 bottom-0 w-full max-w-3xl bg-surface border-l border-white/5 z-[101] shadow-2xl overflow-y-auto focus:outline-none"
           >
             <div className="p-8 space-y-10">
               <header className="flex items-start justify-between">
@@ -82,8 +81,8 @@ export default function FundDetailView({
                       {fund.category}
                     </span>
                     <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-widest ${
-                      fund.action === 'BUY' ? 'text-buy bg-buy/10' : 
-                      fund.action === 'EXIT' ? 'text-exit bg-exit/10' : 'text-hold bg-hold/10'
+                      fund.action === 'BUY' ? 'text-buy bg-buy/10 border border-buy/20' : 
+                      fund.action === 'EXIT' || fund.action === 'SELL' ? 'text-exit bg-exit/10 border border-exit/20' : 'text-hold bg-hold/10 border border-hold/20'
                     }`}>
                       {fund.action}
                     </span>
@@ -96,14 +95,34 @@ export default function FundDetailView({
                     <p className="text-3xl font-medium tabular-nums text-primary">{fund.convictionScore}</p>
                   </div>
                   <Dialog.Close asChild>
-                    <button className="p-2 hover:bg-white/5 rounded-full transition-colors text-muted hover:text-primary">
+                    <button className="p-2 hover:bg-white/5 rounded-full transition-colors text-muted hover:text-primary cursor-pointer">
                       <X size={20} />
                     </button>
                   </Dialog.Close>
                 </div>
               </header>
 
-              <section className="bg-surface-elevated border border-white/5 p-6 rounded-xl space-y-6">
+              {/* Sticky financial strip */}
+              <div className="grid grid-cols-3 gap-3 -mx-8 px-8 py-4 bg-surface-elevated border-y border-border">
+                <div>
+                  <p className="text-[9px] uppercase tracking-[0.2em] text-muted mb-1 font-bold">Value</p>
+                  <CurrencyValue isPrivate={isPrivate} value={fund.currentValue}
+                    className="text-base font-medium text-primary tabular-nums" />
+                </div>
+                <div>
+                  <p className="text-[9px] uppercase tracking-[0.2em] text-muted mb-1 font-bold">XIRR</p>
+                  <p className={`text-base font-medium tabular-nums ${parseFloat(fund.xirr) >= 0 ? 'text-buy glow-buy' : 'text-exit glow-exit'}`}>
+                    {fund.xirr}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-[9px] uppercase tracking-[0.2em] text-muted mb-1 font-bold">Unrealised P&L</p>
+                  <CurrencyValue isPrivate={isPrivate} value={fund.unrealizedGain}
+                    className={`text-base font-medium tabular-nums ${fund.unrealizedGain >= 0 ? 'text-buy' : 'text-exit'}`} />
+                </div>
+              </div>
+
+              <section className="bg-surface-elevated border border-white/5 p-6 rounded-xl space-y-6 shadow-inner">
                 <div className="flex items-center justify-between">
                   <h3 className="text-primary text-xs font-medium uppercase tracking-widest">Valuation Visual</h3>
                   <span className="text-muted text-[10px] font-medium">3-Year Range</span>
@@ -115,8 +134,8 @@ export default function FundDetailView({
                     <div className="absolute top-0 left-0 h-3 w-px bg-white/20 -translate-y-1" />
                     <div className="absolute top-0 right-0 h-3 w-px bg-white/20 -translate-y-1" />
                     
-                    <span className="absolute -top-6 left-0 text-[9px] font-bold text-muted uppercase tracking-widest">3yr Low</span>
-                    <span className="absolute -top-6 right-0 text-[9px] font-bold text-muted uppercase tracking-widest">3yr High</span>
+                    <span className="absolute -top-6 left-0 text-[9px] font-bold text-muted uppercase tracking-widest opacity-50">3yr Low</span>
+                    <span className="absolute -top-6 right-0 text-[9px] font-bold text-muted uppercase tracking-widest opacity-50">3yr High</span>
                     
                     {/* animated dot — using style with clamping */}
                     <div 
@@ -153,7 +172,7 @@ export default function FundDetailView({
                 </div>
                 <div className="space-y-3">
                   {components.map((c) => (
-                    <div key={c.label} className="bg-white/[0.02] border border-white/5 p-4 rounded-lg flex items-center gap-6">
+                    <div key={c.label} className="bg-white/[0.02] border border-white/5 p-4 rounded-lg flex items-center gap-6 group hover:bg-white/[0.04] transition-colors">
                       <div className="w-20">
                         <p className="text-[10px] font-bold text-secondary uppercase tracking-widest">{c.label}</p>
                         <p className="text-[9px] text-muted font-medium">{c.weight} weight</p>
@@ -175,7 +194,7 @@ export default function FundDetailView({
                               <Info size={13} className="text-muted cursor-help hover:text-secondary transition-colors" />
                             </Tooltip.Trigger>
                             <Tooltip.Portal>
-                              <Tooltip.Content className="bg-[#1a1a2e] border border-white/10 text-slate-300 text-[11px] rounded-lg px-3 py-2 max-w-[200px] leading-relaxed z-[200]">
+                              <Tooltip.Content className="bg-[#1a1a2e] border border-white/10 text-slate-300 text-[11px] rounded-lg px-3 py-2 max-w-[200px] leading-relaxed z-[200] shadow-xl animate-in fade-in zoom-in-95">
                                 {c.tooltip}
                                 <Tooltip.Arrow className="fill-[#1a1a2e]" />
                               </Tooltip.Content>
@@ -193,26 +212,22 @@ export default function FundDetailView({
                 )}
               </section>
 
-              <section className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                <div className="bg-surface-elevated p-5 rounded-xl border border-white/5">
-                  <MetricWithTooltip label="Current Value" value={<CurrencyValue isPrivate={isPrivate} value={fund.currentValue} />} tooltip="Market value of your active units." />
-                </div>
-                <div className="bg-surface-elevated p-5 rounded-xl border border-white/5">
-                  <MetricWithTooltip label="Personal XIRR" value={fund.xirr} valueClass={parseFloat(fund.xirr) >= 0 ? "text-buy" : "text-exit"} tooltip="Your personalized annualized return." />
-                </div>
-                <div className="bg-surface-elevated p-5 rounded-xl border border-white/5">
-                  <MetricWithTooltip label="Unrealised P&L" value={<CurrencyValue isPrivate={isPrivate} value={fund.unrealizedGain} />} valueClass={fund.unrealizedGain >= 0 ? "text-buy" : "text-exit"} tooltip="Current paper profit/loss." />
-                </div>
-              </section>
-
               <section className="bg-accent/5 border border-accent/10 p-6 rounded-xl">
                 <div className="flex items-center gap-3 mb-4 text-accent">
                   <Info size={16} />
                   <h3 className="text-[10px] font-bold uppercase tracking-widest">System Verdict</h3>
                 </div>
-                <p className="text-[13px] text-secondary leading-relaxed italic">
-                  "{buildPlainEnglishReason(fund)} This asset is being monitored for rebalancing opportunities based on its {(fund.sortinoRatio || 0).toFixed(2)} Sortino ratio and current {((fund.actualPercentage || 0) - (fund.plannedPercentage || 0)).toFixed(1)}% allocation drift."
-                </p>
+                <div className="space-y-2">
+                  {(fund.justifications && fund.justifications.length > 0
+                    ? fund.justifications
+                    : [buildPlainEnglishReason(fund)]
+                  ).map((j: string, i: number) => (
+                    <div key={i} className="flex gap-3 text-[12px] text-secondary leading-relaxed">
+                      <span className="text-accent/40 shrink-0 mt-0.5">›</span>
+                      <p>{j}</p>
+                    </div>
+                  ))}
+                </div>
               </section>
             </div>
           </motion.div>

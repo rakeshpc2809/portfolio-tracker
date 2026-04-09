@@ -27,12 +27,11 @@ public class TaxSimulatorService {
         this.jdbcTemplate = jdbcTemplate;
     }
 
-    public TaxSimulationResult simulateSellOrder(String schemeName, double targetSellAmount, double currentNav) {
-        log.info("🔍 Simulating FIFO Tax Friction for {} - Target Sell: ₹{}", schemeName, targetSellAmount);
+    public TaxSimulationResult simulateSellOrder(String schemeName, double targetSellAmount, double currentNav, String investorPan) {
+        log.info("🔍 Simulating HIFO Tax Friction for {} (PAN: {}) - Target: ₹{}", schemeName, investorPan, targetSellAmount);
 
         double unitsToSell = targetSellAmount / currentNav;
         
-        // REWRITTEN SQL: Exactly matching your DBeaver schema using a JOIN
         String sql = """
                         SELECT
                             tl.id,
@@ -43,21 +42,22 @@ public class TaxSimulatorService {
                             s.asset_category  AS asset_category
                         FROM tax_lot tl
                         JOIN scheme s ON tl.scheme_id = s.id
+                        JOIN folio f ON s.folio_id = f.id
                         WHERE s.name = ?
+                        AND f.investor_pan = ?
                         AND tl.remaining_units > 0
                         AND tl.status = 'OPEN'
-                        ORDER BY tl.buy_date ASC
+                        ORDER BY tl.cost_basis_per_unit DESC
             """;
 
-        // Note: If you have multiple investors, you will also need to JOIN the `folio` or `investor` table here to filter by PAN.
         List<OpenTaxLot> openLots = jdbcTemplate.query(sql, (rs, rowNum) -> new OpenTaxLot(
             rs.getLong("id"),
             rs.getString("name"),
             rs.getDouble("remaining_units"),
-            rs.getDouble("cost_basis_per_unit"), // Mapped to exact DB column
-            rs.getDate("buy_date").toLocalDate(), // Mapped to exact DB column
+            rs.getDouble("cost_basis_per_unit"),
+            rs.getDate("buy_date").toLocalDate(),
             rs.getString("asset_category")
-        ), schemeName);
+        ), schemeName, investorPan);
 
         double remainingUnitsToSell = unitsToSell;
         double stcgProfit = 0.0;

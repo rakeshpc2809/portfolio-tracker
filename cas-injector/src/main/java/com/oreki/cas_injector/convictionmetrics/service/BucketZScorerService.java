@@ -31,54 +31,39 @@ public class BucketZScorerService {
      *   MaxDD    : -0.15  (lower magnitude is better — negate)
      */
     public void computeBucketCqs() {
-        // Step 1: Load all funds with their bucket and raw metrics
-        // We use a fallback to 'core' if bucket is not defined in strategy sheet
-        String sql = """
-            SELECT 
-                m.amfi_code,
-                m.sortino_ratio,
-                m.win_rate,
-                m.cvar_5,
-                m.max_drawdown,
-                COALESCE(gs.bucket, 'core') as bucket
-            FROM fund_conviction_metrics m
-            JOIN scheme s ON m.amfi_code = s.amfi_code
-            LEFT JOIN (
-                -- This is a placeholder for wherever strategy buckets are stored. 
-                -- Assuming they might be in a strategy table or we infer from category if sheet not joined.
-                -- For now, we'll try to join with a hypothetical strategy table or just use category as bucket if missing.
-                SELECT isin, bucket FROM google_sheet_strategy
-            ) gs ON gs.isin = s.isin
-            WHERE m.calculation_date = (SELECT MAX(calculation_date) FROM fund_conviction_metrics)
-            """;
-
-        // Check if google_sheet_strategy table exists, if not, fallback to category-based bucketing
+        boolean hasStrategyTable = false;
         try {
-            jdbcTemplate.execute("SELECT 1 FROM google_sheet_strategy LIMIT 1");
-        } catch (Exception e) {
-            log.warn("google_sheet_strategy table not found, falling back to asset_category for bucketing.");
-            sql = """
-                SELECT 
-                    m.amfi_code,
-                    m.sortino_ratio,
-                    m.win_rate,
-                    m.cvar_5,
-                    m.max_drawdown,
-                    CASE 
-                        WHEN UPPER(s.asset_category) LIKE '%DEBT%' 
-                          OR UPPER(s.asset_category) LIKE '%GILT%'
-                          OR UPPER(s.asset_category) LIKE '%LIQUID%'
-                          OR UPPER(s.asset_category) LIKE '%ARBITRAGE%'
-                          OR UPPER(s.asset_category) LIKE '%BOND%'
-                          OR UPPER(s.asset_category) LIKE '%MONEY MARKET%'
-                        THEN 'fixed_income'
-                        ELSE 'equity'
-                    END as bucket
-                FROM fund_conviction_metrics m
-                JOIN scheme s ON m.amfi_code = s.amfi_code
-                WHERE m.calculation_date = (SELECT MAX(calculation_date) FROM fund_conviction_metrics)
-                """;
+            jdbcTemplate.queryForObject("SELECT COUNT(*) FROM google_sheet_strategy", Integer.class);
+            hasStrategyTable = true;
+        } catch (Exception ignored) {
+            log.warn("google_sheet_strategy table not accessible. Falling back to asset_category bucketing.");
         }
+
+        String sql = hasStrategyTable
+            ? """
+              SELECT m.amfi_code, m.sortino_ratio, m.win_rate, m.cvar_5, m.max_drawdown,
+                     COALESCE(gs.bucket, 'core') as bucket
+              FROM fund_conviction_metrics m
+              JOIN scheme s ON m.amfi_code = s.amfi_code
+              LEFT JOIN google_sheet_strategy gs ON gs.isin = s.isin
+              WHERE m.calculation_date = (SELECT MAX(calculation_date) FROM fund_conviction_metrics)
+              """
+            : """
+              SELECT m.amfi_code, m.sortino_ratio, m.win_rate, m.cvar_5, m.max_drawdown,
+                     CASE
+                       WHEN UPPER(s.asset_category) LIKE '%DEBT%'
+                         OR UPPER(s.asset_category) LIKE '%GILT%'
+                         OR UPPER(s.asset_category) LIKE '%LIQUID%'
+                         OR UPPER(s.asset_category) LIKE '%ARBITRAGE%'
+                         OR UPPER(s.asset_category) LIKE '%BOND%'
+                         OR UPPER(s.asset_category) LIKE '%MONEY MARKET%'
+                       THEN 'fixed_income'
+                       ELSE 'equity'
+                     END as bucket
+              FROM fund_conviction_metrics m
+              JOIN scheme s ON m.amfi_code = s.amfi_code
+              WHERE m.calculation_date = (SELECT MAX(calculation_date) FROM fund_conviction_metrics)
+              """;
 
         List<Map<String, Object>> rows = jdbcTemplate.queryForList(sql);
         if (rows.isEmpty()) return;
