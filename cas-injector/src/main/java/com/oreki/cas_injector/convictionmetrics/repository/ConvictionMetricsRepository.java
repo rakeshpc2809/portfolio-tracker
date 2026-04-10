@@ -44,9 +44,98 @@ public class ConvictionMetricsRepository {
             ADD COLUMN IF NOT EXISTS pain_score          DOUBLE PRECISION,
             ADD COLUMN IF NOT EXISTS friction_score      DOUBLE PRECISION,
             ADD COLUMN IF NOT EXISTS composite_quant_score INT DEFAULT 50,
-            ADD COLUMN IF NOT EXISTS bucket_peer_count   INT DEFAULT 0;
+            ADD COLUMN IF NOT EXISTS bucket_peer_count   INT DEFAULT 0,
+            ADD COLUMN IF NOT EXISTS rolling_z_score_252 DOUBLE PRECISION DEFAULT 0.0,
+            ADD COLUMN IF NOT EXISTS hurst_exponent      DOUBLE PRECISION DEFAULT 0.5,
+            ADD COLUMN IF NOT EXISTS volatility_tax      DOUBLE PRECISION DEFAULT 0.0,
+            ADD COLUMN IF NOT EXISTS hurst_regime        VARCHAR(20)      DEFAULT 'RANDOM_WALK',
+            ADD COLUMN IF NOT EXISTS historical_rarity_pct DOUBLE PRECISION DEFAULT 50.0;
         """;
         jdbcTemplate.execute(addColumnsSql);
+
+        // Index for fast lookups in the nightly engine
+        String createIndexSql = """
+            CREATE INDEX IF NOT EXISTS idx_fcm_amfi_calcdate
+            ON fund_conviction_metrics (amfi_code, calculation_date DESC);
+        """;
+        jdbcTemplate.execute(createIndexSql);
+    }
+
+    /**
+     * Method 1: Rolling 252-day Z-Score + Volatility Tax via PostgreSQL window functions.
+     * This runs as a single SQL statement and writes back to fund_conviction_metrics.
+     */
+    public int updateRollingZScoreAndVolatilityTax() {
+        String sql = """
+            WITH daily_returns AS (
+                SELECT
+                    amfi_code,
+                    nav_date,
+                    nav,
+                    LAG(nav) OVER (PARTITION BY amfi_code ORDER BY nav_date) AS prev_nav
+                FROM fund_history
+                WHERE nav_date >= CURRENT_DATE - INTERVAL '260 days'
+            ),
+            log_returns AS (
+                SELECT
+                    amfi_code,
+                    nav_date,
+                    LN(nav / NULLIF(prev_nav, 0)) AS log_return
+                FROM daily_returns
+                WHERE prev_nav > 0 AND nav > 0
+            ),
+            rolling_stats AS (
+                SELECT
+                    amfi_code,
+                    nav_date,
+                    log_return,
+                    -- Rolling mean of last 252 trading days
+                    AVG(log_return) OVER (
+                        PARTITION BY amfi_code
+                        ORDER BY nav_date
+                        ROWS BETWEEN 251 PRECEDING AND CURRENT ROW
+                    ) AS rolling_mean_252,
+                    -- Rolling std of last 252 trading days
+                    STDDEV_POP(log_return) OVER (
+                        PARTITION BY amfi_code
+                        ORDER BY nav_date
+                        ROWS BETWEEN 251 PRECEDING AND CURRENT ROW
+                    ) AS rolling_std_252,
+                    -- Rolling variance for volatility tax (annualised)
+                    VAR_POP(log_return) OVER (
+                        PARTITION BY amfi_code
+                        ORDER BY nav_date
+                        ROWS BETWEEN 251 PRECEDING AND CURRENT ROW
+                    ) AS rolling_var_252
+                FROM log_returns
+            ),
+            latest_per_fund AS (
+                SELECT DISTINCT ON (amfi_code)
+                    amfi_code,
+                    log_return,
+                    rolling_mean_252,
+                    rolling_std_252,
+                    rolling_var_252,
+                    -- Z-Score: (today's return - rolling mean) / rolling std
+                    CASE
+                        WHEN rolling_std_252 > 0
+                        THEN (log_return - rolling_mean_252) / rolling_std_252
+                        ELSE 0
+                    END AS z_score_252,
+                    -- Volatility Tax = 2 * annualised variance
+                    2 * (rolling_var_252 * 252) AS volatility_tax_annual
+                FROM rolling_stats
+                ORDER BY amfi_code, nav_date DESC
+            )
+            UPDATE fund_conviction_metrics m
+            SET
+                rolling_z_score_252 = l.z_score_252,
+                volatility_tax      = l.volatility_tax_annual
+            FROM latest_per_fund l
+            WHERE m.amfi_code = l.amfi_code
+            AND m.calculation_date = (SELECT MAX(calculation_date) FROM fund_conviction_metrics)
+            """;
+        return jdbcTemplate.update(sql);
     }
 
     /**

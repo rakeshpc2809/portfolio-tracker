@@ -27,6 +27,7 @@ import com.oreki.cas_injector.core.utils.SignalType;
 import com.oreki.cas_injector.rebalancing.dto.SipLineItem;
 import com.oreki.cas_injector.rebalancing.dto.StrategyTarget;
 import com.oreki.cas_injector.rebalancing.dto.TacticalSignal;
+import com.oreki.cas_injector.rebalancing.dto.ReasoningMetadata;
 import com.oreki.cas_injector.taxmanagement.dto.TaxSimulationResult;
 import com.oreki.cas_injector.taxmanagement.service.TaxSimulatorService;
 import com.oreki.cas_injector.transactions.model.TaxLot;
@@ -51,6 +52,7 @@ public class PortfolioOrchestrator {
     private final ConvictionScoringService convictionScoringService;
     private final PositionSizingService positionSizingService;
     private final LotAggregationService lotAggregationService;
+    private final RebalanceEngine rebalanceEngine;
 
     // ==========================================
     // 🌟 MODE 1: MONTHLY SIP PLAN (Pure Sheet)
@@ -103,90 +105,43 @@ public class PortfolioOrchestrator {
         
         double totalPortfolioValue = holdings.stream().mapToDouble(AggregatedHolding::getCurrentValue).sum();
         
-        // Rebalancer/Arbitrage "dry powder" identification
-        double rebalancerValue = holdings.stream()
-            .filter(h -> {
-                String cat = h.getAssetCategory() != null ? h.getAssetCategory().toUpperCase() : "";
-                boolean isArbitrageByCategory = cat.contains("ARBITRAGE");
-                boolean isRebalancerBySheet = targets.stream()
-                    .anyMatch(t -> "rebalancer".equalsIgnoreCase(t.status()) 
-                        && t.schemeName().equalsIgnoreCase(h.getSchemeName()));
-                return isArbitrageByCategory || isRebalancerBySheet;
-            })
-            .mapToDouble(AggregatedHolding::getCurrentValue)
-            .sum();
-
         List<TacticalSignal> opportunisticDrafts = new ArrayList<>();
 
         for (StrategyTarget target : targets) {
+            if ("dropped".equalsIgnoreCase(target.status())) continue;
+
             AggregatedHolding holding = findHolding(holdings, target);
             String amfi = amfiCodeFor(target);
             MarketMetrics metrics = metricsMap.getOrDefault(amfi, defaultMetrics());
-            double actualPct = totalPortfolioValue > 0 ? (holding.getCurrentValue() / totalPortfolioValue) * 100 : 0;
-
-            // 1. ACCUMULATOR LOGIC (Buy on dips)
-            if ("accumulator".equalsIgnoreCase(target.status())) {
-                boolean isUnderTarget = actualPct < (target.targetPortfolioPct() > 0 ? target.targetPortfolioPct() : 100);
-                
-                // NEW: Three-tier logic
-                boolean isNearLow        = metrics.navPercentile3yr() > 0 && metrics.navPercentile3yr() < 0.45;
-                boolean isAtAthDiscount  = metrics.drawdownFromAth() < -0.15;
-                boolean hasNoNavHistory  = metrics.navPercentile3yr() == 0.0 && metrics.drawdownFromAth() == 0.0;
-                // If no NAV history at all, allow entry if conviction score is decent (new fund being initiated)
-                boolean isNewFundEntry   = hasNoNavHistory && metrics.convictionScore() >= 45;
-
-                boolean entrySignalPresent = isNearLow || isAtAthDiscount || isNewFundEntry;
-
-                if (isUnderTarget && entrySignalPresent) {
-                    String reason;
-                    if (isNearLow)
-                        reason = String.format("NAV at %d%% of 3yr range — near historical low.", Math.round(metrics.navPercentile3yr() * 100));
-                    else if (isAtAthDiscount)
-                        reason = String.format("NAV down %.1f%% from all-time high.", Math.abs(metrics.drawdownFromAth()) * 100);
-                    else
-                        reason = "New position initiation — insufficient NAV history, using conviction score as proxy.";
+            
+            TacticalSignal signal = rebalanceEngine.evaluate(holding, target, metrics, totalPortfolioValue, amfi);
+            
+            // We only care about BUY/WATCH signals in this mode
+            if (signal.action() == SignalType.BUY || signal.action() == SignalType.WATCH) {
+                // Apply concentration guard if it's a BUY
+                if (signal.action() == SignalType.BUY) {
+                    double baseAmount = Math.max(10000.0, 
+                        positionSizingService.calculateExecutionAmount(Double.parseDouble(signal.amount()), lumpsum, metrics));
                     
-                    List<String> justs = new ArrayList<>();
-                    justs.add("Accumulator entry: " + reason);
-                    
-                    double driftAmount = (target.targetPortfolioPct() - actualPct) / 100.0 * totalPortfolioValue;
-                    // Using Half-Kelly sizing
-                    double baseAmount = Math.max(10000, 
-                        positionSizingService.calculateExecutionAmount(driftAmount, lumpsum, metrics));
-
-                    // ── CONCENTRATION GUARD ──────────────────────────────────────────
+                    List<String> justs = new ArrayList<>(signal.justifications());
                     if (wouldBreachConcentration(holding, baseAmount, totalPortfolioValue)) {
                         double maxDeploy = (MAX_SINGLE_FUND_CONCENTRATION * totalPortfolioValue) - holding.getCurrentValue();
-                        if (maxDeploy < 5000) {
+                        if (maxDeploy < 5000.0) {
                             log.info("⛔ Concentration guard: {} already near 30% cap, skipping signal.", target.schemeName());
-                            continue; // skip this fund entirely
+                            continue; 
                         }
-                        baseAmount = Math.max(0, maxDeploy);
+                        baseAmount = Math.max(0.0, maxDeploy);
                         justs.add(String.format(
                             "⚠️ Concentration capped: Deploy limited to ₹%,.0f to stay under 30%% single-fund limit.",
                             baseAmount));
                     }
-
-                    opportunisticDrafts.add(buildSignal(target, amfi, SignalType.BUY, baseAmount, 
-                        target.targetPortfolioPct(), actualPct, metrics, justs));
-                }
-            }
-
-            // 2. REBALANCER DEPLOY (Core/Strategy significant drift)
-            if ("core".equalsIgnoreCase(target.status()) || "strategy".equalsIgnoreCase(target.status())) {
-                double drift = actualPct - target.targetPortfolioPct();
-                if (drift < -5.0 && metrics.navPercentile3yr() < 0.60 && rebalancerValue > 10000) {
-                    double deployFromRebalancer = Math.min(rebalancerValue * 0.4, Math.abs(drift/100.0) * totalPortfolioValue);
-                    List<String> justs = List.of(String.format("⚖️ Rebalancer Deploy: Fund is %.1f%% underweight. Redeploying ₹%,.0f from Rebalancer/Arbitrage parking.", 
-                        Math.abs(drift), deployFromRebalancer));
                     
-                    opportunisticDrafts.add(buildSignal(target, amfi, SignalType.BUY, deployFromRebalancer, 
-                        target.targetPortfolioPct(), actualPct, metrics, justs));
+                    signal = createSignal(signal, SignalType.BUY, String.format("%.2f", baseAmount), justs);
                 }
+                opportunisticDrafts.add(signal);
             }
         }
 
-        // Apply conviction-based weighting to lumpsum if multiple signals exist
         return weightSignalsByConviction(opportunisticDrafts, lumpsum);
     }
 
@@ -194,7 +149,7 @@ public class PortfolioOrchestrator {
 
     private boolean wouldBreachConcentration(AggregatedHolding holding, double deployAmount,
                                               double totalPortfolioValue) {
-        if (totalPortfolioValue <= 0) return false;
+        if (totalPortfolioValue <= 0.0) return false;
         double newValue      = holding.getCurrentValue() + deployAmount;
         double newConcentration = newValue / totalPortfolioValue;
         return newConcentration > MAX_SINGLE_FUND_CONCENTRATION;
@@ -205,127 +160,29 @@ public class PortfolioOrchestrator {
     // ==========================================
     public List<TacticalSignal> computeExitQueue(String pan) {
         List<StrategyTarget> targets = strategyService.fetchLatestStrategy();
-        
-        Set<String> droppedIsins = targets.stream()
-            .filter(t -> "dropped".equalsIgnoreCase(t.status()))
-            .map(t -> t.isin().toUpperCase())
-            .collect(Collectors.toSet());
-        Set<String> droppedNames = targets.stream()
-            .filter(t -> "dropped".equalsIgnoreCase(t.status()))
-            .map(t -> t.schemeName().toUpperCase().trim())
-            .collect(Collectors.toSet());
+        Map<String, MarketMetrics> metricsMap = fetchLiveMetricsMap(pan);
 
         List<TaxLot> allLots = taxLotRepository.findByStatusAndSchemeFolioInvestorPan("OPEN", pan);
         List<AggregatedHolding> holdings = lotAggregationService.aggregate(allLots);
-
-        // Find realized LTCG so far this FY
-        LocalDate fyStart = CommonUtils.getCurrentFyStart();
-        String ltcgSql = """
-            SELECT COALESCE(SUM(a.realized_gain), 0)
-            FROM capital_gain_audit a
-            JOIN transaction t ON a.sell_transaction_id = t.id
-            JOIN scheme s ON t.scheme_id = s.id
-            JOIN folio f ON s.folio_id = f.id
-            WHERE a.tax_category LIKE '%LTCG%'
-            AND t.transaction_date >= ?
-            AND f.investor_pan = ?
-            """;
-        double realizedLtcg = jdbcTemplate.queryForObject(ltcgSql, Double.class, fyStart, pan);
-        double ltcgHeadroom = Math.max(0, 125000 - realizedLtcg);
+        double totalPortfolioValue = holdings.stream().mapToDouble(AggregatedHolding::getCurrentValue).sum();
 
         List<TacticalSignal> exitPlan = new ArrayList<>();
 
         for (AggregatedHolding h : holdings) {
-            boolean isDropped = droppedIsins.contains(h.getIsin() != null ? h.getIsin().toUpperCase() : "")
-                || droppedNames.contains(h.getSchemeName().toUpperCase().trim())
-                || targets.stream().noneMatch(t -> 
-                    t.isin().equalsIgnoreCase(h.getIsin()) || 
-                    t.schemeName().equalsIgnoreCase(h.getSchemeName()));
+            StrategyTarget target = targets.stream()
+                .filter(t -> t.isin().equalsIgnoreCase(h.getIsin()) || t.schemeName().equalsIgnoreCase(h.getSchemeName()))
+                .findFirst()
+                .orElse(new StrategyTarget(h.getIsin() != null ? h.getIsin() : "", h.getSchemeName(), 0.0, 0.0, "dropped", "DROPPED"));
 
-            if (!isDropped) continue;
-            if (h.getCurrentValue() < 100) continue; 
+            if (!"dropped".equalsIgnoreCase(target.status())) continue;
+            if (h.getCurrentValue() < 100.0) continue; 
 
-            List<String> justs = new ArrayList<>();
-            double exitAmount = 0;
-            String category = h.getAssetCategory() != null ? h.getAssetCategory().toUpperCase() : "";
-
-            boolean isDebt = category.contains("DEBT") || category.contains("GILT")
-                || category.contains("BOND") || category.contains("LIQUID")
-                || category.contains("BANKING AND PSU") || category.contains("CORPORATE")
-                || category.contains("MONEY MARKET");
-
-            if (isDebt) {
-                exitAmount = h.getCurrentValue();
-                double gain = h.getCurrentValue() - h.getInvestedAmount();
-                if (gain > 0) {
-                    justs.add(String.format(
-                        "Priority exit: Debt fund taxed at slab rate (post-Apr 2023 rules). " +
-                        "No benefit in waiting. Gain of ₹%,.0f will be taxed at your income bracket.", gain));
-                } else {
-                    justs.add(String.format(
-                        "Priority exit: Debt fund at a loss of ₹%,.0f. " +
-                        "Exit now to book the loss.", Math.abs(gain)));
-                }
-            } else {
-                if (h.getLtcgValue() > 0) {
-                    double ltcgGainInHolding = h.getLtcgAmount();
-                    if (ltcgGainInHolding > 0 && ltcgHeadroom > 0) {
-                        double gainRatio = ltcgGainInHolding / h.getLtcgValue(); 
-                        double maxSellableUnderHeadroom = gainRatio > 0 ? ltcgHeadroom / gainRatio : h.getLtcgValue();
-                        exitAmount = Math.min(h.getLtcgValue(), maxSellableUnderHeadroom);
-                        ltcgHeadroom -= Math.min(ltcgGainInHolding, ltcgHeadroom);
-                        justs.add(String.format(
-                            "Tax-efficient exit: Selling ₹%,.0f of LTCG-eligible units " +
-                            "(profit ₹%,.0f) within annual tax-free limit.", exitAmount, ltcgGainInHolding));
-                    } else if (ltcgGainInHolding <= 0) {
-                        exitAmount = h.getLtcgValue();
-                        justs.add(String.format(
-                            "Exit at no tax: LTCG lots are at a loss of ₹%,.0f.",
-                            Math.abs(ltcgGainInHolding)));
-                    } else {
-                        exitAmount = h.getLtcgValue();
-                        justs.add(String.format(
-                            "LTCG limit reached for this FY. Exiting ₹%,.0f anyway — " +
-                            "excess gains taxed at 12.5%%.",
-                            exitAmount));
-                    }
-                }
-
-                if (h.getStcgValue() > 0) {
-                    int daysToLtcg = h.getDaysToNextLtcg();
-                    if (daysToLtcg > 0 && daysToLtcg <= 45) {
-                        justs.add(String.format(
-                            "Deferred: %d days until next lot becomes LTCG-eligible.", daysToLtcg));
-                    } else if (daysToLtcg > 45) {
-                        if (h.getStcgValue() < 15000) {
-                            exitAmount += h.getStcgValue();
-                            justs.add(String.format(
-                                "Small position (₹%,.0f): Exiting despite %d days remaining.", 
-                                h.getStcgValue(), daysToLtcg));
-                        } else {
-                            justs.add(String.format(
-                                "Deferred: %d days until LTCG. Holding ₹%,.0f to avoid STCG tax.", 
-                                daysToLtcg, h.getStcgValue()));
-                        }
-                    }
-                }
-
-                if (exitAmount == 0 && justs.isEmpty() && h.getCurrentValue() > 0) {
-                    exitAmount = h.getCurrentValue();
-                    justs.add(String.format(
-                        "Exit queued: Fund dropped from strategy. " +
-                        "Current value ₹%,.0f.", h.getCurrentValue()));
-                }
-            }
-
-            if (!justs.isEmpty() || exitAmount > 0) {
-                double totalVal = holdings.stream().mapToDouble(AggregatedHolding::getCurrentValue).sum();
-                exitPlan.add(new TacticalSignal(
-                    h.getSchemeName(), amfiCodeFor(h), SignalType.EXIT,
-                    String.format("%.2f", exitAmount),
-                    0, (h.getCurrentValue() / (totalVal / 100.0)),
-                    0, "DROPPED", 0, 0, 0, 0, 0, 0,
-                    LocalDate.now(), justs));
+            String amfi = amfiCodeFor(h);
+            MarketMetrics metrics = metricsMap.getOrDefault(amfi, defaultMetrics());
+            
+            TacticalSignal signal = rebalanceEngine.evaluate(h, target, metrics, totalPortfolioValue, amfi);
+            if (signal.action() == SignalType.EXIT || (signal.action() == SignalType.HOLD && "DROPPED".equals(signal.fundStatus()))) {
+                exitPlan.add(signal);
             }
         }
 
@@ -348,14 +205,8 @@ public class PortfolioOrchestrator {
      * GATE B: Proactive SELL/HOLD for active (non-dropped) funds.
      */
     public List<TacticalSignal> computeActiveSellSignals(String pan) {
-        final double DRIFT_SELL_THRESHOLD = 2.5;      // % overweight to trigger
-        final double CQS_DETERIORATION_FLOOR = 35;    // CQS below this = quantitative failure
-        final double TAX_DRAG_HARD_OVERRIDE = 0.08;   // 8% drag = sell regardless (Gate C)
-        final double INVESTMENT_HORIZON_YEARS = 5.0;  // Investor's assumed time horizon
-
         List<StrategyTarget> targets = strategyService.fetchLatestStrategy();
         Map<String, MarketMetrics> metricsMap = fetchLiveMetricsMap(pan);
-        Map<String, Integer> cqsMap = loadCqsMap();
 
         List<TaxLot> allLots = taxLotRepository.findByStatusAndSchemeFolioInvestorPan("OPEN", pan);
         List<AggregatedHolding> holdings = lotAggregationService.aggregate(allLots);
@@ -367,75 +218,19 @@ public class PortfolioOrchestrator {
             if ("dropped".equalsIgnoreCase(target.status())) continue; 
             
             AggregatedHolding holding = findHolding(holdings, target);
-            if (holding.getCurrentValue() < 5000) continue; 
+            if (holding.getCurrentValue() < 5000.0) continue; 
 
             String amfi = amfiCodeFor(target);
             MarketMetrics metrics = metricsMap.getOrDefault(amfi, defaultMetrics());
-            int cqs = cqsMap.getOrDefault(amfi, 50);
 
-            double actualPct = totalValue > 0 ? (holding.getCurrentValue() / totalValue) * 100 : 0;
-            double drift = actualPct - target.targetPortfolioPct(); // positive = overweight
-
-            boolean isOverweight = drift > DRIFT_SELL_THRESHOLD;
-            boolean isQuantDeterioration = cqs < CQS_DETERIORATION_FLOOR;
-
-            if (!isOverweight || !isQuantDeterioration) continue;
-
-            // --- TAX-ALPHA HURDLE RATE ---
-            double sellAmount = (drift / 100.0) * totalValue; 
-            TaxSimulationResult taxResult = taxSimulator.simulateSellOrder(
-                holding.getSchemeName(), sellAmount, getCurrentNav(amfi), pan);
+            TacticalSignal signal = rebalanceEngine.evaluate(holding, target, metrics, totalValue, amfi);
             
-            double netRealizable = sellAmount - taxResult.estimatedTax();
-            double taxDragPct = taxResult.taxDragPercentage();
-
-            List<String> justs = new ArrayList<>();
-            justs.add(String.format("Overweight by %.1f%% (actual: %.1f%%, target: %.1f%%).", 
-                drift, actualPct, target.targetPortfolioPct()));
-            justs.add(String.format("Peer CQS: %d/100 — below floor of %d (quantitative deterioration).", 
-                cqs, CQS_DETERIORATION_FLOOR));
-
-            if (metrics.cvar5() < -5.0 || taxDragPct > TAX_DRAG_HARD_OVERRIDE) {
-                justs.add(String.format(
-                    "⚠️ Risk override: CVaR=%.2f%% or tax drag %.1f%% exceeds hard limits.",
-                    metrics.cvar5(), taxDragPct * 100));
-                sellSignals.add(buildSignal(target, amfi, SignalType.SELL, sellAmount, 
-                    target.targetPortfolioPct(), actualPct, metrics, justs));
-                continue;
-            }
-
-            double currentFundExpectedReturn = sortinoToExpectedReturn(metrics.sortinoRatio());
-            double replacementExpectedReturn = estimateBestBucketReturn(pan, target.status(), cqsMap, metricsMap);
-            
-            double holdFutureValue    = sellAmount    * Math.pow(1 + currentFundExpectedReturn, INVESTMENT_HORIZON_YEARS);
-            double switchFutureValue  = netRealizable * Math.pow(1 + replacementExpectedReturn, INVESTMENT_HORIZON_YEARS);
-
-            boolean hurdleCleared = switchFutureValue > holdFutureValue;
-
-            int daysToLtcg = holding.getDaysToNextLtcg();
-            if (!hurdleCleared && daysToLtcg > 0 && daysToLtcg <= 45 && taxResult.hasStcg()) {
-                double stcgSavings = taxResult.stcgProfit() * 0.075; 
-                justs.add(String.format(
-                    "⏳ Tax-Locked: %d days until LTCG. Waiting saves ~₹%,.0f in STCG tax.",
-                    daysToLtcg, stcgSavings));
-                sellSignals.add(buildSignal(target, amfi, SignalType.HOLD, 0, 
-                    target.targetPortfolioPct(), actualPct, metrics, justs));
-                continue;
-            }
-
-            if (!hurdleCleared) {
-                justs.add(String.format(
-                    "Tax-Locked: Net realizable ₹%,.0f after ₹%,.0f tax. Expected switch benefit " +
-                    "doesn't clear hold value over %d-yr horizon.",
-                    netRealizable, taxResult.estimatedTax(), (int)INVESTMENT_HORIZON_YEARS));
-                sellSignals.add(buildSignal(target, amfi, SignalType.HOLD, 0,
-                    target.targetPortfolioPct(), actualPct, metrics, justs));
-            } else {
-                justs.add(String.format(
-                    "Tax-Alpha cleared: Switch value ₹%,.0f vs hold ₹%,.0f (net of ₹%,.0f tax, %.1f%% drag).",
-                    (long)switchFutureValue, (long)holdFutureValue, taxResult.estimatedTax(), taxDragPct * 100));
-                sellSignals.add(buildSignal(target, amfi, SignalType.SELL, sellAmount,
-                    target.targetPortfolioPct(), actualPct, metrics, justs));
+            if (signal.action() == SignalType.SELL || signal.action() == SignalType.HOLD) {
+                // If it's a SELL, it's an active sell. If it's HOLD but was overweight, the engine decided to override.
+                // We show both here as "Active Rebalancing" decisions.
+                if (holding.getCurrentValue() > (target.targetPortfolioPct() / 100.0 * totalValue) + (totalValue * 0.025)) {
+                    sellSignals.add(signal);
+                }
             }
         }
 
@@ -444,7 +239,7 @@ public class PortfolioOrchestrator {
 
     private double sortinoToExpectedReturn(double sortino) {
         double MAR = 0.07;
-        return MAR + Math.max(0, (sortino - 1.0) * 0.03); 
+        return MAR + Math.max(0.0, (sortino - 1.0) * 0.03); 
     }
 
     private double estimateBestBucketReturn(String pan, String bucket, 
@@ -476,7 +271,8 @@ public class PortfolioOrchestrator {
         return new TacticalSignal(t.schemeName(), amfi, action, String.format("%.2f", amount),
             targetPct, actualPct, t.sipPct(), t.status(), m.convictionScore(), 
             m.sortinoRatio(), m.maxDrawdown(), m.navPercentile3yr(), 
-            m.drawdownFromAth(), m.returnZScore(), m.lastBuyDate(), justs);
+            m.drawdownFromAth(), m.returnZScore(), m.lastBuyDate(), justs,
+            ReasoningMetadata.neutral(t.schemeName()));
     }
 
     public List<TacticalSignal> generateDailySignals(String investorPan, double monthlySip, double lumpsum) {
@@ -499,7 +295,7 @@ public class PortfolioOrchestrator {
             return sig;
         }).collect(Collectors.toList());
 
-        if (cash <= 0) {
+        if (cash <= 0.0) {
             return activeDrafts.stream()
                 .filter(s -> SignalType.WATCH != s.action())
                 .map(s -> createSignal(s, SignalType.BUY, s.amount(), s.justifications()))
@@ -516,7 +312,7 @@ public class PortfolioOrchestrator {
             
             double baseAmount = Double.parseDouble(sig.amount());
             double scoreMult = Math.max(0.2, sig.convictionScore() / 100.0);
-            double allocatedAmount = totalDemand > 0 
+            double allocatedAmount = totalDemand > 0.0 
                 ? (baseAmount * scoreMult / totalDemand) * cash 
                 : baseAmount;
             
@@ -529,7 +325,7 @@ public class PortfolioOrchestrator {
     private AggregatedHolding findHolding(List<AggregatedHolding> holdings, StrategyTarget t) {
         return holdings.stream()
             .filter(h -> h.getSchemeName().equalsIgnoreCase(t.schemeName()))
-            .findFirst().orElse(new AggregatedHolding(t.schemeName(), 0,0,0,0,0,0,0,0,0,"UNKNOWN","DROPPED", t.isin()));
+            .findFirst().orElse(new AggregatedHolding(t.schemeName(), 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0, 0, "UNKNOWN", "DROPPED", t.isin()));
     }
 
     private String amfiCodeFor(StrategyTarget t) {
@@ -541,17 +337,18 @@ public class PortfolioOrchestrator {
     }
 
     private MarketMetrics defaultMetrics() {
-        return new MarketMetrics(0,0,0,0,0,0.5,0,0, LocalDate.of(1970,1,1));
+        return MarketMetrics.fromLegacy(0, 0.0, 0.0, 0.0, 0.0, 0.5, 0.0, 0.0, LocalDate.of(1970, 1, 1));
     }
 
     private TacticalSignal createSignal(TacticalSignal s, SignalType action, String amt, List<String> justs) {
-        return new TacticalSignal(s.schemeName(), s.amfiCode(), action, amt, s.plannedPercentage(), s.actualPercentage(), s.sipPercentage(), s.fundStatus(), s.convictionScore(), s.sortinoRatio(), s.maxDrawdown(), s.navPercentile3yr(), s.drawdownFromAth(), s.returnZScore(), s.lastBuyDate(), justs);
+        return new TacticalSignal(s.schemeName(), s.amfiCode(), action, amt, s.plannedPercentage(), s.actualPercentage(), s.sipPercentage(), s.fundStatus(), s.convictionScore(), s.sortinoRatio(), s.maxDrawdown(), s.navPercentile3yr(), s.drawdownFromAth(), s.returnZScore(), s.lastBuyDate(), justs, s.reasoningMetadata());
     }
 
     private Map<String, MarketMetrics> fetchMetricsForAmfi(String amfi) {
         String sql = """
             SELECT amfi_code, sortino_ratio, cvar_5, win_rate, max_drawdown,
-                   conviction_score, nav_percentile_3yr, drawdown_from_ath, return_z_score
+                   conviction_score, nav_percentile_3yr, drawdown_from_ath, return_z_score,
+                   rolling_z_score_252, hurst_exponent, volatility_tax, hurst_regime, historical_rarity_pct
             FROM fund_conviction_metrics
             WHERE amfi_code = ?
             AND calculation_date = (SELECT MAX(calculation_date) FROM fund_conviction_metrics)
@@ -569,7 +366,12 @@ public class PortfolioOrchestrator {
                 getSafeDouble(r.get("nav_percentile_3yr")),
                 getSafeDouble(r.get("drawdown_from_ath")),
                 getSafeDouble(r.get("return_z_score")),
-                LocalDate.of(1970, 1, 1)
+                LocalDate.of(1970, 1, 1),
+                getSafeDouble(r.get("rolling_z_score_252")),
+                getSafeDouble(r.get("hurst_exponent")),
+                getSafeDouble(r.get("volatility_tax")),
+                (String) r.getOrDefault("hurst_regime", "RANDOM_WALK"),
+                getSafeDouble(r.get("historical_rarity_pct"))
             ));
         }
         return map;
@@ -578,7 +380,8 @@ public class PortfolioOrchestrator {
    private Map<String, MarketMetrics> fetchLiveMetricsMap(String pan) {
         String sql = """
             SELECT m.amfi_code, m.sortino_ratio, m.cvar_5, m.win_rate, m.max_drawdown, 
-                   m.conviction_score, m.nav_percentile_3yr, m.drawdown_from_ath, m.return_z_score
+                   m.conviction_score, m.nav_percentile_3yr, m.drawdown_from_ath, m.return_z_score,
+                   m.rolling_z_score_252, m.hurst_exponent, m.volatility_tax, m.hurst_regime, m.historical_rarity_pct
             FROM fund_conviction_metrics m
             JOIN scheme s ON m.amfi_code = s.amfi_code 
             JOIN folio f ON s.folio_id = f.id
@@ -614,7 +417,12 @@ public class PortfolioOrchestrator {
                 getSafeDouble(r.get("nav_percentile_3yr")),
                 getSafeDouble(r.get("drawdown_from_ath")),
                 getSafeDouble(r.get("return_z_score")),
-                lastBuyDates.getOrDefault(amfi, LocalDate.of(1970, 1, 1))
+                lastBuyDates.getOrDefault(amfi, LocalDate.of(1970, 1, 1)),
+                getSafeDouble(r.get("rolling_z_score_252")),
+                getSafeDouble(r.get("hurst_exponent")),
+                getSafeDouble(r.get("volatility_tax")),
+                (String) r.getOrDefault("hurst_regime", "RANDOM_WALK"),
+                getSafeDouble(r.get("historical_rarity_pct"))
             ));
         }
         return map;

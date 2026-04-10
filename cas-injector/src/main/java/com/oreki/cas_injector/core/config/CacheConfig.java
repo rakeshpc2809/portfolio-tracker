@@ -20,5 +20,5 @@ public void evictNavCache() {
 @Bean
     public CacheManager cacheManager() {
         // This creates a simple in-memory cache provider
-return new ConcurrentMapCacheManager("schemeDetailsCache", "navCache", "portfolioCache");    }
+return new ConcurrentMapCacheManager("schemeDetailsCache", "navCache", "portfolioCache", "dashboardSummary");    }
 }

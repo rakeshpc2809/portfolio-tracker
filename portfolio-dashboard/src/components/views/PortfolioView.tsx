@@ -1,13 +1,10 @@
-import { motion } from 'framer-motion';
 import { 
   ResponsiveContainer, XAxis, YAxis, Tooltip as RechartsTooltip, 
-  BarChart, Bar, Cell, CartesianGrid, Treemap
+  BarChart, Bar, CartesianGrid, Treemap
 } from "recharts";
 import { HeartPulse } from 'lucide-react';
 import MetricWithTooltip from '../ui/MetricWithTooltip';
 import CurrencyValue from '../ui/CurrencyValue';
-
-const PALETTE = ['#818cf8', '#34d399', '#fbbf24', '#f87171', '#94a3b8', '#e879f9', '#38bdf8'];
 
 export default function PortfolioView({ 
   portfolioData, 
@@ -39,11 +36,6 @@ export default function PortfolioView({
   const unrealizedAbsPct = Math.min(100, Math.abs(unrealizedPct));
   const isUnrealizedNegative = unrealizedPct < 0;
 
-  const bucketMap: Record<string, number> = {};
-  breakdown.forEach((s: any) => {
-    bucketMap[s.bucket] = (bucketMap[s.bucket] || 0) + (s.currentValue || 0);
-  });
-  
   // Prep Treemap Data (Nested hierarchy)
   const treemapData = Object.entries(
     breakdown.reduce((acc: any, s: any) => {

@@ -13,12 +13,15 @@ public record TacticalSignal(
     double actualPercentage,
     double sipPercentage,
     String fundStatus,
-    int convictionScore,
+    int    convictionScore,
     double sortinoRatio,
     double maxDrawdown,
     double navPercentile3yr,
     double drawdownFromAth,
     double returnZScore,
     LocalDate lastBuyDate,
-    List<String> justifications
+    List<String> justifications,
+
+    // ── NEW: structured "Why" payload for the Explanation Engine ─────────────
+    ReasoningMetadata reasoningMetadata
 ) {}

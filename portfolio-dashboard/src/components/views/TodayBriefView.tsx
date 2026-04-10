@@ -1,7 +1,9 @@
 import { motion } from 'framer-motion';
-import { Zap, TrendingUp, Receipt, Target, ArrowDownRight, Scissors } from 'lucide-react';
-import ConvictionBadge from '../ui/ConvictionBadge';
+import { Zap, TrendingUp, Target, ArrowDownRight, Scissors } from 'lucide-react';
 import CurrencyValue from '../ui/CurrencyValue';
+import { RecommendationDetailCard } from '../ui/RecommendationDetailCard';
+import { resolveReasoningMetadata } from '../../utils/formatters';
+import type { TacticalSignal } from '../../types/signals';
 
 export default function TodayBriefView({ 
   portfolioData, 
@@ -126,25 +128,16 @@ export default function TodayBriefView({
                 onClick={() => onFundClick(s.schemeName)}
                 className="flex items-center gap-4 px-5 py-3.5 bg-surface border border-border rounded-xl hover:border-white/10 hover:bg-white/[0.015] cursor-pointer transition-all group"
               >
-                {/* deploy status dot */}
                 <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${s.deployFlag === 'DEPLOY' ? 'bg-buy shadow-[0_0_8px_rgba(52,211,153,0.4)]' : 'bg-warning shadow-[0_0_8px_rgba(251,191,36,0.4)]'}`} />
-
-                {/* fund name */}
                 <p className="flex-1 text-[13px] text-primary group-hover:text-white transition-colors truncate font-medium">
                   {s.schemeName}
                 </p>
-
-                {/* pct allocation */}
                 <span className="text-[10px] text-muted tabular-nums shrink-0 font-bold">{s.sipPct}%</span>
-
-                {/* amount */}
                 <div className="min-w-[90px] text-right">
                   <span className={`text-[13px] font-bold tabular-nums ${s.deployFlag === 'DEPLOY' ? 'text-buy' : 'text-warning'}`}>
                     {isPrivate ? '••••' : `₹${(s.amount / 1000).toFixed(0)}k`}
                   </span>
                 </div>
-
-                {/* status badge */}
                 <span className={`text-[8px] font-bold uppercase tracking-widest px-2 py-0.5 rounded shrink-0 ${
                   s.deployFlag === 'DEPLOY' ? 'bg-buy/10 text-buy border border-buy/20' : 'bg-warning/10 text-warning border border-warning/20'
                 }`}>
@@ -167,24 +160,16 @@ export default function TodayBriefView({
           animate="show"
           className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"
         >
-          {payload.opportunisticSignals.map((signal: any) => (
-            <motion.div 
-              key={signal.schemeName}
-              variants={item}
-              onClick={() => onFundClick(signal.schemeName)}
-              className="p-5 rounded-xl border border-buy/10 bg-buy/[0.02] hover:border-buy/20 transition-all cursor-pointer group hover:bg-white/[0.02]"
-            >
-              <div className="flex items-center justify-between mb-4">
-                <span className="text-[10px] font-bold uppercase tracking-widest text-buy">{signal.action}</span>
-                <ConvictionBadge score={signal.convictionScore} />
-              </div>
-              <p className="text-[13px] font-medium text-primary mb-1 truncate group-hover:text-white transition-colors">{signal.schemeName}</p>
-              <div className="text-xl font-medium tabular-nums mb-3 text-buy">
-                <CurrencyValue isPrivate={isPrivate} value={parseFloat(signal.amount)} />
-              </div>
-              <p className="text-[11px] text-secondary leading-relaxed line-clamp-2">
-                {signal.justifications[0]}
-              </p>
+          {payload.opportunisticSignals.map((signal: TacticalSignal) => (
+            <motion.div key={signal.schemeName} variants={item}>
+              <RecommendationDetailCard
+                signal={{
+                  ...signal,
+                  reasoningMetadata: resolveReasoningMetadata(signal)
+                }}
+                isPrivate={isPrivate}
+                defaultExpanded={signal.action === 'BUY' && (signal.returnZScore ?? 0) <= -2.0}
+              />
             </motion.div>
           ))}
           
@@ -205,37 +190,15 @@ export default function TodayBriefView({
             <ArrowDownRight size={12} className="text-exit" /> Active Rebalance (Gate B)
           </h3>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {payload.activeSellSignals.map((signal: any) => (
-              <div 
+            {payload.activeSellSignals.map((signal: TacticalSignal) => (
+              <RecommendationDetailCard 
                 key={signal.schemeName}
-                onClick={() => onFundClick(signal.schemeName)}
-                className={`p-5 rounded-xl border transition-all cursor-pointer group hover:bg-white/[0.02] ${
-                  signal.action === 'SELL' ? 'border-exit/20 bg-exit/[0.02]' : 'border-warning/20 bg-warning/[0.02]'
-                }`}
-              >
-                <div className="flex items-center justify-between mb-4">
-                  <span className={`text-[10px] font-bold uppercase tracking-widest ${
-                    signal.action === 'SELL' ? 'text-exit' : 'text-warning'
-                  }`}>{signal.action} SIGNAL</span>
-                  <ConvictionBadge score={signal.convictionScore} />
-                </div>
-                <p className="text-[13px] font-medium text-primary mb-1 truncate">{signal.schemeName}</p>
-                <div className={`text-xl font-medium tabular-nums mb-3 ${
-                  signal.action === 'SELL' ? 'text-exit' : 'text-warning'
-                }`}>
-                  {signal.action === 'SELL' 
-                    ? <CurrencyValue isPrivate={isPrivate} value={parseFloat(signal.amount)} />
-                    : 'TAX-LOCKED'
-                  }
-                </div>
-                <div className="space-y-2">
-                  {signal.justifications.slice(0, 2).map((j: string, idx: number) => (
-                    <p key={idx} className="text-[10px] text-secondary leading-relaxed border-l border-white/10 pl-2">
-                      {j}
-                    </p>
-                  ))}
-                </div>
-              </div>
+                signal={{
+                  ...signal,
+                  reasoningMetadata: resolveReasoningMetadata(signal)
+                }}
+                isPrivate={isPrivate}
+              />
             ))}
           </div>
         </section>
@@ -299,23 +262,16 @@ export default function TodayBriefView({
             </div>
             <table className="w-full text-left">
               <tbody className="divide-y divide-white/5">
-                {payload.exitQueue.map((s: any) => (
-                  <tr key={s.schemeName} className="hover:bg-white/[0.01]">
-                    <td className="px-6 py-4">
-                      <p className="text-[13px] text-primary font-medium">{s.schemeName}</p>
-                      <p className="text-[10px] text-muted uppercase tracking-widest mt-0.5">{s.fundStatus}</p>
-                    </td>
-                    <td className="px-6 py-4 text-right">
-                      <p className="text-[10px] text-muted uppercase mb-0.5">Liquidation</p>
-                      <div className="text-[13px] text-exit font-medium tabular-nums">
-                        <CurrencyValue isPrivate={isPrivate} value={s.amount} />
-                      </div>
-                    </td>
-                    <td className="px-6 py-4">
-                      <div className="flex items-start gap-2 max-w-xs">
-                        <Receipt size={12} className="text-muted mt-0.5 shrink-0" />
-                        <p className="text-[11px] text-secondary leading-relaxed">{s.justifications[0]}</p>
-                      </div>
+                {payload.exitQueue.map((signal: TacticalSignal) => (
+                  <tr key={signal.schemeName} className="hover:bg-white/[0.01]">
+                    <td colSpan={3} className="p-2">
+                      <RecommendationDetailCard
+                        signal={{
+                          ...signal,
+                          reasoningMetadata: resolveReasoningMetadata(signal)
+                        }}
+                        isPrivate={isPrivate}
+                      />
                     </td>
                   </tr>
                 ))}

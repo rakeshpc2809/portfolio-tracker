@@ -52,6 +52,7 @@ public class Scheme {
     private List<Transaction> transactions;
 
     @OneToMany(mappedBy = "scheme", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
+    @Builder.Default
     private List<TaxLot> taxLots = new ArrayList<>();
 
     @Column(name = "benchmark_index")

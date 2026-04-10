@@ -34,7 +34,6 @@ services:
       - PORTFOLIO_API_KEY=${PORTFOLIO_API_KEY:-dev-secret-key}
     volumes:
       - ./logs:/app/logs
-      - ./cas-scraper:/app/cas-scraper
     depends_on:
       - postgres
 
@@ -49,18 +48,6 @@ services:
       - PORTFOLIO_API_KEY=${PORTFOLIO_API_KEY:-dev-secret-key}
     depends_on:
       - java-backend
-
-  # 3.5 The Python Scraper Service
-  python-scraper:
-    build: ./cas-scraper
-    container_name: cas_scraper_service
-    ports:
-      - "8001:8001"
-    environment:
-      - DATABASE_URL=postgresql://${DB_USER:-user}:${DB_PASSWORD:-password}@postgres:5432/${DB_NAME:-cas_db}
-    depends_on:
-      - postgres
-    restart: always
 
   # 4. The React Frontend
   react-frontend:

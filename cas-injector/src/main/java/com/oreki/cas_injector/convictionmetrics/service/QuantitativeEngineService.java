@@ -18,9 +18,10 @@ public class QuantitativeEngineService {
 
     private final ConvictionMetricsRepository convictionMetricsRepository;
     private final BucketZScorerService bucketZScorerService;
+    private final HurstExponentService hurstExponentService;
 
     @Getter private final AtomicBoolean isRunning = new AtomicBoolean(false);
-    @Getter private final AtomicInteger currentStep = new AtomicInteger(0); // 0-4
+    @Getter private final AtomicInteger currentStep = new AtomicInteger(0); // 0-6
     @Getter private String lastStatusMessage = "Idle";
 
     /**
@@ -34,7 +35,7 @@ public class QuantitativeEngineService {
         }
 
         try {
-            log.info("🧮 Starting Advanced Quantitative Math Engine (Sortino, CVaR, MDD, NAV Signals)...");
+            log.info("🧮 Starting Advanced Quantitative Math Engine (Sortino, CVaR, MDD, NAV Signals, Hurst, Z-Score)...");
             long startTime = System.currentTimeMillis();
 
             // 1. Run existing Sortino/CVaR/MDD block
@@ -42,23 +43,34 @@ public class QuantitativeEngineService {
             lastStatusMessage = "Calculating main risk metrics (Sortino, CVaR)...";
             int mainMetricsRows = convictionMetricsRepository.runNightlyMathEngine();
 
-            // 2. Run new NAV Signals block (Percentile, ATH Drawdown, Return Z-Score)
+            // 2. Run existing NAV Signals block (Percentile, ATH Drawdown, Return Z-Score)
             currentStep.set(2);
             lastStatusMessage = "Updating NAV signals (Percentile, ATH)...";
             int navSignalRows = convictionMetricsRepository.updateNavSignals();
 
-            // 3. Run new Bucket Z-Scorer (CQS)
+            // 3. Run existing Bucket Z-Scorer (CQS)
             currentStep.set(3);
             lastStatusMessage = "Computing relative Bucket Z-Scores...";
             bucketZScorerService.computeBucketCqs();
 
+            // 4. Run new Rolling Z-Score & Volatility Tax via SQL
+            currentStep.set(4);
+            lastStatusMessage = "Computing Rolling 252-day Z-Score & Volatility Tax...";
+            int zScoreRows = convictionMetricsRepository.updateRollingZScoreAndVolatilityTax();
+            log.info("📈 Rolling Z-Score updated for {} funds.", zScoreRows);
+
+            // 5. Run new Hurst Exponent (Java R/S Analysis)
+            currentStep.set(5);
+            lastStatusMessage = "Running Hurst Exponent R/S Analysis...";
+            hurstExponentService.computeAndPersistHurstMetrics();
+
             long endTime = System.currentTimeMillis();
             lastStatusMessage = "Complete! Updated " + mainMetricsRows + " funds.";
-            log.info("✅ Math Engine Complete! Main Metrics updated for {} funds. NAV Signals updated for {} rows in {} ms.", 
+            log.info("✅ Math Engine Complete! Main Metrics updated for {} funds. NAV Signals updated for {} rows. Z-Score/Hurst complete in {} ms.", 
                 mainMetricsRows, navSignalRows, (endTime - startTime));
         } catch (Exception e) {
             lastStatusMessage = "Failed: " + e.getMessage();
-            log.error("🚨 Math Engine Failed to execute native SQL.", e);
+            log.error("🚨 Math Engine Failed to execute native SQL or Java services.", e);
         } finally {
             isRunning.set(false);
         }
