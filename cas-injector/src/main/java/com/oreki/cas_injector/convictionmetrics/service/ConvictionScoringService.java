@@ -53,7 +53,21 @@ public class ConvictionScoringService {
 
         if (fundMetrics.isEmpty()) {
             log.warn("⚠️ No metrics found for scoring! Check if nightly engine has run and AMFI codes match.");
+            return;
         }
+
+        // --- Step 2.1: Pre-calculate Max Portfolio CAGR for dynamic normalization ---
+        double portfolioMaxCagr = 0.25; // Default floor
+        for (Map<String, Object> fund : fundMetrics) {
+            String amfi = sanitizeAmfi((String) fund.get("amfi_code"));
+            List<TaxLot> lots = lotsByAmfi.get(amfi);
+            if (lots != null && !lots.isEmpty() && !isDebtLikeCategory(safeStr(fund.get("asset_category")))) {
+                double cagr = calculatePersonalCagr(amfi, lots);
+                if (cagr > portfolioMaxCagr) portfolioMaxCagr = cagr;
+            }
+        }
+        double equityYieldUpperBound = Math.max(0.25, portfolioMaxCagr * 0.90);
+        log.info("🎯 Dynamic Yield Upper Bound set to {:.2f}%", equityYieldUpperBound * 100);
 
         for (Map<String, Object> fund : fundMetrics) {
             String amfiCode = sanitizeAmfi((String) fund.get("amfi_code"));
@@ -75,28 +89,19 @@ public class ConvictionScoringService {
                 List<TaxLot> fundLots = lotsByAmfi.get(amfiCode);
                 if (fundLots != null && !fundLots.isEmpty()) {
                     log.info("  ├─ Found {} lots for this fund.", fundLots.size());
+                    dynamicPersonalCagr = calculatePersonalCagr(amfiCode, fundLots);
+                    log.info("  ├─ CAGR: {:.2f}%", dynamicPersonalCagr * 100);
+                    
                     var details = navService.getLatestSchemeDetails(amfiCode);
                     double currentNav = (details != null && details.getNav() != null) ? details.getNav().doubleValue() : 0.0;
                     if (currentNav > 0) {
-                        double totalCost = 0, totalValue = 0;
-                        LocalDate oldestDate = LocalDate.now();
-                        for (TaxLot lot : fundLots) {
-                            double lCost = lot.getRemainingUnits().doubleValue() * lot.getCostBasisPerUnit().doubleValue();
-                            totalCost  += lCost;
-                            totalValue += lot.getRemainingUnits().doubleValue() * currentNav;
-                            if (lot.getBuyDate().isBefore(oldestDate)) oldestDate = lot.getBuyDate();
-                        }
-                        double absoluteReturn = totalCost > 0 ? (totalValue - totalCost) / totalCost : 0;
-                        double yearsInvested = Math.max(0.5, ChronoUnit.DAYS.between(oldestDate, LocalDate.now()) / 365.0);
-                        dynamicPersonalCagr = Math.pow(1 + absoluteReturn, 1.0 / yearsInvested) - 1;
-                        log.info("  ├─ CAGR: {:.2f}%, Abs Return: {:.2f}%", dynamicPersonalCagr * 100, absoluteReturn * 100);
+                        double totalValue = fundLots.stream().mapToDouble(l -> l.getRemainingUnits().doubleValue() * currentNav).sum();
                         try {
                             String schemeName = fundLots.get(0).getScheme().getName();
                             TaxSimulationResult taxFriction = taxSimulator.simulateSellOrder(schemeName, totalValue, currentNav, investorPan);
                             dynamicTaxDrag = taxFriction.taxDragPercentage();
                             log.info("  ├─ Tax Drag: {:.2f}%", dynamicTaxDrag * 100);
                         } catch (Exception ignored) {}
-
                     }
                 } else {
                     log.warn("  ├─ ⚠️ No lots found for AMFI {} in the lotsByAmfi map!", amfiCode);
@@ -114,7 +119,7 @@ public class ConvictionScoringService {
                     painScore = invertNormalize(maxDrawdown, 0.0, 0.05) * 100;
                     frictionScore = invertNormalize(dynamicTaxDrag, 0.0, 0.30) * 100;
                 } else {
-                    yieldScore    = normalize(dynamicPersonalCagr, 0.05, 0.25) * 100;
+                    yieldScore    = normalize(dynamicPersonalCagr, 0.05, equityYieldUpperBound) * 100;
                     riskScore     = (cqs >= 0) ? cqs : normalize(sortino, 0.5, 2.5) * 100;
                     valueScore    = calculateValueScore(navPercentile, athDrawdown, returnZScore, assetCategory);
                     painScore     = invertNormalize(maxDrawdown, 0.05, 0.35) * 100;
@@ -184,6 +189,25 @@ public class ConvictionScoringService {
     private String sanitizeAmfi(String amfi) {
         if (amfi == null) return "";
         String s = amfi.trim();
+        // Remove leading zeros for consistent matching (MFAPI vs AMFI)
         return s.replaceFirst("^0+(?!$)", "");
+    }
+
+    private double calculatePersonalCagr(String amfi, List<TaxLot> lots) {
+        var details = navService.getLatestSchemeDetails(amfi);
+        double currentNav = (details != null && details.getNav() != null) ? details.getNav().doubleValue() : 0.0;
+        if (currentNav <= 0) return 0.0;
+
+        double totalCost = 0, totalValue = 0;
+        LocalDate oldestDate = LocalDate.now();
+        for (TaxLot lot : lots) {
+            double lCost = lot.getRemainingUnits().doubleValue() * lot.getCostBasisPerUnit().doubleValue();
+            totalCost += lCost;
+            totalValue += lot.getRemainingUnits().doubleValue() * currentNav;
+            if (lot.getBuyDate().isBefore(oldestDate)) oldestDate = lot.getBuyDate();
+        }
+        double absoluteReturn = totalCost > 0 ? (totalValue - totalCost) / totalCost : 0;
+        double yearsInvested = Math.max(0.5, ChronoUnit.DAYS.between(oldestDate, LocalDate.now()) / 365.0);
+        return Math.pow(1 + absoluteReturn, 1.0 / yearsInvested) - 1;
     }
 }

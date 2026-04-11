@@ -3,6 +3,7 @@ package com.oreki.cas_injector.convictionmetrics.service;
 import java.util.List;
 import java.util.Map;
 
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
@@ -20,6 +21,8 @@ import lombok.extern.slf4j.Slf4j;
 public class HmmRegimeService {
 
     private final JdbcTemplate jdbcTemplate;
+    
+    @Qualifier("hmmRestTemplate")
     private final RestTemplate restTemplate;
 
     @Value("${casparser.url:http://cas-parser:8000}")
@@ -28,38 +31,19 @@ public class HmmRegimeService {
     @Value("${hmm.enabled:false}")
     private boolean hmmEnabled;
 
-    public void computeAndPersistHmmStates() {
+    public void computeAndPersistHmmStates(Map<String, double[]> returnsCache) {
         if (!hmmEnabled) {
             log.info("HMM disabled via feature flag.");
             return;
         }
 
-        String amfiSql = """
-            SELECT amfi_code
-            FROM fund_history
-            GROUP BY amfi_code
-            HAVING COUNT(*) >= 253
-            """;
-        List<String> amfiCodes = jdbcTemplate.queryForList(amfiSql, String.class);
-        log.info("🧠 Computing HMM regimes for {} funds...", amfiCodes.size());
+        log.info("🧠 Computing HMM regimes for {} funds from cache...", returnsCache.size());
 
-        for (String amfi : amfiCodes) {
+        for (var entry : returnsCache.entrySet()) {
+            String amfi = entry.getKey();
             try {
-                String navSql = """
-                    SELECT nav FROM (
-                        SELECT nav, nav_date FROM fund_history
-                        WHERE amfi_code = ?
-                        ORDER BY nav_date DESC
-                        LIMIT 253
-                    ) sub ORDER BY nav_date ASC
-                    """;
-                List<Double> navs = jdbcTemplate.queryForList(navSql, Double.class, amfi);
-                if (navs.size() < 253) continue;
-
-                double[] returns = new double[252];
-                for (int i = 0; i < 252; i++) {
-                    returns[i] = Math.log(navs.get(i + 1) / navs.get(i));
-                }
+                double[] returns = entry.getValue();
+                if (returns.length < 252) continue;
 
                 // POST to cas-parser
                 String url = casparserUrl + "/hmm/fit";

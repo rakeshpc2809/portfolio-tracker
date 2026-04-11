@@ -19,10 +19,16 @@ public class HierarchicalRiskParityService {
 
     private final JdbcTemplate jdbcTemplate;
 
-    public Map<String, Double> computeHrpWeights(List<String> amfiCodes) {
+    public record HrpResult(
+        Map<String, Double> weights,
+        double[][] corrMatrix,
+        List<String> sortedAmfiCodes
+    ) {}
+
+    public HrpResult computeHrpWeights(List<String> amfiCodes) {
         int n = amfiCodes.size();
-        if (n == 0) return Collections.emptyMap();
-        if (n == 1) return Map.of(amfiCodes.get(0), 1.0);
+        if (n == 0) return new HrpResult(Collections.emptyMap(), new double[0][0], Collections.emptyList());
+        if (n == 1) return new HrpResult(Map.of(amfiCodes.get(0), 1.0), new double[][]{{1.0}}, amfiCodes);
 
         try {
             // STEP 1: Fetch 60-day log-returns
@@ -39,7 +45,7 @@ public class HierarchicalRiskParityService {
                 List<Double> navs = jdbcTemplate.queryForList(sql, Double.class, amfi);
                 if (navs.size() < 31) {
                     log.warn("HRP: AMFI {} has insufficient data ({} points). Falling back to equal weights.", amfi, navs.size());
-                    return equalWeights(amfiCodes);
+                    return new HrpResult(equalWeights(amfiCodes), new double[0][0], amfiCodes);
                 }
                 double[] returns = new double[navs.size() - 1];
                 for (int i = 0; i < returns.length; i++) {
@@ -96,7 +102,7 @@ public class HierarchicalRiskParityService {
                 }
             }
 
-            // STEP 4: Clustering (Single Linkage - Greedy)
+            // STEP 4: Clustering (Average Linkage - UPGMA)
             List<List<Integer>> clusters = new ArrayList<>();
             for (int i = 0; i < n; i++) {
                 List<Integer> c = new ArrayList<>();
@@ -104,7 +110,6 @@ public class HierarchicalRiskParityService {
                 clusters.add(c);
             }
 
-            List<int[]> linkage = new ArrayList<>();
             while (clusters.size() > 1) {
                 double minDev = Double.MAX_VALUE;
                 int imin = -1, jmin = -1;
@@ -117,7 +122,6 @@ public class HierarchicalRiskParityService {
                         }
                     }
                 }
-                linkage.add(new int[]{imin, jmin});
                 List<Integer> merged = new ArrayList<>(clusters.get(imin));
                 merged.addAll(clusters.get(jmin));
                 clusters.remove(jmin);
@@ -135,22 +139,28 @@ public class HierarchicalRiskParityService {
             for (int i = 0; i < n; i++) {
                 weights.put(amfiCodes.get(i), weightsIdx.get(i));
             }
-            return weights;
+            
+            List<String> sortedAmfi = sortedIndices.stream()
+                .map(amfiCodes::get)
+                .toList();
+
+            return new HrpResult(weights, corrMatrix, sortedAmfi);
 
         } catch (Exception e) {
             log.error("HRP Weights computation failed: {}", e.getMessage(), e);
-            return equalWeights(amfiCodes);
+            return new HrpResult(equalWeights(amfiCodes), new double[0][0], amfiCodes);
         }
     }
 
     private double clusterDist(List<Integer> c1, List<Integer> c2, double[][] distMatrix) {
-        double min = Double.MAX_VALUE;
+        // Average linkage (UPGMA)
+        double sum = 0;
         for (int i : c1) {
             for (int j : c2) {
-                if (distMatrix[i][j] < min) min = distMatrix[i][j];
+                sum += distMatrix[i][j];
             }
         }
-        return min;
+        return sum / (c1.size() * c2.size());
     }
 
     private void recursiveBisect(List<Integer> indices, double[][] covMatrix, double weight, Map<Integer, Double> weights) {
@@ -196,7 +206,7 @@ public class HierarchicalRiskParityService {
 
     private Map<String, Double> equalWeights(List<String> codes) {
         Map<String, Double> map = new HashMap<>();
-        double w = 1.0 / codes.size();
+        double w = codes.isEmpty() ? 0 : 1.0 / codes.size();
         for (String c : codes) map.put(c, w);
         return map;
     }

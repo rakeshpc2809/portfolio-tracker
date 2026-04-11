@@ -63,73 +63,78 @@ class RebalanceEngineTest {
         StrategyTarget target = new StrategyTarget("ISIN123", "Test Fund", 10.0, 5.0, "ACTIVE", "core");
         MarketMetrics metrics = createDefaultMetrics();
 
-        TacticalSignal signal = rebalanceEngine.evaluate(holding, target, metrics, 1000000, "123", Collections.emptyList(), Collections.emptyMap());
+        TacticalSignal signal = rebalanceEngine.evaluate(holding, target, metrics, 1000000.0, "123", 
+            Collections.emptyList(), Collections.emptyMap(), target.targetPortfolioPct());
 
         assertEquals(SignalType.WATCH, signal.action());
         assertTrue(signal.justifications().get(0).contains("Tail Risk Alert"));
     }
-@Test
-void testEvaluate_DroppedFund_TriggersExit() {
-    systemicRiskMonitor.level = TailRiskLevel.NORMAL;
 
-    AggregatedHolding holding = createHolding(100000);
-    // Target is 0, SIP is 0 -> DROPPED
-    StrategyTarget target = new StrategyTarget("ISIN123", "Test Fund", 0.0, 0.0, "ACTIVE", "core");
-    MarketMetrics metrics = createDefaultMetrics();
+    @Test
+    void testEvaluate_DroppedFund_TriggersExit() {
+        systemicRiskMonitor.level = TailRiskLevel.NORMAL;
 
-    TacticalSignal signal = rebalanceEngine.evaluate(holding, target, metrics, 1000000, "123", Collections.emptyList(), Collections.emptyMap());
+        AggregatedHolding holding = createHolding(100000);
+        // Target is 0, SIP is 0 -> DROPPED
+        StrategyTarget target = new StrategyTarget("ISIN123", "Test Fund", 0.0, 0.0, "ACTIVE", "core");
+        MarketMetrics metrics = createDefaultMetrics();
 
-    assertEquals(SignalType.EXIT, signal.action());
-    assertTrue(signal.justifications().stream().anyMatch(j -> j.contains("Strategic Exit")));
-}
+        TacticalSignal signal = rebalanceEngine.evaluate(holding, target, metrics, 1000000.0, "123", 
+            Collections.emptyList(), Collections.emptyMap(), 0.0);
 
-@Test
-void testEvaluate_DroppedButTrending_TriggersHold() {
-    systemicRiskMonitor.level = TailRiskLevel.NORMAL;
+        assertEquals(SignalType.EXIT, signal.action());
+        assertTrue(signal.justifications().stream().anyMatch(j -> j.contains("Strategic Exit")));
+    }
 
-    AggregatedHolding holding = createHolding(100000);
-    StrategyTarget target = new StrategyTarget("ISIN123", "Test Fund", 0.0, 0.0, "ACTIVE", "core");
+    @Test
+    void testEvaluate_DroppedButTrending_TriggersHold() {
+        systemicRiskMonitor.level = TailRiskLevel.NORMAL;
 
-    // H = 0.6 (Trending), Z = 1.0 (Not overheated)
-    MarketMetrics metrics = new MarketMetrics(
-        50, 1.5, -2.0, 60.0, 15.0, 0.5, -0.05, 1.0, LocalDate.now(),
-        1.0, 0.6, 0.02, "TRENDING", 50.0, 0.6, 0.6, "TRENDING",
-        0.0, 0.0, 0.0, 0.0, false, 0.0, 0.0,
-        "STRESSED_NEUTRAL", 0.33, 0.33, 0.33
-    );
+        AggregatedHolding holding = createHolding(100000);
+        StrategyTarget target = new StrategyTarget("ISIN123", "Test Fund", 0.0, 0.0, "ACTIVE", "core");
 
-    TacticalSignal signal = rebalanceEngine.evaluate(holding, target, metrics, 1000000, "123", Collections.emptyList(), Collections.emptyMap());
+        // H = 0.6 (Trending), Z = 1.0 (Not overheated)
+        MarketMetrics metrics = new MarketMetrics(
+            50, 1.5, -2.0, 60.0, 15.0, 0.5, -0.05, 1.0, LocalDate.now(),
+            1.0, 0.6, 0.02, "TRENDING", 50.0, 0.6, 0.6, "TRENDING",
+            0.0, 0.0, 0.0, 0.0, false, 0.0, 0.0,
+            "STRESSED_NEUTRAL", 0.33, 0.33, 0.33
+        );
 
-    assertEquals(SignalType.HOLD, signal.action());
-    assertTrue(signal.justifications().stream().anyMatch(j -> j.contains("Wave Rider")));
-}
+        TacticalSignal signal = rebalanceEngine.evaluate(holding, target, metrics, 1000000.0, "123", 
+            Collections.emptyList(), Collections.emptyMap(), 0.0);
 
-@Test
-void testEvaluate_DroppedTaxShield_TriggersHold() {
-    systemicRiskMonitor.level = TailRiskLevel.NORMAL;
+        assertEquals(SignalType.HOLD, signal.action());
+        assertTrue(signal.justifications().stream().anyMatch(j -> j.contains("Wave Rider")));
+    }
 
-    AggregatedHolding holding = createHolding(100000);
-    holding.setDaysToNextLtcg(20);
-    holding.setLtcgAmount(0); // Forcing STCG lock
-    holding.setStcgAmount(10000);
-    holding.setStcgTaxEstimate(2000.0);
+    @Test
+    void testEvaluate_DroppedTaxShield_TriggersHold() {
+        systemicRiskMonitor.level = TailRiskLevel.NORMAL;
 
-    StrategyTarget target = new StrategyTarget("ISIN123", "Test Fund", 0.0, 0.0, "ACTIVE", "core");
+        AggregatedHolding holding = createHolding(100000);
+        holding.setDaysToNextLtcg(20);
+        holding.setLtcgAmount(0); // Forcing STCG lock
+        holding.setStcgAmount(10000);
+        holding.setStcgTaxEstimate(2000.0);
 
-    // VT = 0.01 (1% annual drift cost). Drift amount = 10% of 1M = 100k. Drift cost = 100k * 0.01 = 1000.
-    // Tax hit (2000) > Drift cost (1000) -> Should HOLD
-    MarketMetrics metrics = new MarketMetrics(
-        50, 1.5, -2.0, 60.0, 15.0, 0.5, -0.05, 0.5, LocalDate.now(),
-        0.5, 0.5, 0.01, "RANDOM_WALK", 50.0, 0.5, 0.5, "RANDOM_WALK",
-        0.0, 0.0, 0.0, 0.0, false, 0.0, 0.0,
-        "STRESSED_NEUTRAL", 0.33, 0.33, 0.33
-    );
+        StrategyTarget target = new StrategyTarget("ISIN123", "Test Fund", 0.0, 0.0, "ACTIVE", "core");
 
-    TacticalSignal signal = rebalanceEngine.evaluate(holding, target, metrics, 1000000, "123", Collections.emptyList(), Collections.emptyMap());
+        // VT = 0.01 (1% annual drift cost). Drift amount = 10% of 1M = 100k. Drift cost = 100k * 0.01 = 1000.
+        // Tax hit (2000) > Drift cost (1000) -> Should HOLD
+        MarketMetrics metrics = new MarketMetrics(
+            50, 1.5, -2.0, 60.0, 15.0, 0.5, -0.05, 0.5, LocalDate.now(),
+            0.5, 0.5, 0.01, "RANDOM_WALK", 50.0, 0.5, 0.5, "RANDOM_WALK",
+            0.0, 0.0, 0.0, 0.0, false, 0.0, 0.0,
+            "STRESSED_NEUTRAL", 0.33, 0.33, 0.33
+        );
 
-    assertEquals(SignalType.HOLD, signal.action());
-    assertTrue(signal.justifications().stream().anyMatch(j -> j.contains("Tax Shield Active")));
-}
+        TacticalSignal signal = rebalanceEngine.evaluate(holding, target, metrics, 1000000.0, "123", 
+            Collections.emptyList(), Collections.emptyMap(), 0.0);
+
+        assertEquals(SignalType.HOLD, signal.action());
+        assertTrue(signal.justifications().stream().anyMatch(j -> j.contains("Tax Shield Active")));
+    }
 
     @Test
     void testEvaluate_RubberBandBuy_TriggersBuy() {
@@ -145,7 +150,8 @@ void testEvaluate_DroppedTaxShield_TriggersHold() {
             "STRESSED_NEUTRAL", 0.33, 0.33, 0.33
         );
 
-        TacticalSignal signal = rebalanceEngine.evaluate(holding, target, metrics, 1000000, "123", Collections.emptyList(), Collections.emptyMap());
+        TacticalSignal signal = rebalanceEngine.evaluate(holding, target, metrics, 1000000.0, "123", 
+            Collections.emptyList(), Collections.emptyMap(), target.targetPortfolioPct());
 
         assertEquals(SignalType.BUY, signal.action());
         assertTrue(signal.justifications().stream().anyMatch(j -> j.contains("Rubber Band Buy")));
@@ -165,7 +171,8 @@ void testEvaluate_DroppedTaxShield_TriggersHold() {
             "STRESSED_NEUTRAL", 0.33, 0.33, 0.33
         );
 
-        TacticalSignal signal = rebalanceEngine.evaluate(holding, target, metrics, 1000000, "123", Collections.emptyList(), Collections.emptyMap());
+        TacticalSignal signal = rebalanceEngine.evaluate(holding, target, metrics, 1000000.0, "123", 
+            Collections.emptyList(), Collections.emptyMap(), target.targetPortfolioPct());
 
         assertEquals(SignalType.HOLD, signal.action());
         assertTrue(signal.justifications().stream().anyMatch(j -> j.contains("Wave Rider Override")));
@@ -190,7 +197,8 @@ void testEvaluate_DroppedTaxShield_TriggersHold() {
             "STRESSED_NEUTRAL", 0.33, 0.33, 0.33
         );
 
-        TacticalSignal signal = rebalanceEngine.evaluate(holding, target, metrics, 1000000, "123", Collections.emptyList(), Collections.emptyMap());
+        TacticalSignal signal = rebalanceEngine.evaluate(holding, target, metrics, 1000000.0, "123", 
+            Collections.emptyList(), Collections.emptyMap(), target.targetPortfolioPct());
 
         assertEquals(SignalType.HOLD, signal.action());
         assertTrue(signal.justifications().stream().anyMatch(j -> j.contains("Tax Shield Active")));

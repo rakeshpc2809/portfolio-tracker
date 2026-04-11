@@ -106,9 +106,17 @@ public class PortfolioOrchestrator {
         List<StrategyTarget> targets = strategyService.fetchLatestStrategy();
         Map<String, MarketMetrics> metricsMap = fetchLiveMetricsMap(pan);
 
+        // Pre-fetch schemes to avoid N+1 queries
+        List<Scheme> allSchemes = schemeRepository.findAll();
+        Map<String, String> isinToAmfi = allSchemes.stream()
+            .filter(s -> s.getIsin() != null)
+            .collect(Collectors.toMap(Scheme::getIsin, Scheme::getAmfiCode, (a, b) -> a));
+        Map<String, String> nameToAmfiMap_Global = allSchemes.stream()
+            .collect(Collectors.toMap(s -> s.getName().toLowerCase(), Scheme::getAmfiCode, (a, b) -> a));
+
         // ENHANCEMENT: Also fetch metrics for accumulator/strategy funds not yet held
         for (StrategyTarget t : targets) {
-            String amfi = amfiCodeFor(t);
+            String amfi = isinToAmfi.getOrDefault(t.isin(), "");
             if (!amfi.isEmpty() && !metricsMap.containsKey(amfi)) {
                 Map<String, MarketMetrics> fetched = fetchMetricsForAmfi(amfi);
                 if (fetched.containsKey(amfi)) {
@@ -125,13 +133,16 @@ public class PortfolioOrchestrator {
         List<TacticalSignal> opportunisticDrafts = new ArrayList<>();
 
         Map<String, String> nameToAmfiMap = holdings.stream()
-            .collect(Collectors.toMap(AggregatedHolding::getSchemeName, h -> amfiCodeFor(h), (a, b) -> a));
+            .collect(Collectors.toMap(AggregatedHolding::getSchemeName, h -> nameToAmfiMap_Global.getOrDefault(h.getSchemeName().toLowerCase(), ""), (a, b) -> a));
 
         List<String> heldAmfiCodes = holdings.stream()
             .map(h -> nameToAmfiMap.get(h.getSchemeName()))
             .filter(c -> c != null && !c.isEmpty())
             .collect(Collectors.toList());
-        Map<String, Double> hrpWeights = hrpService.computeHrpWeights(heldAmfiCodes);
+        
+        HierarchicalRiskParityService.HrpResult hrpResult = hrpService.computeHrpWeights(heldAmfiCodes);
+        Map<String, Double> hrpWeights = hrpResult.weights();
+
         Map<String, Double> actualWeights = holdings.stream()
             .filter(h -> nameToAmfiMap.get(h.getSchemeName()) != null)
             .collect(Collectors.toMap(h -> nameToAmfiMap.get(h.getSchemeName()), h -> h.getCurrentValue() / Math.max(totalPortfolioValue, 1.0)));
@@ -141,7 +152,7 @@ public class PortfolioOrchestrator {
             if ("dropped".equalsIgnoreCase(target.status())) continue;
 
             AggregatedHolding holding = findHolding(holdings, target);
-            String amfi = amfiCodeFor(target);
+            String amfi = isinToAmfi.getOrDefault(target.isin(), "");
             MarketMetrics metrics = metricsMap.getOrDefault(amfi, defaultMetrics());
             
             double effectiveTargetPct = target.targetPortfolioPct();
@@ -156,7 +167,7 @@ public class PortfolioOrchestrator {
 
             StrategyTarget adjustedTarget = new StrategyTarget(target.isin(), target.schemeName(), effectiveTargetPct, target.sipPct(), target.status(), target.bucket());
 
-            TacticalSignal signal = rebalanceEngine.evaluate(holding, adjustedTarget, metrics, totalPortfolioValue, amfi, holdings, nameToAmfiMap);
+            TacticalSignal signal = rebalanceEngine.evaluate(holding, adjustedTarget, metrics, totalPortfolioValue, amfi, holdings, nameToAmfiMap, target.targetPortfolioPct());
             
             if (hrpActive) {
                 signal = setHrpActive(signal);
@@ -214,6 +225,14 @@ public class PortfolioOrchestrator {
         List<StrategyTarget> targets = strategyService.fetchLatestStrategy();
         Map<String, MarketMetrics> metricsMap = fetchLiveMetricsMap(pan);
 
+        // Pre-fetch schemes to avoid N+1 queries
+        List<Scheme> allSchemes = schemeRepository.findAll();
+        Map<String, String> isinToAmfi = allSchemes.stream()
+            .filter(s -> s.getIsin() != null)
+            .collect(Collectors.toMap(Scheme::getIsin, Scheme::getAmfiCode, (a, b) -> a));
+        Map<String, String> nameToAmfiMap_Global = allSchemes.stream()
+            .collect(Collectors.toMap(s -> s.getName().toLowerCase(), Scheme::getAmfiCode, (a, b) -> a));
+
         List<TaxLot> allLots = taxLotRepository.findByStatusAndSchemeFolioInvestorPan("OPEN", pan);
         List<AggregatedHolding> holdings = lotAggregationService.aggregate(allLots);
         double totalPortfolioValue = holdings.stream().mapToDouble(AggregatedHolding::getCurrentValue).sum();
@@ -221,7 +240,7 @@ public class PortfolioOrchestrator {
         List<TacticalSignal> exitPlan = new ArrayList<>();
 
         Map<String, String> nameToAmfiMap = holdings.stream()
-            .collect(Collectors.toMap(AggregatedHolding::getSchemeName, h -> amfiCodeFor(h), (a, b) -> a));
+            .collect(Collectors.toMap(AggregatedHolding::getSchemeName, h -> nameToAmfiMap_Global.getOrDefault(h.getSchemeName().toLowerCase(), ""), (a, b) -> a));
 
         for (AggregatedHolding h : holdings) {
             StrategyTarget target = targets.stream()
@@ -232,10 +251,10 @@ public class PortfolioOrchestrator {
             if (!"dropped".equalsIgnoreCase(target.status())) continue;
             if (h.getCurrentValue() < 100.0) continue; 
 
-            String amfi = amfiCodeFor(h);
+            String amfi = nameToAmfiMap.getOrDefault(h.getSchemeName(), "");
             MarketMetrics metrics = metricsMap.getOrDefault(amfi, defaultMetrics());
             
-            TacticalSignal signal = rebalanceEngine.evaluate(h, target, metrics, totalPortfolioValue, amfi, holdings, nameToAmfiMap);
+            TacticalSignal signal = rebalanceEngine.evaluate(h, target, metrics, totalPortfolioValue, amfi, holdings, nameToAmfiMap, target.targetPortfolioPct());
             if (signal.action() == SignalType.EXIT || (signal.action() == SignalType.HOLD && "DROPPED".equals(signal.fundStatus()))) {
                 exitPlan.add(signal);
             }
@@ -263,6 +282,14 @@ public class PortfolioOrchestrator {
         List<StrategyTarget> targets = strategyService.fetchLatestStrategy();
         Map<String, MarketMetrics> metricsMap = fetchLiveMetricsMap(pan);
 
+        // Pre-fetch schemes to avoid N+1 queries
+        List<Scheme> allSchemes = schemeRepository.findAll();
+        Map<String, String> isinToAmfi = allSchemes.stream()
+            .filter(s -> s.getIsin() != null)
+            .collect(Collectors.toMap(Scheme::getIsin, Scheme::getAmfiCode, (a, b) -> a));
+        Map<String, String> nameToAmfiMap_Global = allSchemes.stream()
+            .collect(Collectors.toMap(s -> s.getName().toLowerCase(), Scheme::getAmfiCode, (a, b) -> a));
+
         List<TaxLot> allLots = taxLotRepository.findByStatusAndSchemeFolioInvestorPan("OPEN", pan);
         List<AggregatedHolding> holdings = lotAggregationService.aggregate(allLots);
         double totalValue = holdings.stream().mapToDouble(AggregatedHolding::getCurrentValue).sum();
@@ -270,7 +297,7 @@ public class PortfolioOrchestrator {
         List<TacticalSignal> sellSignals = new ArrayList<>();
 
         Map<String, String> nameToAmfiMap = holdings.stream()
-            .collect(Collectors.toMap(AggregatedHolding::getSchemeName, h -> amfiCodeFor(h), (a, b) -> a));
+            .collect(Collectors.toMap(AggregatedHolding::getSchemeName, h -> nameToAmfiMap_Global.getOrDefault(h.getSchemeName().toLowerCase(), ""), (a, b) -> a));
 
         for (StrategyTarget target : targets) {
             if ("dropped".equalsIgnoreCase(target.status())) continue; 
@@ -278,10 +305,10 @@ public class PortfolioOrchestrator {
             AggregatedHolding holding = findHolding(holdings, target);
             if (holding.getCurrentValue() < 5000.0) continue; 
 
-            String amfi = amfiCodeFor(target);
+            String amfi = isinToAmfi.getOrDefault(target.isin(), "");
             MarketMetrics metrics = metricsMap.getOrDefault(amfi, defaultMetrics());
 
-            TacticalSignal signal = rebalanceEngine.evaluate(holding, target, metrics, totalValue, amfi, holdings, nameToAmfiMap);
+            TacticalSignal signal = rebalanceEngine.evaluate(holding, target, metrics, totalValue, amfi, holdings, nameToAmfiMap, target.targetPortfolioPct());
             
             if (signal.action() == SignalType.SELL || signal.action() == SignalType.HOLD) {
                 // If it's a SELL, it's an active sell. If it's HOLD but was overweight, the engine decided to override.
@@ -449,41 +476,31 @@ public class PortfolioOrchestrator {
 
    private Map<String, MarketMetrics> fetchLiveMetricsMap(String pan) {
         String sql = """
-            SELECT m.amfi_code, m.sortino_ratio, m.cvar_5, m.win_rate, m.max_drawdown, 
-                   m.conviction_score, m.nav_percentile_3yr, m.drawdown_from_ath, m.return_z_score,
-                   m.rolling_z_score_252, m.hurst_exponent, m.volatility_tax, m.hurst_regime, m.historical_rarity_pct,
-                   m.hurst_20d, m.hurst_60d, m.multi_scale_regime,
-                   m.ou_theta, m.ou_mu, m.ou_sigma, m.ou_half_life, m.ou_valid, m.ou_buy_threshold, m.ou_sell_threshold,
-                   m.hmm_state, m.hmm_bull_prob, m.hmm_bear_prob, m.hmm_transition_bear
+            SELECT m.*, 
+                   (SELECT MAX(t.transaction_date) 
+                    FROM "transaction" t 
+                    JOIN scheme s2 ON t.scheme_id = s2.id 
+                    JOIN folio f2 ON s2.folio_id = f2.id
+                    WHERE s2.amfi_code = m.amfi_code 
+                    AND f2.investor_pan = ? 
+                    AND t.transaction_type = 'BUY') as last_buy
             FROM fund_conviction_metrics m
-            JOIN scheme s ON m.amfi_code = s.amfi_code 
-            JOIN folio f ON s.folio_id = f.id
-            WHERE f.investor_pan = ?
-            AND m.calculation_date = (SELECT MAX(calculation_date) FROM fund_conviction_metrics)
+            WHERE m.calculation_date = (SELECT MAX(calculation_date) FROM fund_conviction_metrics)
+            AND m.amfi_code IN (
+                SELECT s.amfi_code 
+                FROM scheme s 
+                JOIN folio f ON s.folio_id = f.id 
+                WHERE f.investor_pan = ?
+            )
             """;
         
-        String lastBuySql = """
-            SELECT s.amfi_code, MAX(t.transaction_date) as last_buy
-            FROM transaction t
-            JOIN scheme s ON t.scheme_id = s.id
-            JOIN folio f ON s.folio_id = f.id
-            WHERE f.investor_pan = ? AND t.transaction_type = 'BUY'
-            GROUP BY s.amfi_code
-        """;
-
-        Map<String, LocalDate> lastBuyDates = new HashMap<>();
-        jdbcTemplate.query(lastBuySql, rs -> {
-            String amfi = rs.getString("amfi_code");
-            java.sql.Date d = rs.getDate("last_buy");
-            if (d != null) {
-                lastBuyDates.put(amfi, d.toLocalDate());
-            }
-        }, pan);
-
-        List<Map<String, Object>> rows = jdbcTemplate.queryForList(sql, pan);
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList(sql, pan, pan);
         Map<String, MarketMetrics> map = new HashMap<>();
         for (Map<String, Object> r : rows) {
             String amfi = (String) r.get("amfi_code");
+            java.sql.Date lastBuySql = (java.sql.Date) r.get("last_buy");
+            LocalDate lastBuy = lastBuySql != null ? lastBuySql.toLocalDate() : LocalDate.of(1970, 1, 1);
+
             map.put(amfi, new MarketMetrics(
                 getSafeInt(r.get("conviction_score")),
                 getSafeDouble(r.get("sortino_ratio")),
@@ -493,7 +510,7 @@ public class PortfolioOrchestrator {
                 getSafeDouble(r.get("nav_percentile_3yr")),
                 getSafeDouble(r.get("drawdown_from_ath")),
                 getSafeDouble(r.get("return_z_score")),
-                lastBuyDates.getOrDefault(amfi, LocalDate.of(1970, 1, 1)),
+                lastBuy,
                 getSafeDouble(r.get("rolling_z_score_252")),
                 getSafeDouble(r.get("hurst_exponent")),
                 getSafeDouble(r.get("volatility_tax")),

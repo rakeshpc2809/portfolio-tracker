@@ -1,5 +1,9 @@
 package com.oreki.cas_injector.convictionmetrics.service;
 
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -68,20 +72,23 @@ public class QuantitativeEngineService {
             int zScoreRows = convictionMetricsRepository.updateRollingZScoreAndVolatilityTax();
             log.info("📈 Rolling Z-Score updated for {} funds.", zScoreRows);
 
+            // ─── OPTIMISATION: Load NAV series once for all Java services ───
+            Map<String, double[]> returnsCache = loadAllReturns(252);
+
             // 5. Run new Hurst Exponent (Java R/S Analysis)
             currentStep.set(5);
             lastStatusMessage = "Running Hurst Exponent R/S Analysis...";
-            hurstExponentService.computeAndPersistHurstMetrics();
+            hurstExponentService.computeAndPersistHurstMetrics(returnsCache);
 
             // 6. Run new OU Process Calibration
             currentStep.set(6);
             lastStatusMessage = "Calibrating Ornstein-Uhlenbeck Mean Reversion...";
-            ouService.computeAndPersistOUMetrics();
+            ouService.computeAndPersistOUMetrics(returnsCache);
 
             // 7. Run HMM Regime Filter
             currentStep.set(7);
             lastStatusMessage = "Detecting HMM Market Regimes...";
-            hmmRegimeService.computeAndPersistHmmStates();
+            hmmRegimeService.computeAndPersistHmmStates(returnsCache);
 
             long endTime = System.currentTimeMillis();
             lastStatusMessage = "Complete! Updated " + mainMetricsRows + " funds.";
@@ -94,4 +101,48 @@ public class QuantitativeEngineService {
             isRunning.set(false);
         }
     }
-}
+
+    private Map<String, double[]> loadAllReturns(int days) {
+        log.info("🗂️ Pre-loading log returns for all funds ({} days)...", days);
+        String sql = """
+            SELECT amfi_code, nav, nav_date
+            FROM fund_history
+            WHERE amfi_code IN (
+                SELECT amfi_code FROM fund_history 
+                GROUP BY amfi_code HAVING COUNT(*) >= ?
+            )
+            AND nav_date >= CURRENT_DATE - INTERVAL '400 days'
+            ORDER BY amfi_code, nav_date DESC
+        """;
+
+        List<Map<String, Object>> rows = convictionMetricsRepository.getJdbcTemplate().queryForList(sql, days + 1);
+        Map<String, List<Double>> navMap = new HashMap<>();
+
+        for (Map<String, Object> r : rows) {
+            String amfi = (String) r.get("amfi_code");
+            double nav = ((Number) r.get("nav")).doubleValue();
+            navMap.computeIfAbsent(amfi, k -> new ArrayList<>()).add(nav);
+        }
+
+        Map<String, double[]> returnsMap = new HashMap<>();
+        for (var entry : navMap.entrySet()) {
+            List<Double> navsDesc = entry.getValue();
+            if (navsDesc.size() < days + 1) continue;
+
+            // Reverse to get chronological order for return calculation
+            double[] returns = new double[days];
+            for (int i = 0; i < days; i++) {
+                // navsDesc is [latest, yesterday, ..., oldest]
+                // logReturn = log(latest/yesterday)
+                double today = navsDesc.get(i); 
+                double prev  = navsDesc.get(i + 1);
+                if (prev > 0) {
+                    returns[days - 1 - i] = Math.log(today / prev);
+                }
+            }
+            returnsMap.put(entry.getKey(), returns);
+        }
+        log.info("🗂️ Cache primed with returns for {} funds.", returnsMap.size());
+        return returnsMap;
+        }
+        }

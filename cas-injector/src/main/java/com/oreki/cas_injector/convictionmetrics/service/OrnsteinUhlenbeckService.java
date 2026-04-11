@@ -6,6 +6,8 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.List;
+import java.util.Map;
+import java.util.Arrays;
 
 @Service
 @RequiredArgsConstructor
@@ -19,35 +21,15 @@ public class OrnsteinUhlenbeckService {
     /**
      * Computes and persists OU parameters + optimal thresholds for mean-reverting funds.
      */
-    public void computeAndPersistOUMetrics() {
-        String amfiSql = """
-            SELECT amfi_code
-            FROM fund_history
-            GROUP BY amfi_code
-            HAVING COUNT(*) >= 253
-            """;
-        List<String> amfiCodes = jdbcTemplate.queryForList(amfiSql, String.class);
-        log.info("📐 Computing OU Metrics for {} funds...", amfiCodes.size());
+    public void computeAndPersistOUMetrics(Map<String, double[]> returnsCache) {
+        log.info("📐 Computing OU Metrics for {} funds from cache...", returnsCache.size());
 
         int success = 0;
-        for (String amfi : amfiCodes) {
+        for (var entry : returnsCache.entrySet()) {
+            String amfi = entry.getKey();
             try {
-                String navSql = """
-                    SELECT nav FROM (
-                        SELECT nav, nav_date FROM fund_history
-                        WHERE amfi_code = ?
-                        ORDER BY nav_date DESC
-                        LIMIT 253
-                    ) sub ORDER BY nav_date ASC
-                    """;
-                List<Double> navs = jdbcTemplate.queryForList(navSql, Double.class, amfi);
-                if (navs.size() < 253) continue;
-
-                // 1. Convert to log returns
-                double[] returns = new double[252];
-                for (int i = 0; i < 252; i++) {
-                    returns[i] = Math.log(navs.get(i + 1) / navs.get(i));
-                }
+                double[] returns = entry.getValue();
+                if (returns.length < 252) continue;
 
                 // 2. Fit AR(1) OLS: X_t = alpha + beta * X_{t-1} + epsilon
                 double n = 251;
@@ -62,7 +44,18 @@ public class OrnsteinUhlenbeckService {
                 double beta = (n * sumXY - sumX * sumY) / (n * sumX2 - sumX * sumX);
                 double alpha = (sumY - beta * sumX) / n;
 
-                // 3. Compute OU parameters
+                // 3. Compute OU parameters (with unit-root guard)
+                if (Math.abs(beta) >= 0.9999 || Math.abs(beta) < 1e-9 || Math.abs(1.0 - beta) < 1e-6) {
+                    log.debug("⏩ Skipping AMFI {}: Series is a random walk or non-stationary (beta={})", amfi, beta);
+                    jdbcTemplate.update("""
+                        UPDATE fund_conviction_metrics
+                        SET ou_valid = false
+                        WHERE amfi_code = ?
+                        AND calculation_date = (SELECT MAX(calculation_date) FROM fund_conviction_metrics WHERE amfi_code = ?)
+                        """, amfi, amfi);
+                    continue;
+                }
+
                 double dt = 1.0 / 252.0;  // daily step
                 double theta = -Math.log(Math.abs(beta)) / dt;   // speed of reversion
                 double mu = alpha / (1.0 - beta);                 // long-run mean
@@ -104,6 +97,6 @@ public class OrnsteinUhlenbeckService {
                 log.warn("⚠️ OU calculation failed for AMFI {}: {}", amfi, e.getMessage());
             }
         }
-        log.info("✅ OU Engine complete. Processed {}/{} funds.", success, amfiCodes.size());
+        log.info("✅ OU Engine complete. Processed {}/{} funds.", success, returnsCache.size());
     }
 }

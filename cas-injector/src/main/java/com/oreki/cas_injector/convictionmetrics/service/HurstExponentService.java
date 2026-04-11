@@ -8,6 +8,7 @@ import lombok.extern.slf4j.Slf4j;
 
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 
 @Service
 @RequiredArgsConstructor
@@ -29,41 +30,15 @@ public class HurstExponentService {
      *
      * Called by QuantitativeEngineService as Step 5 of the nightly engine.
      */
-    public void computeAndPersistHurstMetrics() {
-        // 1. Fetch all AMFI codes with sufficient history
-        String amfiSql = """
-            SELECT amfi_code
-            FROM fund_history
-            GROUP BY amfi_code
-            HAVING COUNT(*) >= ?
-            """;
-        List<String> amfiCodes = jdbcTemplate.queryForList(amfiSql, String.class, LOOKBACK_DAYS);
-        log.info("🔬 Computing Hurst Exponent for {} funds...", amfiCodes.size());
+    public void computeAndPersistHurstMetrics(Map<String, double[]> returnsCache) {
+        log.info("🔬 Computing Hurst Exponent for {} funds from cache...", returnsCache.size());
 
         int success = 0;
-        for (String amfi : amfiCodes) {
+        for (var entry : returnsCache.entrySet()) {
+            String amfi = entry.getKey();
             try {
-                // 2. Fetch last LOOKBACK_DAYS + 1 NAV values in ascending date order
-                String navSql = """
-                    SELECT nav FROM (
-                        SELECT nav, nav_date FROM fund_history
-                        WHERE amfi_code = ?
-                        ORDER BY nav_date DESC
-                        LIMIT ?
-                    ) sub ORDER BY nav_date ASC
-                    """;
-                List<Double> navs = jdbcTemplate.queryForList(navSql, Double.class, amfi, LOOKBACK_DAYS + 1);
-                if (navs.size() < LOOKBACK_DAYS + 1) continue;
-
-                // Convert to log daily returns
-                double[] returnsAll = new double[LOOKBACK_DAYS];
-                for (int i = 0; i < LOOKBACK_DAYS; i++) {
-                    double prevNav = navs.get(i);
-                    double todayNav = navs.get(i + 1);
-                    if (prevNav > 0) {
-                        returnsAll[i] = Math.log(todayNav / prevNav);
-                    }
-                }
+                double[] returnsAll = entry.getValue();
+                if (returnsAll.length < LOOKBACK_DAYS) continue;
 
                 // Multi-scale windows
                 double[] returnsShort = Arrays.copyOfRange(returnsAll, LOOKBACK_DAYS - LOOKBACK_SHORT, LOOKBACK_DAYS);
@@ -97,7 +72,7 @@ public class HurstExponentService {
                 log.warn("⚠️ Hurst calculation failed for AMFI {}: {}", amfi, e.getMessage());
             }
         }
-        log.info("✅ Hurst Engine complete. Processed {}/{} funds.", success, amfiCodes.size());
+        log.info("✅ Hurst Engine complete. Processed {}/{} funds.", success, returnsCache.size());
     }
 
     private String classifyMultiScaleRegime(double h20, double h60, double h252) {

@@ -17,6 +17,12 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     restart: always
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-user} -d ${DB_NAME:-cas_db}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
 
   # 2. The Java Backend
   java-backend:
@@ -35,7 +41,14 @@ services:
     volumes:
       - ./logs:/app/logs
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/api/admin/status"]
+      interval: 10s
+      timeout: 5s
+      retries: 8
+      start_period: 30s
 
   # 3. The Python Parser
   python-parser:
@@ -47,7 +60,8 @@ services:
       - JAVA_BACKEND_URL=http://java-backend:8080/api/cas/inject
       - PORTFOLIO_API_KEY=${PORTFOLIO_API_KEY:-dev-secret-key}
     depends_on:
-      - java-backend
+      java-backend:
+        condition: service_healthy
 
   # 4. The React Frontend
   react-frontend:
@@ -56,7 +70,8 @@ services:
     ports:
       - "80:80"
     depends_on:
-      - java-backend
+      java-backend:
+        condition: service_healthy
     restart: always
 
 volumes:

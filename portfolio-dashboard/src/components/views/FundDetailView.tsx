@@ -22,7 +22,7 @@ export default function FundDetailView({
   if (!fund) return null;
 
   // Design Improvement 5: Use real sub-scores if available, otherwise estimate
-  const hasRealScores = fund.yieldScore > 0 || fund.riskScore > 0 || fund.valueScore > 0;
+  const hasRealScores = fund.yieldScore != null && fund.riskScore != null && fund.valueScore != null;
   
   const components = [
     { 

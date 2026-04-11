@@ -46,7 +46,8 @@ public class RebalanceEngine {
             double            totalPortfolioValue,
             String            amfiCode,
             List<AggregatedHolding> allHoldings,
-            Map<String, String> nameToAmfiMap) {
+            Map<String, String> nameToAmfiMap,
+            double            originalSheetPct) {
 
         TailRiskLevel tailRisk = systemicRiskMonitor.assessTailRisk(
             allHoldings, Map.of(amfiCode, metrics), nameToAmfiMap);
@@ -80,7 +81,7 @@ public class RebalanceEngine {
         String  regime    = metrics.hurstRegime();
         double  rarity    = metrics.historicalRarityPct();
 
-        String status = resolveStatus(targetPct, sipPct, actualPct);
+        String status = resolveStatus(originalSheetPct, sipPct, actualPct);
         SignalType action = SignalType.HOLD;
         List<String> justifications = new ArrayList<>();
         
@@ -124,7 +125,7 @@ public class RebalanceEngine {
             }
 
             // Apply Tax Logic (Overrides action to HOLD if waiting for LTCG is optimal)
-            action = applyTaxOverride(holding, action, justifications, totalPortfolioValue, actualPct, STCG_WAIT_DAYS, metrics);
+            action = applyTaxOverride(holding, action, justifications, totalPortfolioValue, actualPct, STCG_WAIT_DAYS, metrics, true);
 
             // If applyTaxOverride returned SELL (e.g. for HIFO), revert it to EXIT for the exit queue
             if (action == SignalType.SELL) {
@@ -211,7 +212,7 @@ public class RebalanceEngine {
             }
 
             action = applyTaxOverride(holding, action, justifications, totalPortfolioValue,
-                    overweightPct, STCG_WAIT_DAYS, metrics);
+                    overweightPct, STCG_WAIT_DAYS, metrics, false);
 
             ReasoningMetadata meta = buildHarvestMetadata(holding, z, H, vt, regime, rarity,
                     harvestAmount, action, metrics, totalPortfolioValue, overweightPct);
@@ -322,8 +323,10 @@ public class RebalanceEngine {
     }
 
     private SignalType applyTaxOverride(AggregatedHolding h, SignalType action,
-            List<String> justs, double totalValue, double overweightPct, int stcgWaitDays, MarketMetrics metrics) {
-        if (h.getLtcgAmount() > 0) {
+            List<String> justs, double totalValue, double overweightPct, int stcgWaitDays, MarketMetrics metrics,
+            boolean isFifoEnforced) {
+        
+        if (!isFifoEnforced && h.getLtcgAmount() > 0) {
             justs.add(String.format(Locale.US,
                 "Tax Strategy: Selling oldest lots first — ₹%,.0f in LTCG gains. Use HIFO.",
                 h.getLtcgAmount()));

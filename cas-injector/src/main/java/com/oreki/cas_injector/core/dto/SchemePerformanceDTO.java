@@ -41,6 +41,7 @@ public class SchemePerformanceDTO {
     private FundStatus status; // ACTIVE or REDEEMED
 
     private String xirr;
+    private double benchmarkXirr;
 
     private String category;
 

@@ -44,6 +44,7 @@ public class DashboardService {
     private final TransactionRepository txnRepo;
     private final NavService navService;
     private final HistoricalNavRepository historicalNavRepo;
+    private final BenchmarkService benchmarkService;
 
     private String sanitizeAmfi(String amfi) {
         if (amfi == null) return "";
@@ -189,6 +190,8 @@ public class DashboardService {
                 BigDecimal xirrValue = CommonUtils.SOLVE_XIRR.apply(cashFlows);
                 String displayXirr = CommonUtils.SCALE_MONEY.apply(xirrValue).toString() + "%";
 
+                double benchXirr = benchmarkService.getBenchmarkReturn(bucket, amfiCategory);
+
                 return SchemePerformanceDTO.builder()
                     .schemeName(scheme.getName())
                     .isin(scheme.getIsin())
@@ -203,6 +206,7 @@ public class DashboardService {
                     .stcgUnrealizedGain(stcgUnrealized)
                     .transactionCount(cleanTxCount)
                     .xirr(displayXirr)
+                    .benchmarkXirr(benchXirr)
                     .status(status)
                     .category(amfiCategory)
                     .bucket(bucket)

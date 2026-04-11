@@ -44,6 +44,14 @@ export default function TaxView({
 
   const estTaxPaid = realizedSTCG * 0.20 + Math.max(0, realizedLTCG - ltcgLimit) * 0.125;
 
+  // PROJECTED TAX (If exit everything today)
+  const totalUnrealizedLTCG = (portfolioData.schemeBreakdown || []).reduce((a: number, s: any) => a + (s.ltcgUnrealizedGain || 0), 0);
+  const totalUnrealizedSTCG = (portfolioData.schemeBreakdown || []).reduce((a: number, s: any) => a + (s.stcgUnrealizedGain || 0), 0);
+
+  const projectedLtcgTax = Math.max(0, totalUnrealizedLTCG - (ltcgLimit - realizedLTCG)) * 0.125;
+  const projectedStcgTax = totalUnrealizedSTCG * 0.20;
+  const totalProjectedTax = projectedLtcgTax + projectedStcgTax;
+
   return (
     <div className="space-y-10 pb-32">
       <header>
@@ -111,6 +119,17 @@ export default function TaxView({
               value={<CurrencyValue isPrivate={isPrivate} value={realizedSTCG} />} 
               tooltip="Short-term gains booked this year. Taxed at 20%." 
             />
+          </div>
+          <div className="p-6 rounded-2xl border border-white/5 bg-white/[0.02] shadow-lg">
+            <MetricWithTooltip 
+              label="Exit Tax Projection" 
+              value={<CurrencyValue isPrivate={isPrivate} value={totalProjectedTax} />} 
+              valueClass={totalProjectedTax > 0 ? "text-exit" : "text-buy"}
+              tooltip="Estimated tax liability if you sold all current holdings today." 
+            />
+            <p className="text-[8px] text-muted uppercase font-black mt-2 tracking-widest">
+              Projected if liquidated today
+            </p>
           </div>
           <div className={`p-6 rounded-2xl border border-white/5 ${estTaxPaid > 0 ? 'surface-tonal-exit shadow-exit' : 'surface-tonal-buy'}`}>
             <div className="flex justify-between items-start">

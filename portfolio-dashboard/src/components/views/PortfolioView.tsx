@@ -298,6 +298,154 @@ export default function PortfolioView({
         </section>
       </div>
 
+      {/* Portfolio Efficiency Matrix */}
+      <section className="bg-surface/40 backdrop-blur-xl border border-white/5 p-10 rounded-[2.5rem] shadow-2xl overflow-hidden">
+        <div className="flex items-center justify-between mb-8 px-2">
+          <div className="space-y-1">
+            <h3 className="text-primary text-[10px] font-black uppercase tracking-[0.3em]">Capital Efficiency</h3>
+            <p className="text-sm font-bold text-secondary">Deployment Matrix · High scores indicate optimal utilization</p>
+          </div>
+          <div className="flex gap-2">
+            <span className="text-[9px] text-buy font-bold uppercase bg-buy/10 px-3 py-1 rounded-full border border-buy/20">Efficiency Core</span>
+          </div>
+        </div>
+
+        <div className="overflow-x-auto scrollbar-none -mx-4 px-4">
+          <table className="w-full text-left">
+            <thead>
+              <tr className="border-b border-white/5">
+                <th className="pb-4 text-[9px] font-black text-muted uppercase tracking-widest pl-4">Asset</th>
+                <th className="pb-4 text-[9px] font-black text-muted uppercase tracking-widest text-center">Weight</th>
+                <th className="pb-4 text-[9px] font-black text-muted uppercase tracking-widest text-center">Alpha</th>
+                <th className="pb-4 text-[9px] font-black text-muted uppercase tracking-widest text-center">Quality (S)</th>
+                <th className="pb-4 text-[9px] font-black text-muted uppercase tracking-widest text-center">Entry (Z)</th>
+                <th className="pb-4 text-[9px] font-black text-muted uppercase tracking-widest text-right pr-4">Efficiency</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-white/5">
+              {activeBreakdown.map((s: any) => {
+                const alpha = parseFloat(s.xirr || '0') - (s.benchmarkXirr || 14.8);
+                const sScore = Math.min(100, Math.max(0, (s.sortinoRatio || 0) * 40));
+                const zScore = s.returnZScore || 0;
+                const zEntryScore = Math.min(100, Math.max(0, (1 - (zScore + 2) / 4) * 100)); // -2 is ideal
+                
+                // Efficiency = Alpha(30%) + Sortino(25%) + Z-Entry(25%) + Conviction(20%)
+                const alphaScore = Math.min(100, Math.max(0, (alpha + 10) * 5)); 
+                const efficiency = (alphaScore * 0.3) + (sScore * 0.25) + (zEntryScore * 0.25) + (s.convictionScore * 0.2);
+                
+                const statusColor = efficiency > 70 ? 'text-buy bg-buy/10 border-buy/20' : 
+                                   efficiency > 40 ? 'text-warning bg-warning/10 border-warning/20' : 
+                                   'text-exit bg-exit/10 border-exit/20';
+
+                return (
+                  <tr key={s.schemeName} className="group hover:bg-white/[0.02] transition-colors">
+                    <td className="py-5 pl-4">
+                      <p className="text-xs font-bold text-primary group-hover:text-white transition-colors">{s.schemeName.substring(0, 30)}</p>
+                      <p className="text-[9px] text-muted font-bold uppercase tracking-widest mt-0.5">{s.category}</p>
+                    </td>
+                    <td className="text-center tabular-nums text-xs font-medium text-secondary">{s.allocationPercentage.toFixed(1)}%</td>
+                    <td className={`text-center tabular-nums text-xs font-bold ${alpha >= 0 ? 'text-buy' : 'text-exit'}`}>
+                      {alpha > 0 ? '+' : ''}{alpha.toFixed(1)}%
+                    </td>
+                    <td className="text-center tabular-nums text-xs font-medium text-secondary">{s.sortinoRatio?.toFixed(2)}</td>
+                    <td className={`text-center tabular-nums text-xs font-medium ${zScore <= -1 ? 'text-buy' : 'text-secondary'}`}>
+                      {zScore > 0 ? '+' : ''}{zScore.toFixed(1)}σ
+                    </td>
+                    <td className="text-right pr-4">
+                      <span className={`px-2.5 py-1 rounded-lg text-[10px] font-black border tabular-nums ${statusColor}`}>
+                        {efficiency.toFixed(0)}
+                      </span>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      {/* Alpha Generation / Benchmark Comparison */}
+      <section className="bg-surface/40 backdrop-blur-xl border border-white/5 p-8 rounded-[2.5rem] shadow-2xl relative overflow-hidden">
+        <div className="flex items-center justify-between mb-8 px-2">
+          <div className="space-y-1">
+            <h3 className="text-primary text-[10px] font-black uppercase tracking-[0.3em]">Alpha Generation</h3>
+            <p className="text-sm font-bold text-secondary">Personal XIRR vs Index Benchmarks</p>
+          </div>
+          <div className="flex gap-6 text-[9px] font-black uppercase tracking-widest text-muted">
+            <span className="flex items-center gap-2">
+              <div className="w-3 h-1 rounded-full bg-buy" /> Your Performance
+            </span>
+            <span className="flex items-center gap-2">
+              <div className="w-3 h-1 rounded-full bg-white/20" /> Market Index
+            </span>
+          </div>
+        </div>
+
+        <div className="h-80 w-full">
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart 
+              data={activeBreakdown
+                .filter((s: any) => (s.currentValue || 0) > 5000)
+                .map((s: any) => {
+                  const personal = parseFloat(s.xirr || '0');
+                  const bench = s.benchmarkXirr || 14.8;
+                  return {
+                    name: s.schemeName.substring(0, 18) + '…',
+                    personal: parseFloat(personal.toFixed(1)),
+                    benchmark: parseFloat(bench.toFixed(1)),
+                    alpha: parseFloat((personal - bench).toFixed(1)),
+                    isWinning: personal >= bench
+                  };
+                })
+                .sort((a: any, b: any) => b.alpha - a.alpha)
+              } 
+              layout="vertical" 
+              margin={{ left: 100, right: 40 }}
+            >
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.02)" horizontal={true} vertical={false} />
+              <XAxis type="number" hide />
+              <YAxis 
+                dataKey="name" 
+                type="category" 
+                axisLine={false} 
+                tickLine={false} 
+                width={100}
+                tick={{ fill: 'rgba(241,245,249,0.5)', fontSize: 9, fontWeight: 800 }}
+              />
+              <RechartsTooltip 
+                cursor={{ fill: 'rgba(255,255,255,0.03)' }}
+                content={({ active, payload }) => {
+                  if (!active || !payload?.length) return null;
+                  const d = payload[0].payload;
+                  return (
+                    <div className="bg-surface-overlay/95 backdrop-blur-2xl border border-white/10 p-4 rounded-2xl shadow-2xl">
+                      <p className="text-[10px] font-black text-primary uppercase tracking-widest mb-2">{d.name}</p>
+                      <div className="space-y-1">
+                        <div className="flex justify-between gap-10"><span className="text-[9px] text-muted uppercase">Your XIRR</span><span className={`text-[10px] font-black ${d.isWinning ? 'text-buy' : 'text-exit'}`}>{d.personal}%</span></div>
+                        <div className="flex justify-between gap-10"><span className="text-[9px] text-muted uppercase">Benchmark</span><span className="text-[10px] font-black text-secondary">{d.benchmark}%</span></div>
+                        <div className="flex justify-between gap-10 pt-1 border-t border-white/5 mt-1">
+                          <span className="text-[9px] text-muted uppercase">Alpha</span>
+                          <span className={`text-[10px] font-black ${d.isWinning ? 'text-buy' : 'text-exit'}`}>{d.alpha > 0 ? '+' : ''}{d.alpha}%</span>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                }}
+              />
+              <Bar dataKey="personal" radius={[0, 4, 4, 0]} barSize={8}>
+                {(activeBreakdown
+                  .filter((s: any) => (s.currentValue || 0) > 5000)
+                  .map((s: any) => parseFloat(s.xirr || '0') >= (s.benchmarkXirr || 14.8))
+                ).map((isWinning: boolean, i: number) => (
+                  <Cell key={i} fill={isWinning ? '#4ade80' : '#f87171'} fillOpacity={0.8} />
+                ))}
+              </Bar>
+              <Bar dataKey="benchmark" fill="rgba(255,255,255,0.1)" radius={[0, 4, 4, 0]} barSize={8} />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      </section>
+
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
         {/* Vital Signs Pulse */}
         <section className="xl:col-span-2">

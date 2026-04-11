@@ -36,6 +36,10 @@ public class PositionSizingService {
         // Full Kelly fraction
         double fullKelly = (b * p - q) / b;
 
+        if (fullKelly <= 0) {
+            return 0.10; // Negative edge: Minimum viable position only (10% of drift)
+        }
+
         // Half-Kelly (standard institutional practice)
         double halfKelly = fullKelly * 0.5;
 
@@ -48,8 +52,8 @@ public class PositionSizingService {
 
         double multiplier = halfKelly * cvarPenalty;
 
-        // Clamp to [0.2, 1.5] — never size below 20% or above 150% of drift
-        multiplier = Math.max(0.2, Math.min(1.5, multiplier));
+        // Clamp to [0.1, 1.5] — never size below 10% or above 150% of drift
+        multiplier = Math.max(0.1, Math.min(1.5, multiplier));
         
         log.debug("Kelly sizing: p={:.2f} b={:.2f} fullKelly={:.2f} halfKelly={:.2f} cvarPenalty={:.2f} → mult={:.2f}",
             p, b, fullKelly, halfKelly, cvarPenalty, multiplier);

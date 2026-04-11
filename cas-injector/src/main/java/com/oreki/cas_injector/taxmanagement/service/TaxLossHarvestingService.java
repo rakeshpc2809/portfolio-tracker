@@ -7,6 +7,7 @@ import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
@@ -37,7 +38,7 @@ public class TaxLossHarvestingService {
     // Minimum loss required to trigger a harvest (e.g., ₹1,000) to avoid "dusting"
     private static final double MIN_ABSOLUTE_LOSS_THRESHOLD = 1000.0;
     // Minimum percentage drop to consider the lot "broken"
-    private static final double MIN_PERCENTAGE_DROP = -0.05; // -5%
+    private static final double MIN_PERCENTAGE_DROP = -0.03; // -3%
 
     // Externalized proxy map for maintaining market exposure without violating 
     // commercial substance rules (avoiding circular trading suspicion)
@@ -74,6 +75,13 @@ public class TaxLossHarvestingService {
         Map<Scheme, List<TaxLot>> lotsByScheme = allOpenLots.stream()
             .collect(Collectors.groupingBy(TaxLot::getScheme));
 
+        // --- OPTIMISATION: Cache NAVs for all schemes in this scan ---
+        Map<String, Double> navCache = new HashMap<>();
+        lotsByScheme.keySet().forEach(s -> {
+            double nav = amfiService.getLatestSchemeDetails(s.getAmfiCode()).getNav().doubleValue();
+            navCache.put(s.getAmfiCode(), nav);
+        });
+
         for (Map.Entry<Scheme, List<TaxLot>> entry : lotsByScheme.entrySet()) {
             Scheme scheme = entry.getKey();
             
@@ -82,7 +90,8 @@ public class TaxLossHarvestingService {
                 .sorted(Comparator.comparing(TaxLot::getBuyDate))
                 .toList();
 
-            double currentNav = amfiService.getLatestSchemeDetails(scheme.getAmfiCode()).getNav().doubleValue();
+            double currentNav = navCache.getOrDefault(scheme.getAmfiCode(), 0.0);
+            if (currentNav <= 0) continue;
             
             double accumHarvestAmount = 0.0;
             double accumCapitalLoss = 0.0;
@@ -140,7 +149,9 @@ public class TaxLossHarvestingService {
             if (proxyFundName == null) continue;
 
             double totalCost = entry.getValue().stream().mapToDouble(l -> l.getCostBasisPerUnit().doubleValue() * l.getRemainingUnits().doubleValue()).sum();
-            double currentNav = amfiService.getLatestSchemeDetails(scheme.getAmfiCode()).getNav().doubleValue();
+            double currentNav = navCache.getOrDefault(scheme.getAmfiCode(), 0.0);
+            if (currentNav <= 0) continue;
+            
             double totalValue = entry.getValue().stream().mapToDouble(l -> l.getRemainingUnits().doubleValue() * currentNav).sum();
             double unrealizedGain = totalValue - totalCost;
 
