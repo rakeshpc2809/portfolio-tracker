@@ -7,9 +7,11 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 
 @Repository
 @RequiredArgsConstructor
+@Slf4j
 public class ConvictionMetricsRepository {
 
     private final JdbcTemplate jdbcTemplate;
@@ -19,6 +21,12 @@ public class ConvictionMetricsRepository {
      */
     @jakarta.annotation.PostConstruct
     public void ensureColumnsExist() {
+        // 1. Global Data Sanitization: Strip leading zeros from all tables for consistency
+        log.info("🧹 Running global AMFI code sanitization...");
+        jdbcTemplate.execute("UPDATE scheme SET amfi_code = LTRIM(amfi_code, '0') WHERE amfi_code LIKE '0%'");
+        jdbcTemplate.execute("UPDATE fund_history SET amfi_code = LTRIM(amfi_code, '0') WHERE amfi_code LIKE '0%'");
+        jdbcTemplate.execute("UPDATE fund_conviction_metrics SET amfi_code = LTRIM(amfi_code, '0') WHERE amfi_code LIKE '0%'");
+
         String createTableSql = """
             CREATE TABLE IF NOT EXISTS fund_conviction_metrics (
                 amfi_code VARCHAR(255) NOT NULL,
@@ -35,14 +43,14 @@ public class ConvictionMetricsRepository {
 
         String addColumnsSql = """
             ALTER TABLE fund_conviction_metrics
-            ADD COLUMN IF NOT EXISTS nav_percentile_3yr DOUBLE PRECISION,
-            ADD COLUMN IF NOT EXISTS drawdown_from_ath   DOUBLE PRECISION,
-            ADD COLUMN IF NOT EXISTS return_z_score      DOUBLE PRECISION,
-            ADD COLUMN IF NOT EXISTS yield_score         DOUBLE PRECISION,
-            ADD COLUMN IF NOT EXISTS risk_score          DOUBLE PRECISION,
-            ADD COLUMN IF NOT EXISTS value_score         DOUBLE PRECISION,
-            ADD COLUMN IF NOT EXISTS pain_score          DOUBLE PRECISION,
-            ADD COLUMN IF NOT EXISTS friction_score      DOUBLE PRECISION,
+            ADD COLUMN IF NOT EXISTS nav_percentile_3yr DOUBLE PRECISION DEFAULT 0.5,
+            ADD COLUMN IF NOT EXISTS drawdown_from_ath   DOUBLE PRECISION DEFAULT 0.0,
+            ADD COLUMN IF NOT EXISTS return_z_score      DOUBLE PRECISION DEFAULT 0.0,
+            ADD COLUMN IF NOT EXISTS yield_score         DOUBLE PRECISION DEFAULT 50.0,
+            ADD COLUMN IF NOT EXISTS risk_score          DOUBLE PRECISION DEFAULT 50.0,
+            ADD COLUMN IF NOT EXISTS value_score         DOUBLE PRECISION DEFAULT 50.0,
+            ADD COLUMN IF NOT EXISTS pain_score          DOUBLE PRECISION DEFAULT 50.0,
+            ADD COLUMN IF NOT EXISTS friction_score      DOUBLE PRECISION DEFAULT 50.0,
             ADD COLUMN IF NOT EXISTS composite_quant_score INT DEFAULT 50,
             ADD COLUMN IF NOT EXISTS bucket_peer_count   INT DEFAULT 0,
             ADD COLUMN IF NOT EXISTS rolling_z_score_252 DOUBLE PRECISION DEFAULT 0.0,
@@ -63,9 +71,47 @@ public class ConvictionMetricsRepository {
             ADD COLUMN IF NOT EXISTS hmm_state           VARCHAR(20)      DEFAULT 'STRESSED_NEUTRAL',
             ADD COLUMN IF NOT EXISTS hmm_bull_prob       DOUBLE PRECISION DEFAULT 0.33,
             ADD COLUMN IF NOT EXISTS hmm_bear_prob       DOUBLE PRECISION DEFAULT 0.33,
-            ADD COLUMN IF NOT EXISTS hmm_transition_bear DOUBLE PRECISION DEFAULT 0.33;
+            ADD COLUMN IF NOT EXISTS hmm_transition_bear DOUBLE PRECISION DEFAULT 0.33,
+            ADD COLUMN IF NOT EXISTS conviction_score    INT              DEFAULT 50;
         """;
         jdbcTemplate.execute(addColumnsSql);
+
+        // SELF-HEALING: Update existing NULLs or 0s to defaults
+        jdbcTemplate.execute("""
+            UPDATE fund_conviction_metrics
+            SET conviction_score = COALESCE(NULLIF(conviction_score, 0), 50),
+                composite_quant_score = COALESCE(NULLIF(composite_quant_score, 0), 50),
+                yield_score = COALESCE(NULLIF(yield_score, 0), 50.0),
+                risk_score = COALESCE(NULLIF(risk_score, 0), 50.0),
+                value_score = COALESCE(NULLIF(value_score, 0), 50.0),
+                pain_score = COALESCE(NULLIF(pain_score, 0), 50.0),
+                friction_score = COALESCE(NULLIF(friction_score, 0), 50.0),
+                nav_percentile_3yr = COALESCE(nav_percentile_3yr, 0.5),
+                drawdown_from_ath = COALESCE(drawdown_from_ath, 0.0),
+                return_z_score = COALESCE(return_z_score, 0.0),
+                rolling_z_score_252 = COALESCE(rolling_z_score_252, 0.0),
+                hurst_exponent = COALESCE(hurst_exponent, 0.5),
+                volatility_tax = COALESCE(volatility_tax, 0.0),
+                hurst_regime = COALESCE(hurst_regime, 'RANDOM_WALK'),
+                historical_rarity_pct = COALESCE(historical_rarity_pct, 50.0),
+                hurst_20d = COALESCE(hurst_20d, 0.5),
+                hurst_60d = COALESCE(hurst_60d, 0.5),
+                multi_scale_regime = COALESCE(multi_scale_regime, 'RANDOM_WALK'),
+                ou_theta = COALESCE(ou_theta, 0.0),
+                ou_mu = COALESCE(ou_mu, 0.0),
+                ou_sigma = COALESCE(ou_sigma, 0.0),
+                ou_half_life = COALESCE(ou_half_life, 0.0),
+                ou_valid = COALESCE(ou_valid, FALSE),
+                ou_buy_threshold = COALESCE(ou_buy_threshold, 0.0),
+                ou_sell_threshold = COALESCE(ou_sell_threshold, 0.0),
+                hmm_state = COALESCE(hmm_state, 'STRESSED_NEUTRAL'),
+                hmm_bull_prob = COALESCE(hmm_bull_prob, 0.33),
+                hmm_bear_prob = COALESCE(hmm_bear_prob, 0.33),
+                hmm_transition_bear = COALESCE(hmm_transition_bear, 0.33)
+            WHERE conviction_score IS NULL OR conviction_score = 0
+               OR composite_quant_score IS NULL OR composite_quant_score = 0
+               OR yield_score IS NULL OR yield_score = 0
+        """);
 
         // Index for fast lookups in the nightly engine
         String createIndexSql = """
@@ -73,6 +119,10 @@ public class ConvictionMetricsRepository {
             ON fund_conviction_metrics (amfi_code, calculation_date DESC);
         """;
         jdbcTemplate.execute(createIndexSql);
+    }
+
+    public long getHistoryCount() {
+        return jdbcTemplate.queryForObject("SELECT COUNT(*) FROM fund_history", Long.class);
     }
 
     /**
@@ -168,7 +218,10 @@ public class ConvictionMetricsRepository {
             WHERE amfi_code = ? 
             AND calculation_date = (SELECT MAX(calculation_date) FROM fund_conviction_metrics)
         """;
-        jdbcTemplate.update(updateSql, finalScore, yield, risk, value, pain, friction, amfiCode);
+        int updated = jdbcTemplate.update(updateSql, finalScore, yield, risk, value, pain, friction, amfiCode);
+        if (updated == 0) {
+            log.warn("⚠️ No rows updated for AMFI {} in fund_conviction_metrics. Check if row exists for latest date.", amfiCode);
+        }
     }
 
     /**
@@ -181,7 +234,7 @@ public class ConvictionMetricsRepository {
 
             WITH rolling_window AS (
                 -- 1. Grab 3 years of data and calculate daily returns
-                SELECT amfi_code, nav_date, nav AS current_nav,
+                SELECT LTRIM(amfi_code, '0') as amfi_code, nav_date, nav AS current_nav,
                        LAG(nav) OVER (PARTITION BY amfi_code ORDER BY nav_date) AS previous_nav
                 FROM fund_history
                 WHERE nav_date >= CURRENT_DATE - INTERVAL '3 years'
@@ -257,7 +310,14 @@ public class ConvictionMetricsRepository {
                 sortino_ratio = EXCLUDED.sortino_ratio,
                 cvar_5 = EXCLUDED.cvar_5,
                 win_rate = EXCLUDED.win_rate,
-                max_drawdown = EXCLUDED.max_drawdown;
+                max_drawdown = EXCLUDED.max_drawdown,
+                conviction_score = 50,
+                composite_quant_score = 50,
+                yield_score = 50.0,
+                risk_score = 50.0,
+                value_score = 50.0,
+                pain_score = 50.0,
+                friction_score = 50.0;
             """;
         return jdbcTemplate.update(sql);
     }
@@ -270,8 +330,8 @@ public class ConvictionMetricsRepository {
             WITH nav_stats AS (
                 SELECT
                     amfi_code,
-                    MAX(nav) FILTER (WHERE nav_date >= CURRENT_DATE - INTERVAL '3 years') AS max_3yr,
-                    MIN(nav) FILTER (WHERE nav_date >= CURRENT_DATE - INTERVAL '3 years') AS min_3yr,
+                    MAX(nav) FILTER (WHERE nav_date >= CURRENT_DATE - INTERVAL '365 days') AS max_1yr,
+                    MIN(nav) FILTER (WHERE nav_date >= CURRENT_DATE - INTERVAL '365 days') AS min_1yr,
                     MAX(nav) AS ath_nav,
                     (SELECT nav FROM fund_history h2
                      WHERE h2.amfi_code = h.amfi_code
@@ -281,9 +341,9 @@ public class ConvictionMetricsRepository {
             ),
             percentile_and_ath AS (
                 SELECT amfi_code,
-                    CASE WHEN (max_3yr - min_3yr) > 0
-                        THEN (current_nav - min_3yr) / (max_3yr - min_3yr)
-                        ELSE 0.5 END AS nav_percentile_3yr,
+                    CASE WHEN (max_1yr - min_1yr) > 0
+                        THEN (current_nav - min_1yr) / (max_1yr - min_1yr)
+                        ELSE 0.5 END AS nav_percentile_1yr,
                     (current_nav - ath_nav) / NULLIF(ath_nav, 0) AS drawdown_from_ath
                 FROM nav_stats
             ),
@@ -307,7 +367,7 @@ public class ConvictionMetricsRepository {
             )
             UPDATE fund_conviction_metrics fcm
             SET
-                nav_percentile_3yr    = p.nav_percentile_3yr,
+                nav_percentile_3yr    = p.nav_percentile_1yr,
                 drawdown_from_ath     = p.drawdown_from_ath,
                 return_z_score        = CASE WHEN rz.std_1yr > 0
                                             THEN (rz.latest_1yr - rz.mean_1yr) / rz.std_1yr
@@ -330,10 +390,10 @@ public class ConvictionMetricsRepository {
                   m.composite_quant_score,
                   s.asset_category
            FROM fund_conviction_metrics m
-           JOIN scheme s ON m.amfi_code = s.amfi_code
+           JOIN scheme s ON LTRIM(m.amfi_code, '0') = LTRIM(s.amfi_code, '0')
            WHERE m.calculation_date = (SELECT MAX(calculation_date) FROM fund_conviction_metrics)
-           AND m.amfi_code IN (
-               SELECT s2.amfi_code 
+           AND LTRIM(m.amfi_code, '0') IN (
+               SELECT LTRIM(s2.amfi_code, '0')
                FROM scheme s2 
                JOIN folio fol ON s2.folio_id = fol.id 
                WHERE fol.investor_pan = ?
@@ -352,7 +412,10 @@ public class ConvictionMetricsRepository {
             WHERE amfi_code = ? 
             AND calculation_date = (SELECT MAX(calculation_date) FROM fund_conviction_metrics)
         """;
-        jdbcTemplate.update(updateSql, finalScore, amfiCode);
+        int updated = jdbcTemplate.update(updateSql, finalScore, amfiCode);
+        if (updated == 0) {
+            log.warn("⚠️ No final score updated for AMFI {}. Check calculation_date.", amfiCode);
+        }
     }
 
     /**

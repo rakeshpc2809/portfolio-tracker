@@ -1,91 +1,177 @@
+@import url('https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&display=swap');
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "@fontsource-variable/geist";
 
 @theme {
-  --color-background:       #09090f;
-  --color-surface:          #0f0f18;
-  --color-surface-elevated: #14141f;
-  --color-border:           rgba(255,255,255,0.06);
-  --color-primary:          #f1f5f9;
-  --color-secondary:        rgba(241,245,249,0.55);
-  --color-muted:            rgba(241,245,249,0.28);
-  --color-buy:              #34d399;
-  --color-exit:             #f87171;
-  --color-hold:             #94a3b8;
-  --color-warning:          #fbbf24;
-  --color-accent:           #818cf8;
+  /* ── Depth layers (Material 3 elevation model) ──────────── */
+  --color-background:        #07070e;
+  --color-surface:           #0d0d1a;
+  --color-surface-elevated:  #121224;
+  --color-surface-overlay:   #181830;
+  --color-border:            rgba(255,255,255,0.055);
+  --color-border-strong:     rgba(255,255,255,0.12);
 
-  /* Typography scale — use these instead of arbitrary px sizes */
-  --text-2xs: 0.625rem;   /* 10px */
-  --text-xs:  0.6875rem;  /* 11px */
-  --text-sm:  0.8125rem;  /* 13px */
+  /* ── Typography ─────────────────────────────────────────── */
+  --color-primary:           #f0f2ff;
+  --color-secondary:         rgba(240,242,255,0.60);
+  --color-muted:             rgba(240,242,255,0.30);
+  --color-hint:              rgba(240,242,255,0.16);
+
+  /* ── Semantic colors (vivid, Material 3 tonal) ───────────── */
+  --color-buy:               #4ade80;    /* vivid green */
+  --color-buy-dim:           rgba(74,222,128,0.12);
+  --color-buy-glow:          rgba(74,222,128,0.25);
+  
+  --color-exit:              #f87171;
+  --color-exit-dim:          rgba(248,113,113,0.12);
+  --color-exit-glow:         rgba(248,113,113,0.25);
+  
+  --color-watch:             #fbbf24;
+  --color-watch-dim:         rgba(251,191,36,0.12);
+  
+  --color-hold:              #818cf8;
+  --color-hold-dim:          rgba(129,140,248,0.12);
+  
+  --color-harvest:           #c084fc;
+  --color-harvest-dim:       rgba(192,132,252,0.12);
+  
+  --color-accent:            #818cf8;
+  --color-accent-bright:     #a5b4fc;
+
+  /* ── Semantic status ─────────────────────────────────────── */
+  --color-warning:           #fb923c;
+  --color-info:              #38bdf8;
+  --color-success:           #4ade80;
+  --color-danger:            #f87171;
+
+  /* ── Typography scale ────────────────────────────────────── */
+  --text-2xs:  0.625rem;    /* 10px — badge text */
+  --text-xs:   0.6875rem;   /* 11px — caption */
+  --text-sm:   0.8125rem;   /* 13px — body small */
+  --text-base: 0.9375rem;   /* 15px — body */
+  
+  /* ── Radii (M3 style) ────────────────────────────────────── */
+  --radius-sm:   6px;
+  --radius-md:   12px;
+  --radius-lg:   16px;
+  --radius-xl:   24px;
+  --radius-pill: 999px;
+  
+  /* ── Motion ──────────────────────────────────────────────── */
+  --ease-spring:   cubic-bezier(0.34, 1.56, 0.64, 1);
+  --ease-out:      cubic-bezier(0.16, 1, 0.3, 1);
+  --duration-fast: 150ms;
+  --duration-base: 250ms;
+  --duration-slow: 400ms;
 }
 
 :root {
-  font-family: 'Geist Variable', sans-serif;
+  font-family: 'Geist Variable', system-ui, sans-serif;
   line-height: 1.5;
   font-weight: 400;
   color-scheme: dark;
-  color: #f1f5f9;
-  background-color: #09090f;
+  color: var(--color-primary);
+  background-color: var(--color-background);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
 }
 
-body {
-  margin: 0;
-  min-width: 320px;
-  min-height: 100vh;
-  background-color: #09090f;
-}
+body { margin: 0; min-width: 320px; min-height: 100vh; }
 
-.tabular-nums {
+/* ── Elevation system (Material 3) ─────────────────────────── */
+.surface-0 { background: var(--color-background); }
+.surface-1 { background: var(--color-surface); }
+.surface-2 { background: var(--color-surface-elevated); }
+.surface-3 { background: var(--color-surface-overlay); }
+
+/* Tonal surface with color bleed */
+.surface-tonal-buy     { background: linear-gradient(135deg, var(--color-buy-dim), transparent 70%); border-color: rgba(74,222,128,0.15); }
+.surface-tonal-exit    { background: linear-gradient(135deg, var(--color-exit-dim), transparent 70%); border-color: rgba(248,113,113,0.15); }
+.surface-tonal-accent  { background: linear-gradient(135deg, var(--color-hold-dim), transparent 70%); border-color: rgba(129,140,248,0.15); }
+.surface-tonal-harvest { background: linear-gradient(135deg, var(--color-harvest-dim), transparent 70%); border-color: rgba(192,132,252,0.15); }
+
+/* ── Glow utilities ─────────────────────────────────────────── */
+.glow-buy     { text-shadow: 0 0 24px var(--color-buy-glow); }
+.glow-exit    { text-shadow: 0 0 24px var(--color-exit-glow); }
+.glow-accent  { text-shadow: 0 0 24px rgba(129,140,248,0.4); }
+.glow-harvest { text-shadow: 0 0 24px rgba(192,132,252,0.4); }
+
+/* Box glow for cards */
+.shadow-buy     { box-shadow: 0 0 0 1px rgba(74,222,128,0.15), 0 4px 24px rgba(74,222,128,0.08); }
+.shadow-exit    { box-shadow: 0 0 0 1px rgba(248,113,113,0.15), 0 4px 24px rgba(248,113,113,0.08); }
+.shadow-accent  { box-shadow: 0 0 0 1px rgba(129,140,248,0.15), 0 4px 24px rgba(129,140,248,0.08); }
+.shadow-harvest { box-shadow: 0 0 0 1px rgba(192,132,252,0.15), 0 4px 24px rgba(192,132,252,0.08); }
+.shadow-card    { box-shadow: 0 1px 3px rgba(0,0,0,0.4), 0 4px 12px rgba(0,0,0,0.3); }
+
+/* ── Number style (expressive, large data display) ────────────── */
+.num-display {
+  font-family: 'Geist Variable', monospace;
   font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+  letter-spacing: -0.02em;
 }
 
-/* Refined scrollbar */
-::-webkit-scrollbar { width: 5px; height: 5px; }
-::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 99px; }
-::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.14); }
+/* ── Badge system (M3 tonal chips) ─────────────────────────── */
+.chip { 
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 3px 10px; border-radius: var(--radius-pill);
+  font-size: 10px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.06em;
+  border: 1px solid transparent;
+}
+.chip-buy     { background: rgba(74,222,128,0.12);  color: #4ade80; border-color: rgba(74,222,128,0.25); }
+.chip-exit    { background: rgba(248,113,113,0.12); color: #f87171; border-color: rgba(248,113,113,0.25); }
+.chip-watch   { background: rgba(251,191,36,0.12);  color: #fbbf24; border-color: rgba(251,191,36,0.25); }
+.chip-hold    { background: rgba(129,140,248,0.12); color: #818cf8; border-color: rgba(129,140,248,0.25); }
+.chip-harvest { background: rgba(192,132,252,0.12); color: #c084fc; border-color: rgba(192,132,252,0.25); }
 
-/* Range input */
+/* ── Scrollbar ──────────────────────────────────────────────── */
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.07); border-radius: 99px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.13); }
+
+/* ── Range slider ───────────────────────────────────────────── */
 input[type="range"] {
-  -webkit-appearance: none;
-  appearance: none;
-  height: 4px;
-  background: rgba(255,255,255,0.1);
-  border-radius: 2px;
-  outline: none;
+  -webkit-appearance: none; appearance: none;
+  height: 4px; background: rgba(255,255,255,0.08);
+  border-radius: 2px; outline: none;
 }
 input[type="range"]::-webkit-slider-thumb {
   -webkit-appearance: none;
-  width: 14px; height: 14px;
-  background: #818cf8;
-  border-radius: 50%;
-  cursor: pointer;
-  border: 2px solid #09090f;
-  box-shadow: 0 0 12px rgba(129,140,248,0.4);
-  transition: box-shadow 0.15s;
+  width: 16px; height: 16px;
+  background: radial-gradient(circle at 40% 35%, #a5b4fc, #6366f1);
+  border-radius: 50%; cursor: pointer;
+  border: 2px solid var(--color-background);
+  box-shadow: 0 0 0 3px rgba(129,140,248,0.2), 0 2px 8px rgba(0,0,0,0.5);
+  transition: box-shadow var(--duration-fast);
 }
 input[type="range"]::-webkit-slider-thumb:hover {
-  box-shadow: 0 0 18px rgba(129,140,248,0.6);
-}
-input[type="range"]::-moz-range-thumb {
-  width: 14px; height: 14px;
-  background: #818cf8;
-  border-radius: 50%;
-  cursor: pointer;
-  border: 2px solid #09090f;
+  box-shadow: 0 0 0 5px rgba(129,140,248,0.3), 0 2px 12px rgba(0,0,0,0.5);
 }
 
-/* Glow utility for key numbers */
-.glow-buy    { text-shadow: 0 0 20px rgba(52,211,153,0.4); }
-.glow-exit   { text-shadow: 0 0 20px rgba(248,113,113,0.4); }
-.glow-accent { text-shadow: 0 0 20px rgba(129,140,248,0.4); }
+/* ── Animations ─────────────────────────────────────────────── */
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.5; transform: scale(0.85); }
+}
+@keyframes shimmer {
+  from { background-position: -200% 0; }
+  to   { background-position:  200% 0; }
+}
+.animate-pulse-dot { animation: pulse-dot 2s ease-in-out infinite; }
+.skeleton {
+  background: linear-gradient(90deg, 
+    rgba(255,255,255,0.03) 25%, 
+    rgba(255,255,255,0.07) 50%, 
+    rgba(255,255,255,0.03) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s ease-in-out infinite;
+  border-radius: var(--radius-md);
+}
 
 .scrollbar-none::-webkit-scrollbar { display: none; }
 .scrollbar-none { -ms-overflow-style: none; scrollbar-width: none; }
+.tabular-nums { font-variant-numeric: tabular-nums; }

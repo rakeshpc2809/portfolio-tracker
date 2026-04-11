@@ -11,6 +11,7 @@ import java.util.stream.Collectors;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.springframework.cache.CacheManager;
 
 import com.oreki.cas_injector.backfill.service.NavService;
 import com.oreki.cas_injector.core.model.Folio;
@@ -35,17 +36,17 @@ import com.fasterxml.jackson.databind.JsonNode;
 @Slf4j
 public class CasProcessingService {
 
-    @Autowired private InvestorRepository investorRepo; // Ported from InjectionService
+    @Autowired private InvestorRepository investorRepo;
     @Autowired private TransactionRepository txnRepo;
     @Autowired private SchemeRepository schemeRepo;
     @Autowired private TaxLotRepository taxLotRepo;
     @Autowired private CapitalGainAuditRepository auditRepo;
     @Autowired private FolioRepository folioRepo;
     @Autowired private NavService navService;
+    @Autowired private CacheManager cacheManager;
 
     @Transactional
     public void processJson(JsonNode root) {
-        // 1. Investor Level (Ported from InjectionService)
         String pan = root.path("pan").asText();
         Investor investor = investorRepo.findById(pan).orElseGet(() -> 
             investorRepo.save(Investor.builder()
@@ -56,11 +57,9 @@ public class CasProcessingService {
         );
 
         root.path("folios").forEach(folioNode -> {
-            // 2. Find/Create Folio
             Folio folio = findOrCreateFolio(folioNode, investor); 
 
             folioNode.path("schemes").forEach(schemeNode -> {
-                // 3. Find/Create Scheme
                 Scheme scheme = findOrCreateScheme(schemeNode, folio);
                 
                 schemeNode.path("transactions").forEach(txNode -> {
@@ -68,10 +67,17 @@ public class CasProcessingService {
                 });
             });
         });
+
+        // 4. Evict caches for this PAN
+        if (cacheManager.getCache("portfolioCache") != null) {
+            cacheManager.getCache("portfolioCache").evict(pan);
+        }
+        if (cacheManager.getCache("dashboardSummary") != null) {
+            cacheManager.getCache("dashboardSummary").evict(pan);
+        }
     }
 
     private Folio findOrCreateFolio(JsonNode node, Investor investor) {
-        // Ported from InjectionService: Uses "folio_number" to match your actual JSON
         String folioNum = node.path("folio_number").asText().trim(); 
         return folioRepo.findByFolioNumber(folioNum)
             .orElseGet(() -> folioRepo.save(Folio.builder()
@@ -86,15 +92,12 @@ public class CasProcessingService {
         String rawName = node.has("name") ? node.path("name").asText() : node.path("scheme").asText();
         String name = CommonUtils.SANITIZE.apply(rawName);
         
-        // Handle variations in JSON keys ("amfiCode" vs "amfi")
         String rawAmfi = node.has("amfiCode") ? node.path("amfiCode").asText() : node.path("amfi").asText();
-        String amfiCode = CommonUtils.SANITIZE.apply(rawAmfi); 
+        String amfiCode = sanitizeAmfi(rawAmfi); 
 
-        // 1. Look for the scheme in the database
         Scheme existingScheme = schemeRepo.findByIsin(isin).orElse(null);
 
         if (existingScheme != null) {
-            // 🌟 SELF-HEALING: If the DB has a null or UNKNOWN category, fix it!
             if (existingScheme.getAssetCategory() == null || existingScheme.getAssetCategory().equals("UNKNOWN")) {
                 String realCategory = navService.getLatestSchemeDetails(existingScheme.getAmfiCode()).getCategory();
                 existingScheme.setAssetCategory(realCategory);
@@ -104,7 +107,6 @@ public class CasProcessingService {
             return existingScheme;
         }
 
-        // 2. Brand new scheme
         String extractedCategory = navService.getLatestSchemeDetails(amfiCode).getCategory();
         log.info("🚨 STEP 1 - NavService Returned: " + extractedCategory);
 
@@ -113,18 +115,16 @@ public class CasProcessingService {
             .name(name)
             .amfiCode(amfiCode)
             .folio(folio)
-            .assetCategory(extractedCategory) // <--- Safely attached!
+            .assetCategory(extractedCategory)
             .build();
 
         return schemeRepo.save(newScheme);
     }
 
     private void processTransaction(JsonNode txNode, Scheme scheme) {
-        // 1. Check Idempotency
         String hash = CommonUtils.GENERATE_HASH.apply(txNode, scheme.getId());
         if (txnRepo.existsByTxnHash(hash)) return;
 
-        // 2. Build and Save Transaction
         Transaction tx = Transaction.builder()
             .txnHash(hash)
             .date(LocalDate.parse(txNode.path("date").asText()))
@@ -136,8 +136,6 @@ public class CasProcessingService {
             .build();
         
         txnRepo.save(tx);
-
-        // 3. Route to Inventory/Accounting logic
         applyInventoryRules(tx);
     }
 
@@ -174,7 +172,6 @@ public class CasProcessingService {
         }
     }
 
-    // Advanced Batch Processor (Retained from V2)
     public void processPortfolioTaxation(List<Transaction> allSells) {
         Map<String, String> amfiToCategoryMap = allSells.stream()
             .map(tx -> tx.getScheme().getAmfiCode())
@@ -192,7 +189,6 @@ public class CasProcessingService {
         }
     }
 
-    // Advanced Tax Calculation (Retained from V2)
     private void consumeLotsFIFO(Transaction sellTx, String category) {
         BigDecimal unitsToRedeem = sellTx.getUnits().abs();
         List<TaxLot> activeLots = taxLotRepo.findBySchemeAndStatusOrderByBuyDateAsc(sellTx.getScheme(), "OPEN");
@@ -226,5 +222,11 @@ public class CasProcessingService {
 
             unitsToRedeem = unitsToRedeem.subtract(match);
         }
+    }
+
+    private String sanitizeAmfi(String amfi) {
+        if (amfi == null) return "";
+        String s = amfi.trim();
+        return s.replaceFirst("^0+(?!$)", "");
     }
 }

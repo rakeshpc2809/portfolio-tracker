@@ -8,6 +8,7 @@ import java.util.Map;
 import java.util.stream.Collectors;
 
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import com.oreki.cas_injector.backfill.service.NavService;
 import com.oreki.cas_injector.convictionmetrics.repository.ConvictionMetricsRepository;
@@ -36,18 +37,27 @@ public class ConvictionScoringService {
     private static final double WEIGHT_PAIN = 0.15;       
     private static final double WEIGHT_FRICTION = 0.15;   
 
+    @Transactional
     public void calculateAndSaveFinalScores(String investorPan) {
         log.info("🚀 [1/3] Starting Conviction Scoring for PAN: {}", investorPan);
 
         List<TaxLot> allLots = taxLotRepository.findByStatusAndSchemeFolioInvestorPan("OPEN", investorPan);
+        log.info("📦 Found {} total open lots for PAN: {}", allLots.size(), investorPan);
+        
         Map<String, List<TaxLot>> lotsByAmfi = allLots.stream()
-                .collect(Collectors.groupingBy(lot -> lot.getScheme().getAmfiCode()));
+                .collect(Collectors.groupingBy(lot -> sanitizeAmfi(lot.getScheme().getAmfiCode())));
+        log.info("📦 Grouped into {} unique AMFI codes from tax lots.", lotsByAmfi.size());
 
         var fundMetrics = convictionMetricsRepository.findMetricsForScoring(investorPan);
-        log.info("📊 [2/3] Found {} funds to score.", fundMetrics.size());
+        log.info("📊 [2/3] Found {} funds in fund_conviction_metrics to score.", fundMetrics.size());
+
+        if (fundMetrics.isEmpty()) {
+            log.warn("⚠️ No metrics found for scoring! Check if nightly engine has run and AMFI codes match.");
+        }
 
         for (Map<String, Object> fund : fundMetrics) {
-            String amfiCode = (String) fund.get("amfi_code");
+            String amfiCode = sanitizeAmfi((String) fund.get("amfi_code"));
+            log.info("🔎 Scoring fund: {} (AMFI: {})", fund.get("amfi_code"), amfiCode);
             try {
                 String assetCategory = safeStr(fund.get("asset_category"));
                 boolean isDebtLike = isDebtLikeCategory(assetCategory);
@@ -64,6 +74,7 @@ public class ConvictionScoringService {
 
                 List<TaxLot> fundLots = lotsByAmfi.get(amfiCode);
                 if (fundLots != null && !fundLots.isEmpty()) {
+                    log.info("  ├─ Found {} lots for this fund.", fundLots.size());
                     var details = navService.getLatestSchemeDetails(amfiCode);
                     double currentNav = (details != null && details.getNav() != null) ? details.getNav().doubleValue() : 0.0;
                     if (currentNav > 0) {
@@ -78,51 +89,31 @@ public class ConvictionScoringService {
                         double absoluteReturn = totalCost > 0 ? (totalValue - totalCost) / totalCost : 0;
                         double yearsInvested = Math.max(0.5, ChronoUnit.DAYS.between(oldestDate, LocalDate.now()) / 365.0);
                         dynamicPersonalCagr = Math.pow(1 + absoluteReturn, 1.0 / yearsInvested) - 1;
+                        log.info("  ├─ CAGR: {:.2f}%, Abs Return: {:.2f}%", dynamicPersonalCagr * 100, absoluteReturn * 100);
                         try {
                             String schemeName = fundLots.get(0).getScheme().getName();
                             TaxSimulationResult taxFriction = taxSimulator.simulateSellOrder(schemeName, totalValue, currentNav, investorPan);
                             dynamicTaxDrag = taxFriction.taxDragPercentage();
+                            log.info("  ├─ Tax Drag: {:.2f}%", dynamicTaxDrag * 100);
                         } catch (Exception ignored) {}
 
                     }
+                } else {
+                    log.warn("  ├─ ⚠️ No lots found for AMFI {} in the lotsByAmfi map!", amfiCode);
                 }
 
                 double yieldScore, riskScore, valueScore, painScore, frictionScore;
 
                 if (isDebtLike) {
-                    // ══════════════════════════════════════════════════════
-                    // DEBT/ARBITRAGE SCORING MODEL
-                    // These funds: monotonically increase, low drawdown is expected,
-                    // their value is in stability + yield vs MAR, not price dips.
-                    // ══════════════════════════════════════════════════════
-
-                    // Yield: calibrated for debt returns (3–9% CAGR range)
                     yieldScore = normalize(dynamicPersonalCagr, 0.03, 0.09) * 100;
-
-                    // Risk: Sortino still valid — a stable debt fund should have VERY high Sortino
-                    // calibrate for 1–5 range (debt funds can have extremely high Sortino)
                     riskScore = (cqs >= 0) ? cqs : normalize(sortino, 0.5, 5.0) * 100;
-
-                    // Value score for debt: Reward CONSISTENCY, not price dips.
-                    // A high NAV percentile means the fund has been steadily compounding — that's GOOD.
-                    // Use return Z-score instead: positive Z-score = outperforming peers = good.
                     double debtReturnConsistency = returnZScore > 0
-                        ? Math.min(100, 50 + (returnZScore * 15))   // positive Z = above peer average
+                        ? Math.min(100, 50 + (returnZScore * 15))
                         : Math.max(0,  50 + (returnZScore * 15));
                     valueScore = debtReturnConsistency;
-
-                    // Pain: debt funds rarely have significant drawdown. Reward low MDD heavily.
-                    // A debt fund with 0% drawdown should score 100 on this.
-                    painScore = invertNormalize(maxDrawdown, 0.0, 0.05) * 100; // 0–5% range for debt
-
-                    // Friction: same tax drag model, but debt funds have SLAB taxation post-Apr 2023
-                    // so friction naturally higher — but the system already simulates this correctly.
-                    frictionScore = invertNormalize(dynamicTaxDrag, 0.0, 0.30) * 100; // 0–30% slab drag range
-
+                    painScore = invertNormalize(maxDrawdown, 0.0, 0.05) * 100;
+                    frictionScore = invertNormalize(dynamicTaxDrag, 0.0, 0.30) * 100;
                 } else {
-                    // ══════════════════════════════════════════════════════
-                    // EQUITY / HYBRID SCORING MODEL (unchanged)
-                    // ══════════════════════════════════════════════════════
                     yieldScore    = normalize(dynamicPersonalCagr, 0.05, 0.25) * 100;
                     riskScore     = (cqs >= 0) ? cqs : normalize(sortino, 0.5, 2.5) * 100;
                     valueScore    = calculateValueScore(navPercentile, athDrawdown, returnZScore, assetCategory);
@@ -151,10 +142,6 @@ public class ConvictionScoringService {
         log.info("🏁 [3/3] Dynamic Conviction Scoring completed.");
     }
 
-    /**
-     * Returns true for debt, gilt, bond, liquid, money market, banking&psu, arbitrage categories.
-     * These all share monotonically-increasing NAV behaviour and require different scoring.
-     */
     private boolean isDebtLikeCategory(String assetCategory) {
         if (assetCategory == null) return false;
         String upper = assetCategory.toUpperCase();
@@ -165,7 +152,6 @@ public class ConvictionScoringService {
             || upper.contains("ULTRA SHORT") || upper.contains("LOW DURATION");
     }
 
-    // Safe helpers to replace repetitive null checks
     private double safeNum(Object o) { return o == null ? 0.0 : ((Number) o).doubleValue(); }
     private double safeNumDefault(Object o, double def) { return o == null ? def : ((Number) o).doubleValue(); }
     private String safeStr(Object o) { return o == null ? "" : o.toString(); }
@@ -173,29 +159,16 @@ public class ConvictionScoringService {
     private double calculateValueScore(double navPercentile, double athDrawdown,
                                    double returnZScore, String assetCategory) {
         String cat = assetCategory != null ? assetCategory.toUpperCase() : "";
-
-        // Debt, gilt, bond, gold — PE signals are meaningless. Return neutral.
         if (cat.contains("DEBT") || cat.contains("GILT") || cat.contains("BOND")
                 || cat.contains("GOLD") || cat.contains("LIQUID")) {
             return 50.0;
         }
-
-        // High navPercentile = near 3yr high = expensive. Invert it.
         double percentileScore = invertNormalize(navPercentile, 0.1, 0.9) * 100;
-
-        // Deep ATH drawdown = opportunity. athDrawdown is negative (e.g. -0.22).
-        // Math.abs gives the magnitude; higher magnitude = more of an opportunity.
         double athScore = normalize(Math.abs(athDrawdown), 0.0, 0.40) * 100;
-
-        // Negative returnZScore = fund has had a poor recent year vs its own history = cheap.
-        // Invert: lower Z → higher score.
         double returnZNorm = invertNormalize(returnZScore, -2.0, 2.0) * 100;
-
-        // All active equity (index and active alike)
         return (percentileScore * 0.50) + (athScore * 0.30) + (returnZNorm * 0.20);
     }
 
-    // Mathematical Helpers
     private double normalize(double value, double minBound, double maxBound) {
         if (value <= minBound) return 0;
         if (value >= maxBound) return 1;
@@ -206,5 +179,11 @@ public class ConvictionScoringService {
         if (value <= minBound) return 1; 
         if (value >= maxBound) return 0;   
         return 1.0 - ((value - minBound) / (maxBound - minBound));
+    }
+
+    private String sanitizeAmfi(String amfi) {
+        if (amfi == null) return "";
+        String s = amfi.trim();
+        return s.replaceFirst("^0+(?!$)", "");
     }
 }

@@ -96,8 +96,8 @@ public class OrnsteinUhlenbeckService {
                         ou_buy_threshold = ?,
                         ou_sell_threshold = ?
                     WHERE amfi_code = ?
-                    AND calculation_date = (SELECT MAX(calculation_date) FROM fund_conviction_metrics)
-                    """, theta, mu, sigma, halfLife, valid, buyZ, sellZ, amfi);
+                    AND calculation_date = (SELECT MAX(calculation_date) FROM fund_conviction_metrics WHERE amfi_code = ?)
+                    """, theta, mu, sigma, halfLife, valid, buyZ, sellZ, amfi, amfi);
 
                 success++;
             } catch (Exception e) {

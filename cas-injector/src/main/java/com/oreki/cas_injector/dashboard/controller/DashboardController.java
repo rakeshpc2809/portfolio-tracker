@@ -50,7 +50,7 @@ public class DashboardController {
         @RequestParam(defaultValue = "75000") double sip,
         @RequestParam(defaultValue = "0") double lumpsum
     ) {
-        return ResponseEntity.ok(fullService.getFullPortfolio(pan, sip, lumpsum));
+        return ResponseEntity.ok(fullService.getFullPortfolioWithTactical(pan, sip, lumpsum));
     }
 
     @DeleteMapping("/reset")

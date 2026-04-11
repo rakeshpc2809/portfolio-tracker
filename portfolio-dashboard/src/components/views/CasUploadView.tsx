@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { uploadCas, triggerBackfill, triggerForceSync, fetchAdminStatus } from "@/services/api";
 import { Upload, ShieldCheck, FileText, AlertCircle, CheckCircle2, Database, Zap, Loader2, Info, TrendingUp } from "lucide-react";
 
-const CasUploadView: React.FC = () => {
+const CasUploadView: React.FC<{ pan: string }> = ({ pan }) => {
   const [file, setFile] = useState<File | null>(null);
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -73,7 +73,7 @@ const CasUploadView: React.FC = () => {
   const handleSync = async () => {
     setSyncing(true);
     try {
-      await triggerForceSync();
+      await triggerForceSync(pan);
     } catch (err: any) {
       alert(err.message);
     } finally {

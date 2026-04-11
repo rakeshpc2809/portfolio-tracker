@@ -62,6 +62,9 @@ public class SchemePerformanceDTO {
     // Tax Efficiency Metrics (Added for Bug 4)
     private double ltcgUnrealizedGain;
     private double stcgUnrealizedGain;
+    private int daysToNextLtcg;    // days until oldest STCG lot becomes LTCG-eligible
+    private double stcgValue;      // alias for stcgUnrealizedGain (keep for compat)
+    private double ltcgValue;      // alias for ltcgUnrealizedGain (keep for compat)
 
     // Conviction Sub-scores (Added for Design Improvement 5)
     private double yieldScore;

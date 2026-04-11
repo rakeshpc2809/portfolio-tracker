@@ -52,14 +52,6 @@ export const fetchTransactions = async (
   return response.json();
 };
 
-export const fetchUnifiedDashboard = async (pan: string, monthlySip: number = 75000, lumpsum: number = 0) => {
-  const response = await authenticatedFetch(
-    `${BASE_URL}/portfolio/${pan}/unified-dashboard?monthlySip=${monthlySip}&lumpsum=${lumpsum}`
-  );
-  if (!response.ok) throw new Error("Unified dashboard synchronization failed");
-  return response.json();
-};
-
 export const fetchTlhOpportunities = async (pan: string) => {
   const response = await authenticatedFetch(
     `${BASE_URL}/portfolio/${pan}/tax-loss-harvesting`
@@ -98,8 +90,8 @@ export const triggerBackfill = async () => {
   return response.text();
 };
 
-export const triggerForceSync = async () => {
-  const response = await authenticatedFetch(`${BASE_URL}/admin/force-sync`, {
+export const triggerForceSync = async (pan: string) => {
+  const response = await authenticatedFetch(`${BASE_URL}/admin/force-sync?pan=${pan}`, {
     method: 'POST'
   });
   if (!response.ok) {

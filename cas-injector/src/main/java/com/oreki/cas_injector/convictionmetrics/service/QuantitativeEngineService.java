@@ -37,6 +37,13 @@ public class QuantitativeEngineService {
         }
 
         try {
+            if (convictionMetricsRepository.getHistoryCount() == 0) {
+                log.warn("⚠️ Math Engine aborted: fund_history is empty. Please run 'Full History Refresh' first.");
+                lastStatusMessage = "Failed: History missing. Run 'Full History Refresh' first.";
+                isRunning.set(false);
+                return;
+            }
+
             log.info("🧮 Starting Advanced Quantitative Math Engine (Sortino, CVaR, MDD, NAV Signals, Hurst, Z-Score, OU, HMM)...");
             long startTime = System.currentTimeMillis();
 

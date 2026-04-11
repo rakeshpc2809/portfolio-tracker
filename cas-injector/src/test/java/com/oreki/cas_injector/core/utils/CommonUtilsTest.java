@@ -23,9 +23,23 @@ public class CommonUtilsTest {
         );
 
         BigDecimal xirr = CommonUtils.SOLVE_XIRR.apply(txs);
-        
-        // Expected approx 10%
         assertEquals(10.0, xirr.doubleValue(), 0.1);
+    }
+
+    @Test
+    public void testSolveXirr_ComplexMultiple() {
+        // Multi-stage investment
+        // Jan 1: -10,000
+        // Jul 1: -10,000
+        // Next Jan 1: 22,000  (approx 13-14% XIRR)
+        List<TransactionDTO> txs = Arrays.asList(
+            new TransactionDTO(new BigDecimal("-10000.00"), LocalDate.of(2023, 1, 1)),
+            new TransactionDTO(new BigDecimal("-10000.00"), LocalDate.of(2023, 7, 1)),
+            new TransactionDTO(new BigDecimal("22000.00"), LocalDate.of(2024, 1, 1))
+        );
+
+        BigDecimal xirr = CommonUtils.SOLVE_XIRR.apply(txs);
+        assertTrue(xirr.doubleValue() > 13.0 && xirr.doubleValue() < 15.0, "XIRR should be around 14%, got: " + xirr);
     }
 
     @Test

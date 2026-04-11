@@ -1,8 +1,9 @@
-import { motion } from 'framer-motion';
-import { Zap, TrendingUp, Target, ArrowDownRight, Scissors } from 'lucide-react';
+import { motion, type Variants } from 'framer-motion';
+import { useMemo } from 'react';
+import { Zap, TrendingUp, Target, ArrowDownRight, Scissors, ShieldAlert } from 'lucide-react';
 import CurrencyValue from '../ui/CurrencyValue';
 import { RecommendationDetailCard } from '../ui/RecommendationDetailCard';
-import { resolveReasoningMetadata } from '../../utils/formatters';
+import { resolveReasoningMetadata, formatCurrency } from '../../utils/formatters';
 import type { TacticalSignal } from '../../types/signals';
 
 export default function TodayBriefView({ 
@@ -39,114 +40,152 @@ export default function TodayBriefView({
   const harvestCount = payload.harvestOpportunities?.length || 0;
   const sipTotal = payload.sipPlan?.reduce((a: number, s: any) => a + s.amount, 0) || 0;
 
-  const container = {
+  const activeSipPlan = useMemo(() => 
+    (payload.sipPlan || []).filter((s: any) => s.amount > 0),
+    [payload.sipPlan]
+  );
+
+  const container: Variants = {
     hidden: { opacity: 0 },
     show: {
       opacity: 1,
-      transition: { staggerChildren: 0.05 }
+      transition: { staggerChildren: 0.08 }
     }
   };
 
-  const item = {
-    hidden: { opacity: 0, y: 10 },
-    show: { opacity: 1, y: 0 }
+  const item: Variants = {
+    hidden: { opacity: 0, y: 20, scale: 0.95 },
+    show: { 
+      opacity: 1, 
+      y: 0, 
+      scale: 1, 
+      transition: { 
+        type: "spring" as const, 
+        damping: 20, 
+        stiffness: 200 
+      } 
+    }
   };
 
   return (
     <div className="space-y-12 pb-32">
-      <header className="space-y-6">
-        <div>
-          <h2 className="text-muted text-[10px] font-medium uppercase tracking-[0.2em] mb-1">Intelligent Tactical Orchestrator</h2>
-          <p className="text-xl font-medium text-primary tracking-tight">Today's brief · {dateStr}</p>
+      <header className="space-y-8">
+        <div className="flex justify-between items-start">
+          <div className="space-y-1">
+            <h2 className="text-accent text-[10px] font-black uppercase tracking-[0.3em] animate-pulse">Tactical Orbit Control</h2>
+            <p className="text-2xl font-black text-primary tracking-tighter tabular-nums">Briefing · {dateStr}</p>
+          </div>
+          <div className="px-4 py-2 rounded-2xl bg-white/[0.03] border border-white/5 backdrop-blur-xl shadow-xl flex flex-col items-end group hover:border-buy/20 transition-all">
+            <span className="text-[8px] font-black uppercase tracking-widest text-muted opacity-60">System Orbit Return</span>
+            <span className={`text-lg font-black tabular-nums ${parseFloat(portfolioData.overallReturn) >= 0 ? 'text-buy glow-buy' : 'text-exit glow-exit'}`}>
+              {portfolioData.overallReturn}
+            </span>
+          </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-6 px-6 py-4 bg-white/[0.02] border border-white/5 rounded-xl">
-          <div className="flex items-center gap-3">
-            <div className={`w-2 h-2 rounded-full ${exitCount + sellCount > 0 ? 'bg-exit' : 'bg-buy'}`} />
-            <span className="text-[11px] text-secondary">
-              {exitCount + sellCount > 0 
-                ? `${exitCount + sellCount} funds need attention/exit` 
-                : 'No urgent sell actions'}
-            </span>
-          </div>
-          <div className="flex items-center gap-3 border-l border-white/5 pl-6">
-            <div className="w-2 h-2 rounded-full bg-accent" />
-            <span className="text-[11px] text-secondary">
-              SIP Budget: <CurrencyValue isPrivate={isPrivate} value={sipTotal} className="text-primary font-medium" />
-            </span>
-          </div>
-          {harvestCount > 0 && (
-            <div className="flex items-center gap-3 border-l border-white/5 pl-6">
-              <div className="w-2 h-2 rounded-full bg-buy" />
-              <span className="text-[11px] text-secondary">{harvestCount} TLH opportunities identified</span>
-            </div>
-          )}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          {[
+            { label: 'Attention Required', value: `${exitCount + sellCount} Assets`, color: exitCount + sellCount > 0 ? 'text-exit' : 'text-buy', icon: <ShieldAlert size={14}/>, bg: exitCount + sellCount > 0 ? 'bg-exit/10' : 'bg-buy/10' },
+            { label: 'Deployment Budget', value: formatCurrency(sipTotal), color: 'text-accent', icon: <Zap size={14} className="fill-current"/>, bg: 'bg-accent/10' },
+            { label: 'Tax Optimization', value: `${harvestCount} Signals`, color: 'text-buy', icon: <Scissors size={14}/>, bg: 'bg-buy/10' }
+          ].map((stat, i) => (
+            <motion.div 
+              key={stat.label}
+              initial={{ opacity: 0, x: -20 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ delay: i * 0.1 }}
+              className="px-6 py-4 bg-surface/40 backdrop-blur-xl border border-white/5 rounded-3xl flex items-center gap-4 group hover:border-white/10 transition-all shadow-lg"
+            >
+              <div className={`p-3 rounded-2xl ${stat.bg} ${stat.color} group-hover:scale-110 transition-transform shadow-inner`}>
+                {stat.icon}
+              </div>
+              <div className="space-y-0.5">
+                <p className="text-[9px] font-black uppercase tracking-widest text-muted opacity-60">{stat.label}</p>
+                <p className={`text-base font-black tabular-nums ${stat.color}`}>{isPrivate && stat.label.includes('Budget') ? '••••' : stat.value}</p>
+              </div>
+            </motion.div>
+          ))}
         </div>
       </header>
 
       {/* SECTION 1: MONTHLY SIP PLAN */}
-      <section className="space-y-6">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
-          <h3 className="text-muted text-[10px] font-medium uppercase tracking-widest flex items-center gap-2">
-            <Target size={12} className="text-accent" /> Monthly SIP Strategy
-          </h3>
-          <div className="flex flex-wrap items-center gap-8">
-            <div className="flex items-center gap-4">
-              <div className="flex items-center gap-2 text-[10px] uppercase tracking-widest text-muted">
-                <span>SIP Amount</span>
-                <CurrencyValue isPrivate={isPrivate} value={sipAmount} className="text-primary tabular-nums font-medium" />
+      <section className="space-y-8">
+        <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 px-2">
+          <div className="space-y-1">
+            <h3 className="text-muted text-[10px] font-black uppercase tracking-[0.2em] flex items-center gap-2">
+              <Target size={12} className="text-accent" /> Structural Deployment Plan
+            </h3>
+            <p className="text-xs text-secondary font-medium opacity-60 uppercase tracking-widest">Phased entry strategy based on current market pulse.</p>
+          </div>
+          
+          <div className="flex flex-wrap items-center gap-10 bg-white/[0.02] backdrop-blur-md p-4 rounded-[2rem] border border-white/5 shadow-xl">
+            <div className="flex items-center gap-6">
+              <div className="space-y-1">
+                <div className="flex justify-between text-[9px] font-black uppercase tracking-widest text-muted">
+                  <span>SIP Budget</span>
+                  <span className="text-accent"><CurrencyValue isPrivate={isPrivate} value={sipAmount} /></span>
+                </div>
+                <input 
+                  type="range" min="0" max="200000" step="5000" 
+                  value={sipAmount} 
+                  onChange={(e) => setSipAmount(parseInt(e.target.value) || 0)}
+                  className="w-40 h-1.5 bg-white/10 rounded-full appearance-none cursor-pointer accent-accent hover:accent-accent-bright transition-all"
+                />
               </div>
-              <input 
-                type="range" min="0" max="200000" step="1000" 
-                value={sipAmount} 
-                onChange={(e) => setSipAmount(parseInt(e.target.value) || 0)}
-                className="w-32 h-1 bg-white/10 rounded-lg appearance-none cursor-pointer accent-accent"
-              />
             </div>
-            <div className="flex items-center gap-3">
-              <label className="text-[10px] uppercase tracking-widest text-muted">Extra Lumpsum</label>
+            <div className="flex flex-col gap-1.5">
+              <label className="text-[9px] font-black uppercase tracking-widest text-muted">Tactical Lumpsum</label>
               <input 
                 type="number" 
                 value={lumpsum || ''} 
                 onChange={(e) => setLumpsum(parseInt(e.target.value) || 0)}
                 placeholder="₹0"
-                className="bg-surface-elevated border border-white/10 rounded-md px-3 py-1.5 text-xs text-primary tabular-nums focus:outline-none focus:border-indigo-500/50 transition-colors w-28"
+                className="bg-black/40 border border-white/10 rounded-xl px-4 py-2 text-xs text-primary tabular-nums font-bold focus:outline-none focus:border-accent/50 focus:ring-1 focus:ring-accent/20 transition-all w-32 shadow-inner"
               />
             </div>
           </div>
         </div>
 
-        <div className="space-y-2">
-          {payload.sipPlan.length === 0 ? (
-            <div className="py-10 text-center bg-surface border border-border rounded-xl">
-              <p className="text-muted text-xs italic">SIP plan not loaded. Check strategy sheet connection.</p>
+        <motion.div 
+          variants={container}
+          initial="hidden"
+          animate="show"
+          className="grid grid-cols-1 md:grid-cols-2 gap-3"
+        >
+          {activeSipPlan.length === 0 ? (
+            <div className="col-span-full py-16 text-center bg-surface/20 backdrop-blur-xl border border-dashed border-white/10 rounded-[2.5rem] space-y-4">
+              <Target size={40} className="text-muted/10 mx-auto" />
+              <p className="text-muted text-xs font-black uppercase tracking-widest opacity-40">No active SIP deployment targets</p>
             </div>
           ) : (
-            payload.sipPlan.map((s: any) => (
-              <div
+            activeSipPlan.map((s: any) => (
+              <motion.div
                 key={s.isin}
+                variants={item}
                 onClick={() => onFundClick(s.schemeName)}
-                className="flex items-center gap-4 px-5 py-3.5 bg-surface border border-border rounded-xl hover:border-white/10 hover:bg-white/[0.015] cursor-pointer transition-all group"
+                className="flex items-center gap-5 px-6 py-4 bg-surface/40 backdrop-blur-xl border border-white/5 rounded-3xl hover:border-white/20 hover:bg-white/[0.03] cursor-pointer transition-all group shadow-lg"
               >
-                <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${s.deployFlag === 'DEPLOY' ? 'bg-buy shadow-[0_0_8px_rgba(52,211,153,0.4)]' : 'bg-warning shadow-[0_0_8px_rgba(251,191,36,0.4)]'}`} />
-                <p className="flex-1 text-[13px] text-primary group-hover:text-white transition-colors truncate font-medium">
-                  {s.schemeName}
-                </p>
-                <span className="text-[10px] text-muted tabular-nums shrink-0 font-bold">{s.sipPct}%</span>
-                <div className="min-w-[90px] text-right">
-                  <span className={`text-[13px] font-bold tabular-nums ${s.deployFlag === 'DEPLOY' ? 'text-buy' : 'text-warning'}`}>
-                    {isPrivate ? '••••' : `₹${(s.amount / 1000).toFixed(0)}k`}
-                  </span>
+                <div className={`w-2 h-2 rounded-full shrink-0 shadow-lg ${s.deployFlag === 'DEPLOY' ? 'bg-buy animate-pulse' : 'bg-warning'}`} />
+                <div className="flex-1 min-w-0">
+                  <p className="text-[13px] text-primary group-hover:text-white transition-colors truncate font-black tracking-tight">
+                    {s.schemeName}
+                  </p>
+                  <p className="text-[10px] text-muted font-bold uppercase tracking-widest opacity-60 mt-0.5">Target: {s.sipPct}% Allocation</p>
                 </div>
-                <span className={`text-[8px] font-bold uppercase tracking-widest px-2 py-0.5 rounded shrink-0 ${
-                  s.deployFlag === 'DEPLOY' ? 'bg-buy/10 text-buy border border-buy/20' : 'bg-warning/10 text-warning border border-warning/20'
-                }`}>
-                  {s.deployFlag === 'DEPLOY' ? 'GO' : 'HOLD'}
-                </span>
-              </div>
+                <div className="text-right space-y-0.5">
+                  <p className={`text-sm font-black tabular-nums ${s.deployFlag === 'DEPLOY' ? 'text-buy' : 'text-warning'}`}>
+                    {isPrivate ? '••••' : `₹${(s.amount / 1000).toFixed(1)}k`}
+                  </p>
+                  <div className={`text-[8px] font-black uppercase tracking-[0.2em] px-2 py-0.5 rounded-full inline-block ${
+                    s.deployFlag === 'DEPLOY' ? 'bg-buy/10 text-buy border border-buy/20' : 'bg-warning/10 text-warning border border-warning/20'
+                  }`}>
+                    {s.deployFlag === 'DEPLOY' ? 'Execute' : 'Await Pulse'}
+                  </div>
+                </div>
+              </motion.div>
             ))
           )}
-        </div>
+        </motion.div>
       </section>
 
       {/* SECTION 2: OPPORTUNISTIC TOP-UPS (BUY) */}

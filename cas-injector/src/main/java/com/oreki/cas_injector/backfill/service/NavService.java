@@ -86,8 +86,8 @@ public class NavService {
                 String[] columns = line.split(";");
                 
                 // columns[0] = AMFI Code, columns[3] = Name, columns[4] = NAV
-                if (columns.length >= 5 && columns[0].matches("\\d+")) {
-                    String amfiCode = columns[0];
+                if (columns.length >= 5 && columns[0].trim().matches("\\d+")) {
+                    String amfiCode = sanitizeAmfi(columns[0]);
                     String name = columns[3];
                     String navString = columns[4];
 
@@ -112,12 +112,19 @@ public class NavService {
      * It just instantly pulls the answer from memory.
      */
     public SchemeDetailsDTO getLatestSchemeDetails(String amfiCode) {
-        if (amfiCode == null || amfiCode.isEmpty()) {
+        String code = sanitizeAmfi(amfiCode);
+        if (code.isEmpty()) {
             return new SchemeDetailsDTO(BigDecimal.ZERO, "UNKNOWN", "N/A");
         }
         
         // 0ms lookup! No Cloudflare, no 502 Bad Gateway.
-        return masterFundMap.getOrDefault(amfiCode, new SchemeDetailsDTO(BigDecimal.ZERO, "UNKNOWN", "N/A"));
+        return masterFundMap.getOrDefault(code, new SchemeDetailsDTO(BigDecimal.ZERO, "UNKNOWN", "N/A"));
+    }
+
+    private String sanitizeAmfi(String amfi) {
+        if (amfi == null) return "";
+        String s = amfi.trim();
+        return s.replaceFirst("^0+(?!$)", "");
     }
 
 }

@@ -89,18 +89,65 @@ public class RebalanceEngine {
         }
 
         // ══════════════════════════════════════════════════════════════════════
-        // CASE 1: DROPPED FUND — full exit logic
+        // CASE 1: DROPPED FUND — smart exit logic
         // ══════════════════════════════════════════════════════════════════════
         if ("DROPPED".equals(status)) {
             action = SignalType.EXIT;
-            justifications.add("Strategic: Explicitly marked as DROPPED. Target is 0%.");
-            applyTaxJustifications(holding, justifications, STCG_WAIT_DAYS);
-            if (action == SignalType.EXIT && holding.getDaysToNextLtcg() > 0
-                    && holding.getDaysToNextLtcg() <= STCG_WAIT_DAYS) {
+            
+            // ── HURST SAFETY GATE: Trending fund — let it grow ───
+            if (H > H_TRENDING && z < Z_SELL_STRONG) {
                 action = SignalType.HOLD;
+                justifications.add(String.format(Locale.US,
+                    "Wave Rider: Fund is DROPPED, but H=%.2f indicates a strong trending regime. " +
+                    "Holding position to capture remaining upside before exiting.", H));
+                
+                ReasoningMetadata waveRiderMeta = buildWaveRiderMetadata(holding, z, H, vt, regime, actualPct, metrics);
+                ReasoningMetadata meta = new ReasoningMetadata(
+                    holding.getSchemeName() + " is trending — holding dropped fund",
+                    waveRiderMeta.technicalLabel(),
+                    "Riding the Wave — SIP stopped, but strong uptrend (H=" + String.format(Locale.US, "%.2f", H) + "). Holding to maximize exit value.",
+                    waveRiderMeta.uiMetaphor(),
+                    waveRiderMeta.zScore(), waveRiderMeta.hurstExponent(), waveRiderMeta.volatilityTax(), waveRiderMeta.hurstRegime(), 
+                    waveRiderMeta.zScoreLabel(), waveRiderMeta.historicalRarityPct(), waveRiderMeta.harvestAmountRupees(), 
+                    waveRiderMeta.harvestExplanation(), waveRiderMeta.ouHalfLifeDays(), waveRiderMeta.ouInterpretation(), 
+                    waveRiderMeta.featureAttribution()
+                );
+                return buildSignal(holding, amfiCode, action, diffAmount, targetPct, actualPct,
+                        sipPct, status, metrics, justifications, meta);
+            } 
+            
+            if (z >= Z_SELL_STRONG) {
+                justifications.add(String.format(Locale.US,
+                    "Overheated: Z-Score +%.2fσ. Fund is DROPPED and statistically expensive. Liquidating now.", z));
+            } else {
+                justifications.add("Strategic Exit: Fund is marked as DROPPED (SIP stopped). Phasing out to redeploy capital.");
             }
 
-            ReasoningMetadata meta = buildDroppedMetadata(holding, z, H, vt, regime, metrics);
+            // Apply Tax Logic (Overrides action to HOLD if waiting for LTCG is optimal)
+            action = applyTaxOverride(holding, action, justifications, totalPortfolioValue, actualPct, STCG_WAIT_DAYS, metrics);
+
+            // If applyTaxOverride returned SELL (e.g. for HIFO), revert it to EXIT for the exit queue
+            if (action == SignalType.SELL) {
+                action = SignalType.EXIT; 
+            }
+
+            ReasoningMetadata meta;
+            if (action == SignalType.HOLD) {
+                ReasoningMetadata waveRiderMeta = buildWaveRiderMetadata(holding, z, H, vt, regime, actualPct, metrics);
+                meta = new ReasoningMetadata(
+                    holding.getSchemeName() + " is tax-shielded — holding dropped fund",
+                    waveRiderMeta.technicalLabel(),
+                    "Tax Shield Active — SIP stopped, but waiting for LTCG benefits before exiting.",
+                    waveRiderMeta.uiMetaphor(),
+                    waveRiderMeta.zScore(), waveRiderMeta.hurstExponent(), waveRiderMeta.volatilityTax(), waveRiderMeta.hurstRegime(), 
+                    waveRiderMeta.zScoreLabel(), waveRiderMeta.historicalRarityPct(), waveRiderMeta.harvestAmountRupees(), 
+                    waveRiderMeta.harvestExplanation(), waveRiderMeta.ouHalfLifeDays(), waveRiderMeta.ouInterpretation(), 
+                    waveRiderMeta.featureAttribution()
+                );
+            } else {
+                meta = buildDroppedMetadata(holding, z, H, vt, regime, metrics);
+            }
+
             return buildSignal(holding, amfiCode, action, diffAmount, targetPct, actualPct,
                     sipPct, status, metrics, justifications, meta);
         }

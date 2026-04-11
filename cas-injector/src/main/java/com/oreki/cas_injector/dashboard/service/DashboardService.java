@@ -45,6 +45,12 @@ public class DashboardService {
     private final NavService navService;
     private final HistoricalNavRepository historicalNavRepo;
 
+    private String sanitizeAmfi(String amfi) {
+        if (amfi == null) return "";
+        String s = amfi.trim();
+        return s.replaceFirst("^0+(?!$)", "");
+    }
+
     @Cacheable(value = "dashboardSummary", key = "#pan")
     public DashboardSummaryDTO getInvestorSummary(String pan) {
         Optional<Investor> investorOpt = investorRepo.findById(pan);
@@ -67,19 +73,16 @@ public class DashboardService {
 
         List<TransactionDTO> totalCashFlow=new ArrayList<>();
         
-        // 🚀 EFFICIENCY FIX: Pre-group audits by Scheme ID to avoid O(n*m) scan inside the loop
         List<CapitalGainAudit> allInvestorAudits = auditRepo.findAllBySellTransactionSchemeFolioInvestorPan(pan);
         Map<Long, List<CapitalGainAudit>> auditsBySchemeId = allInvestorAudits.stream()
             .collect(Collectors.groupingBy(a -> a.getSellTransaction().getScheme().getId()));
 
-        // 1. Calculate the Breakdown per Scheme
         List<SchemePerformanceDTO> breakdown = investor.getFolios().stream()
             .flatMap(f -> f.getSchemes().stream())
             .map(scheme -> {
                 List<TaxLot> allLots = scheme.getTaxLots();
                 List<CapitalGainAudit> schemeAudits = auditsBySchemeId.getOrDefault(scheme.getId(), List.of());
 
-                // A. TOTAL INVESTED (Historical Gross)
                 BigDecimal totalInvested = scheme.getTransactions().stream()
                     .filter(t -> "BUY".equalsIgnoreCase(t.getTransactionType()) || 
                     "STAMP_DUTY".equalsIgnoreCase(t.getTransactionType()))
@@ -87,40 +90,30 @@ public class DashboardService {
                     .map(CommonUtils.SCALE_MONEY)
                     .reduce(BigDecimal.ZERO, BigDecimal::add);
 
-                // B. SOLD AMOUNT (Cost basis of exited units)
                 BigDecimal soldAmountCost = schemeAudits.stream()
                     .map(audit -> audit.getUnitsMatched().multiply(audit.getTaxLot().getCostBasisPerUnit()))
                     .map(CommonUtils.SCALE_MONEY)
                     .reduce(BigDecimal.ZERO, BigDecimal::add);
 
-                // C. CURRENT INVESTED (Net Principal currently at risk)
                 BigDecimal currentInvested = allLots.stream()
                     .filter(lot -> "OPEN".equalsIgnoreCase(lot.getStatus()))
                     .map(lot -> lot.getRemainingUnits().multiply(lot.getCostBasisPerUnit()))
                     .map(CommonUtils.SCALE_MONEY)
                     .reduce(BigDecimal.ZERO, BigDecimal::add);
 
-                // D. REALIZED GAIN (Profit/Loss booked)
                 BigDecimal schemeGain = schemeAudits.stream()
                     .map(CapitalGainAudit::getRealizedGain)
                     .map(CommonUtils.SCALE_MONEY)
                     .reduce(BigDecimal.ZERO, BigDecimal::add);
 
-                // E. TRANSACTION COUNT (Excluding Stamp Duty)
                 long cleanTxCount = scheme.getTransactions().stream()
                     .filter(t -> "BUY".equalsIgnoreCase(t.getTransactionType()) || 
                     "SELL".equalsIgnoreCase(t.getTransactionType())).count();
 
-                // F. CURRENT VALUE
                 SchemeDetailsDTO schemeDetails = navService.getLatestSchemeDetails(scheme.getAmfiCode());
-
-                // 2. Extract the NAV for your valuation math
                 BigDecimal currentNav = schemeDetails.getNav();
-
-                // 3. Extract the Category to determine your Rebalancing Bucket
                 String amfiCategory = schemeDetails.getCategory().toUpperCase();
 
-                // 4. Enhanced Bucket Logic for 2026
                 String bucket;
                 if (amfiCategory.contains("ARBITRAGE")) {
                     bucket = "SAFE_REBALANCER_EQUITY_TAX"; 
@@ -138,18 +131,15 @@ public class DashboardService {
                     bucket = "OTHERS_CHECK_ISIN";
                 }
                     
-                // Calculate total units currently held
                 BigDecimal unitsHeld = allLots.stream()
                     .filter(lot -> "OPEN".equalsIgnoreCase(lot.getStatus()))
                     .map(TaxLot::getRemainingUnits)
                     .reduce(BigDecimal.ZERO, BigDecimal::add);
 
-                // Current Value = Units * Latest Price
                 BigDecimal currentValue = Optional.of(unitsHeld.multiply(currentNav))
                     .map(CommonUtils.SCALE_MONEY)
                     .orElse(BigDecimal.ZERO);
 
-                // Compute unrealized LTCG vs STCG (Bug 4 fix)
                 double ltcgUnrealized = allLots.stream()
                     .filter(lot -> "OPEN".equalsIgnoreCase(lot.getStatus()))
                     .mapToDouble(lot -> {
@@ -174,14 +164,13 @@ public class DashboardService {
                         return 0.0;
                     }).sum();
 
-                // Unrealized Gain = Current Value - What you paid for these specific units
                 BigDecimal unrealizedGain =  Optional.of(currentValue.subtract(currentInvested))
                     .map(CommonUtils.SCALE_MONEY)
                     .orElse(BigDecimal.ZERO);
 
-           List<TransactionDTO> cashFlows = scheme.getTransactions().stream()
+                List<TransactionDTO> cashFlows = scheme.getTransactions().stream()
                     .map(t -> {
-                        BigDecimal preciseAmount = historicalNavRepo.findByAmfiCodeAndNavDate(scheme.getAmfiCode(), t.getDate())
+                        BigDecimal preciseAmount = historicalNavRepo.findByAmfiCodeAndNavDate(sanitizeAmfi(scheme.getAmfiCode()), t.getDate())
                             .map(h -> h.getNav().multiply(t.getUnits().abs()))
                             .orElse(t.getAmount());
                             
@@ -190,11 +179,8 @@ public class DashboardService {
                     .collect(Collectors.toList());
                                 
                 FundStatus status = CommonUtils.GET_STATUS.apply(unitsHeld);
-
                 totalCashFlow.addAll(cashFlows);
-
                 cashFlows.sort(Comparator.comparing(TransactionDTO::getDate));
-
 
                 if (status == FundStatus.ACTIVE) {
                     cashFlows.add(new TransactionDTO(currentValue, LocalDate.now()));
@@ -202,7 +188,6 @@ public class DashboardService {
               
                 BigDecimal xirrValue = CommonUtils.SOLVE_XIRR.apply(cashFlows);
                 String displayXirr = CommonUtils.SCALE_MONEY.apply(xirrValue).toString() + "%";
-
 
                 return SchemePerformanceDTO.builder()
                     .schemeName(scheme.getName())
@@ -226,7 +211,6 @@ public class DashboardService {
             })
             .collect(Collectors.toList());
 
-        // 2. Aggregate Totals for the Dashboard
         BigDecimal aggregateTotalInvested = breakdown.stream()
             .map(SchemePerformanceDTO::getTotalInvested)
             .map(CommonUtils.SCALE_MONEY)
@@ -274,14 +258,11 @@ public class DashboardService {
             .reduce(BigDecimal.ZERO, BigDecimal::add);
 
         totalCashFlow.add(new TransactionDTO(totalPortfolioValue, LocalDate.now()));
-
         totalCashFlow.sort(Comparator.comparing(TransactionDTO::getDate));
         
         BigDecimal totalXirr = CommonUtils.SOLVE_XIRR.apply(totalCashFlow);
-
         String overallXirr = CommonUtils.SCALE_MONEY.apply(totalXirr) + "%";
         
-
         return DashboardSummaryDTO.builder()
             .investorName(investor.getName())
             .totalFolios(investor.getFolios().size())

@@ -125,8 +125,8 @@ public class BucketZScorerService {
             UPDATE fund_conviction_metrics 
             SET composite_quant_score = ?, bucket_peer_count = ?
             WHERE amfi_code = ?
-            AND calculation_date = (SELECT MAX(calculation_date) FROM fund_conviction_metrics)
-            """, cqsScore, peerCount, amfi);
+            AND calculation_date = (SELECT MAX(calculation_date) FROM fund_conviction_metrics WHERE amfi_code = ?)
+            """, cqsScore, peerCount, amfi, amfi);
     }
 
     private double zZScore(double val, double mean, double std) {

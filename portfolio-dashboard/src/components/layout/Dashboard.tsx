@@ -1,5 +1,4 @@
 import { useState } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
 import { 
   LayoutDashboard, 
   TrendingUp, 
@@ -73,13 +72,17 @@ export default function Dashboard({
     Math.max(1, (portfolioData?.schemeBreakdown ?? []).length)
   );
 
+  const headerGlow = parseFloat(portfolioData.overallXirr || '0') > 0 
+    ? 'after:bg-buy/[0.02]' 
+    : 'after:bg-exit/[0.02]';
+
   return (
     <div className="min-h-screen bg-background text-primary font-sans selection:bg-accent/30">
       <div className="fixed inset-0 pointer-events-none opacity-40" 
            style={{ background: 'radial-gradient(ellipse 70% 40% at 15% 0%, rgba(129,140,248,0.07) 0%, transparent 55%), radial-gradient(ellipse 50% 30% at 85% 100%, rgba(52,211,153,0.04) 0%, transparent 50%)' }} 
       />
 
-      <header className="sticky top-0 z-[90] border-b border-border bg-background/80 backdrop-blur-md px-8 py-4 flex justify-between items-center">
+      <header className={`sticky top-0 z-[90] border-b border-border bg-background/80 backdrop-blur-md px-8 py-4 flex justify-between items-center overflow-hidden after:absolute after:inset-0 after:pointer-events-none ${headerGlow}`}>
         <div className="flex items-center gap-10">
           <div className="flex items-center gap-3">
             <div className="w-6 h-6 bg-accent rounded-md flex items-center justify-center shadow-[0_0_15px_rgba(129,140,248,0.4)]">
@@ -89,12 +92,19 @@ export default function Dashboard({
             <h1 className="text-[10px] font-bold uppercase tracking-[0.2em] text-accent">Portfolio OS</h1>
           </div>
 
-          <div className="hidden lg:flex items-center gap-8 border-l border-border pl-8">
+          <div className="hidden lg:flex items-center gap-3 border-l border-border pl-8">
             {stats.map(s => (
-              <div key={s.label} className="space-y-0.5 group cursor-default">
-                <p className="text-[9px] uppercase tracking-widest text-muted transition-colors group-hover:text-secondary">{s.label}</p>
-                <p className={`text-sm font-medium tabular-nums ${s.color || 'text-primary'} ${s.glow || ''}`}>{mask(s.value)}</p>
-              </div>
+              <button
+                key={s.label}
+                className="group flex items-center gap-2 px-3 py-1.5 rounded-xl border border-transparent transition-all duration-200 hover:border-white/20 active:scale-95"
+              >
+                <span className="text-[9px] uppercase tracking-widest text-muted group-hover:text-secondary transition-colors">
+                  {s.label}
+                </span>
+                <span className={`text-sm font-semibold num-display ${s.color || 'text-primary'} ${s.glow || ''}`}>
+                  {mask(s.value)}
+                </span>
+              </button>
             ))}
           </div>
         </div>
@@ -133,60 +143,50 @@ export default function Dashboard({
             ))}
           </Tabs.List>
 
-          <AnimatePresence mode="wait">
-            <motion.div
-              key={activeTab}
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -10 }}
-              transition={{ duration: 0.2, ease: "easeOut" }}
-            >
-              <Tabs.Content value="today" className="outline-none focus:ring-0">
-                <TodayBriefView 
-                  portfolioData={portfolioData}
-                  sipAmount={sipAmount}
-                  setSipAmount={setSipAmount}
-                  lumpsum={lumpsum}
-                  setLumpsum={setLumpsum}
-                  onFundClick={setSelectedFundName}
-                  isPrivate={isPrivate}
-                />
-              </Tabs.Content>
-              
-              <Tabs.Content value="portfolio" className="outline-none focus:ring-0">
-                <PortfolioView portfolioData={portfolioData} isPrivate={isPrivate} />
-              </Tabs.Content>
+          <Tabs.Content value="today" className="outline-none focus:ring-0">
+            <TodayBriefView 
+              portfolioData={portfolioData}
+              sipAmount={sipAmount}
+              setSipAmount={setSipAmount}
+              lumpsum={lumpsum}
+              setLumpsum={setLumpsum}
+              onFundClick={setSelectedFundName}
+              isPrivate={isPrivate}
+            />
+          </Tabs.Content>
+          
+          <Tabs.Content value="portfolio" className="outline-none focus:ring-0">
+            <PortfolioView portfolioData={portfolioData} isPrivate={isPrivate} />
+          </Tabs.Content>
 
-              <Tabs.Content value="funds" className="outline-none focus:ring-0">
-                <FundsListView 
-                  portfolioData={portfolioData} 
-                  onFundClick={setSelectedFundName}
-                  isPrivate={isPrivate}
-                />
-              </Tabs.Content>
+          <Tabs.Content value="funds" className="outline-none focus:ring-0">
+            <FundsListView 
+              portfolioData={portfolioData} 
+              onFundClick={setSelectedFundName}
+              isPrivate={isPrivate}
+            />
+          </Tabs.Content>
 
-              <Tabs.Content value="rebalance" className="outline-none focus:ring-0">
-                <RebalanceView 
-                  portfolioData={portfolioData}
-                  sipAmount={sipAmount}
-                  setSipAmount={setSipAmount}
-                  isPrivate={isPrivate}
-                />
-              </Tabs.Content>
-              
-              <Tabs.Content value="tax" className="outline-none focus:ring-0">
-                <TaxView portfolioData={portfolioData} isPrivate={isPrivate} pan={investorPan} />
-              </Tabs.Content>
-              
-              <Tabs.Content value="ledger" className="outline-none focus:ring-0">
-                <LedgerView investorPan={investorPan} isPrivate={isPrivate} />
-              </Tabs.Content>
+          <Tabs.Content value="rebalance" className="outline-none focus:ring-0">
+            <RebalanceView 
+              portfolioData={portfolioData}
+              sipAmount={sipAmount}
+              setSipAmount={setSipAmount}
+              isPrivate={isPrivate}
+            />
+          </Tabs.Content>
+          
+          <Tabs.Content value="tax" className="outline-none focus:ring-0">
+            <TaxView portfolioData={portfolioData} isPrivate={isPrivate} pan={investorPan} />
+          </Tabs.Content>
+          
+          <Tabs.Content value="ledger" className="outline-none focus:ring-0">
+            <LedgerView investorPan={investorPan} isPrivate={isPrivate} />
+          </Tabs.Content>
 
-              <Tabs.Content value="upload" className="outline-none focus:ring-0">
-                <CasUploadView />
-              </Tabs.Content>
-            </motion.div>
-          </AnimatePresence>
+          <Tabs.Content value="upload" className="outline-none focus:ring-0">
+            <CasUploadView pan={investorPan} />
+          </Tabs.Content>
         </Tabs.Root>
       </main>
 

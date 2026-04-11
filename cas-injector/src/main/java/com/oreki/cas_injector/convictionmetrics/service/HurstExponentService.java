@@ -17,8 +17,8 @@ public class HurstExponentService {
     private final JdbcTemplate jdbcTemplate;
 
     // Regime thresholds — tuned for mutual fund daily NAV series
-    private static final double MEAN_REVERTING_THRESHOLD = 0.45;
-    private static final double TRENDING_THRESHOLD       = 0.55;
+    private static final double MEAN_REVERTING_THRESHOLD = 0.47;
+    private static final double TRENDING_THRESHOLD       = 0.53;
     private static final int    LOOKBACK_DAYS            = 252;
     private static final int    LOOKBACK_SHORT           = 20;
     private static final int    LOOKBACK_MID             = 60;
@@ -89,8 +89,8 @@ public class HurstExponentService {
                         hurst_60d             = ?,
                         multi_scale_regime    = ?
                     WHERE amfi_code = ?
-                    AND calculation_date = (SELECT MAX(calculation_date) FROM fund_conviction_metrics)
-                    """, hurst, volTax, regime, rarityPct, hurstShort, hurstMid, multiScaleRegime, amfi);
+                    AND calculation_date = (SELECT MAX(calculation_date) FROM fund_conviction_metrics WHERE amfi_code = ?)
+                    """, hurst, volTax, regime, rarityPct, hurstShort, hurstMid, multiScaleRegime, amfi, amfi);
 
                 success++;
             } catch (Exception e) {
@@ -108,19 +108,22 @@ public class HurstExponentService {
     }
 
     /**
-     * R/S Analysis — Hurst Exponent calculation using Apache Commons Math.
+     * R/S Analysis — Hurst Exponent calculation using corrected Rescaled Range.
+     * Uses Anis-Lloyd correction for expected R/S of a random walk to reduce bias in small samples.
      * @param returns  Array of log daily returns (chronological order)
      * @return         Hurst exponent H ∈ [0, 1]
      */
     double calculateHurst(double[] returns) {
         int n = returns.length;
+        if (n < 10) return 0.5;
+
         DescriptiveStatistics stats = new DescriptiveStatistics(returns);
         double mean = stats.getMean();
         double S = stats.getStandardDeviation();
 
         if (S == 0) return 0.5;
 
-        // Cumulative deviation series
+        // 1. Calculate Rescaled Range (R/S)
         double[] Y = new double[n];
         double cumDev = 0;
         for (int i = 0; i < n; i++) {
@@ -128,15 +131,25 @@ public class HurstExponentService {
             Y[i] = cumDev;
         }
 
-        // Range (R) = max cumulative deviation − min cumulative deviation
-        double max = Arrays.stream(Y).max().orElse(0);
-        double min = Arrays.stream(Y).min().orElse(0);
+        double max = -Double.MAX_VALUE;
+        double min = Double.MAX_VALUE;
+        for (double val : Y) {
+            if (val > max) max = val;
+            if (val < min) min = val;
+        }
         double R = max - min;
+        double rsObserved = R / S;
 
-        if (R == 0) return 0.5;
-
-        // H = log(R/S) / log(N)
-        return Math.log(R / S) / Math.log(n);
+        // 2. Anis-Lloyd Correction: Expected R/S for a random walk of size n
+        // E(R/S)_n = [ (n-0.5)/n * (n*pi/2)^-0.5 ] * sum_{r=1}^{n-1} [ (n-r)/r ]^0.5
+        // A simpler but robust approximation for n > 20:
+        double expectedRS = ((double) n - 0.5) / n * Math.sqrt(Math.PI * n / 2.0);
+        
+        // 3. H = 0.5 + log(rsObserved / expectedRS) / log(n)
+        // This anchors the result to 0.5 for random walks and measures deviation.
+        double h = 0.5 + (Math.log(rsObserved) - Math.log(expectedRS)) / Math.log(n);
+        
+        return Math.max(0.0, Math.min(1.0, h));
     }
 
     /**

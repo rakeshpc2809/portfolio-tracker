@@ -87,8 +87,8 @@ public class HmmRegimeService {
                             hmm_bear_prob = ?,
                             hmm_transition_bear = ?
                         WHERE amfi_code = ?
-                        AND calculation_date = (SELECT MAX(calculation_date) FROM fund_conviction_metrics)
-                        """, state, bullProb, bearProb, transBear, amfi);
+                        AND calculation_date = (SELECT MAX(calculation_date) FROM fund_conviction_metrics WHERE amfi_code = ?)
+                        """, state, bullProb, bearProb, transBear, amfi, amfi);
                 }
 
             } catch (Exception e) {
