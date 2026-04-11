@@ -10,6 +10,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
@@ -28,8 +29,10 @@ import com.oreki.cas_injector.rebalancing.dto.SipLineItem;
 import com.oreki.cas_injector.rebalancing.dto.StrategyTarget;
 import com.oreki.cas_injector.rebalancing.dto.TacticalSignal;
 import com.oreki.cas_injector.rebalancing.dto.ReasoningMetadata;
+import com.oreki.cas_injector.taxmanagement.dto.TlhOpportunity;
 import com.oreki.cas_injector.taxmanagement.dto.TaxSimulationResult;
 import com.oreki.cas_injector.taxmanagement.service.TaxSimulatorService;
+import com.oreki.cas_injector.taxmanagement.service.TaxLossHarvestingService;
 import com.oreki.cas_injector.transactions.model.TaxLot;
 import com.oreki.cas_injector.transactions.repository.TaxLotRepository;
 
@@ -47,12 +50,16 @@ public class PortfolioOrchestrator {
     private final SchemeRepository schemeRepository;
     private final TaxSimulatorService taxSimulator;
     private final JdbcTemplate jdbcTemplate;
-    @SuppressWarnings("unused")
     private final SystemicRiskMonitorService systemicRiskMonitor;
     private final ConvictionScoringService convictionScoringService;
     private final PositionSizingService positionSizingService;
     private final LotAggregationService lotAggregationService;
     private final RebalanceEngine rebalanceEngine;
+    private final HierarchicalRiskParityService hrpService;
+    private final TaxLossHarvestingService tlhService;
+
+    @Value("${hrp.blend.ratio:0.5}")
+    private double hrpBlendRatio;
 
     // ==========================================
     // 🌟 MODE 1: MONTHLY SIP PLAN (Pure Sheet)
@@ -60,6 +67,7 @@ public class PortfolioOrchestrator {
     public List<SipLineItem> computeSipPlan(String pan, double sipAmount) {
         List<StrategyTarget> targets = strategyService.fetchLatestStrategy();
         Map<String, MarketMetrics> metrics = fetchLiveMetricsMap(pan);
+        List<TlhOpportunity> tlhOpps = tlhService.scanForOpportunities(pan);
 
         return targets.stream()
             .filter(t -> t.sipPct() > 0 && !"dropped".equalsIgnoreCase(t.status()))
@@ -73,6 +81,15 @@ public class PortfolioOrchestrator {
                 String note = flag.equals("CAUTION_EXPENSIVE")
                     ? "Fund at " + Math.round(m.navPercentile3yr()*100) + "% of 3yr range. Consider deferring."
                     : "Deploy as per strategy.";
+
+                // Check for SIP Redirect
+                for (TlhOpportunity opp : tlhOpps) {
+                    if (opp.type() == TlhOpportunity.OpportunityType.SIP_REDIRECT && opp.amfiCode().equals(amfiCode)) {
+                        flag = "SIP_REDIRECT_ADVISED";
+                        note = opp.recommendation();
+                        break;
+                    }
+                }
 
                 return new SipLineItem(t.schemeName(), t.isin(), amfiCode,
                     amount, t.sipPct(), t.targetPortfolioPct(), t.status(), flag, note);
@@ -107,6 +124,19 @@ public class PortfolioOrchestrator {
         
         List<TacticalSignal> opportunisticDrafts = new ArrayList<>();
 
+        Map<String, String> nameToAmfiMap = holdings.stream()
+            .collect(Collectors.toMap(AggregatedHolding::getSchemeName, h -> amfiCodeFor(h), (a, b) -> a));
+
+        List<String> heldAmfiCodes = holdings.stream()
+            .map(h -> nameToAmfiMap.get(h.getSchemeName()))
+            .filter(c -> c != null && !c.isEmpty())
+            .collect(Collectors.toList());
+        Map<String, Double> hrpWeights = hrpService.computeHrpWeights(heldAmfiCodes);
+        Map<String, Double> actualWeights = holdings.stream()
+            .filter(h -> nameToAmfiMap.get(h.getSchemeName()) != null)
+            .collect(Collectors.toMap(h -> nameToAmfiMap.get(h.getSchemeName()), h -> h.getCurrentValue() / Math.max(totalPortfolioValue, 1.0)));
+        List<String> concentrationRisks = hrpService.computeHercConcentrationSignal(hrpWeights, actualWeights);
+
         for (StrategyTarget target : targets) {
             if ("dropped".equalsIgnoreCase(target.status())) continue;
 
@@ -114,8 +144,30 @@ public class PortfolioOrchestrator {
             String amfi = amfiCodeFor(target);
             MarketMetrics metrics = metricsMap.getOrDefault(amfi, defaultMetrics());
             
-            TacticalSignal signal = rebalanceEngine.evaluate(holding, target, metrics, totalPortfolioValue, amfi);
+            double effectiveTargetPct = target.targetPortfolioPct();
+            boolean hrpActive = false;
+            if (hrpWeights.containsKey(amfi)) {
+                double hrpPct = hrpWeights.get(amfi) * 100.0;
+                effectiveTargetPct = (1.0 - hrpBlendRatio) * target.targetPortfolioPct() + hrpBlendRatio * hrpPct;
+                if (Math.abs(effectiveTargetPct - target.targetPortfolioPct()) > 0.5) {
+                    hrpActive = true;
+                }
+            }
+
+            StrategyTarget adjustedTarget = new StrategyTarget(target.isin(), target.schemeName(), effectiveTargetPct, target.sipPct(), target.status(), target.bucket());
+
+            TacticalSignal signal = rebalanceEngine.evaluate(holding, adjustedTarget, metrics, totalPortfolioValue, amfi, holdings, nameToAmfiMap);
             
+            if (hrpActive) {
+                signal = setHrpActive(signal);
+            }
+
+            if (concentrationRisks.contains(amfi)) {
+                List<String> justs = new ArrayList<>(signal.justifications());
+                justs.add("📊 HERC Concentration Alert: This fund's cluster is contributing disproportionate risk to your portfolio. Trimming improves diversification even if nominal drift looks small.");
+                signal = createSignal(signal, signal.action(), signal.amount(), justs);
+            }
+
             // We only care about BUY/WATCH signals in this mode
             if (signal.action() == SignalType.BUY || signal.action() == SignalType.WATCH) {
                 // Apply concentration guard if it's a BUY
@@ -168,6 +220,9 @@ public class PortfolioOrchestrator {
 
         List<TacticalSignal> exitPlan = new ArrayList<>();
 
+        Map<String, String> nameToAmfiMap = holdings.stream()
+            .collect(Collectors.toMap(AggregatedHolding::getSchemeName, h -> amfiCodeFor(h), (a, b) -> a));
+
         for (AggregatedHolding h : holdings) {
             StrategyTarget target = targets.stream()
                 .filter(t -> t.isin().equalsIgnoreCase(h.getIsin()) || t.schemeName().equalsIgnoreCase(h.getSchemeName()))
@@ -180,7 +235,7 @@ public class PortfolioOrchestrator {
             String amfi = amfiCodeFor(h);
             MarketMetrics metrics = metricsMap.getOrDefault(amfi, defaultMetrics());
             
-            TacticalSignal signal = rebalanceEngine.evaluate(h, target, metrics, totalPortfolioValue, amfi);
+            TacticalSignal signal = rebalanceEngine.evaluate(h, target, metrics, totalPortfolioValue, amfi, holdings, nameToAmfiMap);
             if (signal.action() == SignalType.EXIT || (signal.action() == SignalType.HOLD && "DROPPED".equals(signal.fundStatus()))) {
                 exitPlan.add(signal);
             }
@@ -214,6 +269,9 @@ public class PortfolioOrchestrator {
 
         List<TacticalSignal> sellSignals = new ArrayList<>();
 
+        Map<String, String> nameToAmfiMap = holdings.stream()
+            .collect(Collectors.toMap(AggregatedHolding::getSchemeName, h -> amfiCodeFor(h), (a, b) -> a));
+
         for (StrategyTarget target : targets) {
             if ("dropped".equalsIgnoreCase(target.status())) continue; 
             
@@ -223,7 +281,7 @@ public class PortfolioOrchestrator {
             String amfi = amfiCodeFor(target);
             MarketMetrics metrics = metricsMap.getOrDefault(amfi, defaultMetrics());
 
-            TacticalSignal signal = rebalanceEngine.evaluate(holding, target, metrics, totalValue, amfi);
+            TacticalSignal signal = rebalanceEngine.evaluate(holding, target, metrics, totalValue, amfi, holdings, nameToAmfiMap);
             
             if (signal.action() == SignalType.SELL || signal.action() == SignalType.HOLD) {
                 // If it's a SELL, it's an active sell. If it's HOLD but was overweight, the engine decided to override.
@@ -264,15 +322,6 @@ public class PortfolioOrchestrator {
 
     private double getCurrentNav(String amfi) {
         return amfiService.getLatestSchemeDetails(amfi).getNav().doubleValue();
-    }
-
-    private TacticalSignal buildSignal(StrategyTarget t, String amfi, SignalType action, double amount, 
-                                     double targetPct, double actualPct, MarketMetrics m, List<String> justs) {
-        return new TacticalSignal(t.schemeName(), amfi, action, String.format("%.2f", amount),
-            targetPct, actualPct, t.sipPct(), t.status(), m.convictionScore(), 
-            m.sortinoRatio(), m.maxDrawdown(), m.navPercentile3yr(), 
-            m.drawdownFromAth(), m.returnZScore(), m.lastBuyDate(), justs,
-            ReasoningMetadata.neutral(t.schemeName()));
     }
 
     public List<TacticalSignal> generateDailySignals(String investorPan, double monthlySip, double lumpsum) {
@@ -325,7 +374,7 @@ public class PortfolioOrchestrator {
     private AggregatedHolding findHolding(List<AggregatedHolding> holdings, StrategyTarget t) {
         return holdings.stream()
             .filter(h -> h.getSchemeName().equalsIgnoreCase(t.schemeName()))
-            .findFirst().orElse(new AggregatedHolding(t.schemeName(), 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0, 0, "UNKNOWN", "DROPPED", t.isin()));
+            .findFirst().orElse(new AggregatedHolding(t.schemeName(), 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0, 0, "UNKNOWN", "DROPPED", t.isin(), 0.0));
     }
 
     private String amfiCodeFor(StrategyTarget t) {
@@ -341,14 +390,21 @@ public class PortfolioOrchestrator {
     }
 
     private TacticalSignal createSignal(TacticalSignal s, SignalType action, String amt, List<String> justs) {
-        return new TacticalSignal(s.schemeName(), s.amfiCode(), action, amt, s.plannedPercentage(), s.actualPercentage(), s.sipPercentage(), s.fundStatus(), s.convictionScore(), s.sortinoRatio(), s.maxDrawdown(), s.navPercentile3yr(), s.drawdownFromAth(), s.returnZScore(), s.lastBuyDate(), justs, s.reasoningMetadata());
+        return new TacticalSignal(s.schemeName(), s.amfiCode(), action, amt, s.plannedPercentage(), s.actualPercentage(), s.sipPercentage(), s.fundStatus(), s.convictionScore(), s.sortinoRatio(), s.maxDrawdown(), s.navPercentile3yr(), s.drawdownFromAth(), s.returnZScore(), s.lastBuyDate(), justs, s.reasoningMetadata(), s.hurst20d(), s.hurst60d(), s.multiScaleRegime(), s.ouHalfLife(), s.ouValid(), s.ouBuyThreshold(), s.ouSellThreshold(), s.hrpOverrideActive());
+    }
+
+    private TacticalSignal setHrpActive(TacticalSignal s) {
+        return new TacticalSignal(s.schemeName(), s.amfiCode(), s.action(), s.amount(), s.plannedPercentage(), s.actualPercentage(), s.sipPercentage(), s.fundStatus(), s.convictionScore(), s.sortinoRatio(), s.maxDrawdown(), s.navPercentile3yr(), s.drawdownFromAth(), s.returnZScore(), s.lastBuyDate(), s.justifications(), s.reasoningMetadata(), s.hurst20d(), s.hurst60d(), s.multiScaleRegime(), s.ouHalfLife(), s.ouValid(), s.ouBuyThreshold(), s.ouSellThreshold(), true);
     }
 
     private Map<String, MarketMetrics> fetchMetricsForAmfi(String amfi) {
         String sql = """
             SELECT amfi_code, sortino_ratio, cvar_5, win_rate, max_drawdown,
                    conviction_score, nav_percentile_3yr, drawdown_from_ath, return_z_score,
-                   rolling_z_score_252, hurst_exponent, volatility_tax, hurst_regime, historical_rarity_pct
+                   rolling_z_score_252, hurst_exponent, volatility_tax, hurst_regime, historical_rarity_pct,
+                   hurst_20d, hurst_60d, multi_scale_regime,
+                   ou_theta, ou_mu, ou_sigma, ou_half_life, ou_valid, ou_buy_threshold, ou_sell_threshold,
+                   hmm_state, hmm_bull_prob, hmm_bear_prob, hmm_transition_bear
             FROM fund_conviction_metrics
             WHERE amfi_code = ?
             AND calculation_date = (SELECT MAX(calculation_date) FROM fund_conviction_metrics)
@@ -370,8 +426,22 @@ public class PortfolioOrchestrator {
                 getSafeDouble(r.get("rolling_z_score_252")),
                 getSafeDouble(r.get("hurst_exponent")),
                 getSafeDouble(r.get("volatility_tax")),
-                (String) r.getOrDefault("hurst_regime", "RANDOM_WALK"),
-                getSafeDouble(r.get("historical_rarity_pct"))
+                String.valueOf(r.getOrDefault("hurst_regime", "RANDOM_WALK")),
+                getSafeDouble(r.get("historical_rarity_pct")),
+                getSafeDouble(r.get("hurst_20d")),
+                getSafeDouble(r.get("hurst_60d")),
+                String.valueOf(r.getOrDefault("multi_scale_regime", "RANDOM_WALK")),
+                getSafeDouble(r.get("ou_theta")),
+                getSafeDouble(r.get("ou_mu")),
+                getSafeDouble(r.get("ou_sigma")),
+                getSafeDouble(r.get("ou_half_life")),
+                getSafeBoolean(r.get("ou_valid")),
+                getSafeDouble(r.get("ou_buy_threshold")),
+                getSafeDouble(r.get("ou_sell_threshold")),
+                String.valueOf(r.getOrDefault("hmm_state", "STRESSED_NEUTRAL")),
+                getSafeDouble(r.get("hmm_bull_prob")),
+                getSafeDouble(r.get("hmm_bear_prob")),
+                getSafeDouble(r.get("hmm_transition_bear"))
             ));
         }
         return map;
@@ -381,7 +451,10 @@ public class PortfolioOrchestrator {
         String sql = """
             SELECT m.amfi_code, m.sortino_ratio, m.cvar_5, m.win_rate, m.max_drawdown, 
                    m.conviction_score, m.nav_percentile_3yr, m.drawdown_from_ath, m.return_z_score,
-                   m.rolling_z_score_252, m.hurst_exponent, m.volatility_tax, m.hurst_regime, m.historical_rarity_pct
+                   m.rolling_z_score_252, m.hurst_exponent, m.volatility_tax, m.hurst_regime, m.historical_rarity_pct,
+                   m.hurst_20d, m.hurst_60d, m.multi_scale_regime,
+                   m.ou_theta, m.ou_mu, m.ou_sigma, m.ou_half_life, m.ou_valid, m.ou_buy_threshold, m.ou_sell_threshold,
+                   m.hmm_state, m.hmm_bull_prob, m.hmm_bear_prob, m.hmm_transition_bear
             FROM fund_conviction_metrics m
             JOIN scheme s ON m.amfi_code = s.amfi_code 
             JOIN folio f ON s.folio_id = f.id
@@ -398,11 +471,14 @@ public class PortfolioOrchestrator {
             GROUP BY s.amfi_code
         """;
 
-        Map<String, LocalDate> lastBuyDates = jdbcTemplate.queryForList(lastBuySql, pan).stream()
-            .collect(Collectors.toMap(
-                r -> (String) r.get("amfi_code"),
-                r -> r.get("last_buy") != null ? ((java.sql.Date) r.get("last_buy")).toLocalDate() : LocalDate.of(1970, 1, 1)
-            ));
+        Map<String, LocalDate> lastBuyDates = new HashMap<>();
+        jdbcTemplate.query(lastBuySql, rs -> {
+            String amfi = rs.getString("amfi_code");
+            java.sql.Date d = rs.getDate("last_buy");
+            if (d != null) {
+                lastBuyDates.put(amfi, d.toLocalDate());
+            }
+        }, pan);
 
         List<Map<String, Object>> rows = jdbcTemplate.queryForList(sql, pan);
         Map<String, MarketMetrics> map = new HashMap<>();
@@ -421,8 +497,22 @@ public class PortfolioOrchestrator {
                 getSafeDouble(r.get("rolling_z_score_252")),
                 getSafeDouble(r.get("hurst_exponent")),
                 getSafeDouble(r.get("volatility_tax")),
-                (String) r.getOrDefault("hurst_regime", "RANDOM_WALK"),
-                getSafeDouble(r.get("historical_rarity_pct"))
+                String.valueOf(r.getOrDefault("hurst_regime", "RANDOM_WALK")),
+                getSafeDouble(r.get("historical_rarity_pct")),
+                getSafeDouble(r.get("hurst_20d")),
+                getSafeDouble(r.get("hurst_60d")),
+                String.valueOf(r.getOrDefault("multi_scale_regime", "RANDOM_WALK")),
+                getSafeDouble(r.get("ou_theta")),
+                getSafeDouble(r.get("ou_mu")),
+                getSafeDouble(r.get("ou_sigma")),
+                getSafeDouble(r.get("ou_half_life")),
+                getSafeBoolean(r.get("ou_valid")),
+                getSafeDouble(r.get("ou_buy_threshold")),
+                getSafeDouble(r.get("ou_sell_threshold")),
+                String.valueOf(r.getOrDefault("hmm_state", "STRESSED_NEUTRAL")),
+                getSafeDouble(r.get("hmm_bull_prob")),
+                getSafeDouble(r.get("hmm_bear_prob")),
+                getSafeDouble(r.get("hmm_transition_bear"))
             ));
         }
         return map;
@@ -430,4 +520,10 @@ public class PortfolioOrchestrator {
 
     private double getSafeDouble(Object obj) { return obj == null ? 0.0 : ((Number) obj).doubleValue(); }
     private int getSafeInt(Object obj) { return obj == null ? 0 : ((Number) obj).intValue(); }
+    private boolean getSafeBoolean(Object obj) {
+        if (obj == null) return false;
+        if (obj instanceof Boolean) return (Boolean) obj;
+        if (obj instanceof Number) return ((Number) obj).intValue() != 0;
+        return false;
+    }
 }

@@ -1,55 +1,23 @@
-# Portfolio Tracker
+# Portfolio OS
 
-A comprehensive portfolio management system designed to track, analyze, and visualize mutual fund investments using Consolidated Account Statements (CAS).
+A comprehensive, intelligent portfolio tracking and rebalancing system designed to analyze Mutual Fund holdings (via CAS injections) and provide actionable, data-driven insights.
 
-## System Architecture
+## Architecture Overview
 
-The project is built as a microservices-based system, containerized with Docker, comprising the following components:
+The system is composed of three primary microservices:
 
-1.  **`cas-injector` (Java Backend)**: The central brain of the system, built with Spring Boot. It manages the core logic, data persistence in PostgreSQL, and exposes APIs for the frontend and parser.
-2.  **`cas-parser` (Python Parser)**: A FastAPI-based service that uses `casparser` to extract investment data from PDF CAS statements and feeds it into the backend.
-3.  **`cas-scraper` (Python Scraper)**: A utility script that fetches market indices fundamentals (PE, PB, etc.) from the NSE to provide market context and valuation metrics.
-4.  **`portfolio-dashboard` (React Frontend)**: A modern, high-performance UI built with React and Framer Motion for a futuristic data visualization experience.
-5.  **`PostgreSQL`**: The primary data store for investment records, market indices, and valuation history.
+1. **cas-injector (Java Spring Boot)**: The core backend engine. It ingests CAS PDFs, processes transactions, and runs a sophisticated quantitative math engine (Sortino, CVaR, Multi-scale Hurst, Ornstein-Uhlenbeck (OU) Mean Reversion, Hierarchical Risk Parity). It orchestrates three modes of rebalancing (SIP Deployment, Opportunistic Accumulation, Exit Queue) and serves REST APIs.
+2. **cas-parser (Python FastAPI)**: A lightweight Python sidecar responsible for tasks requiring specialized Python libraries. Primarily, it uses `hmmlearn` to fit Hidden Markov Models (HMM) on historical NAV data, identifying underlying market regimes (Volatile Bear, Stressed Neutral, Calm Bull).
+3. **portfolio-dashboard (React/Vite)**: A modern, aesthetic frontend built with React, Vite, Tailwind CSS, and Radix UI primitives. It visualizes the portfolio's "Vital Signs" (CVaR, Tax Efficiency, Regime Pulse, Average Reversion Speed) and provides an interactive ledger and fund-level breakdown with detailed Explanation Engine tooltips.
 
-## Component Overview
+## Running the Application
 
-| Component | Technology | Role |
-| :--- | :--- | :--- |
-| **Backend** | Java, Spring Boot, JPA | Business Logic, API, Database Management |
-| **Parser** | Python, FastAPI, casparser | PDF Processing, Data Normalization |
-| **Scraper** | Python, nsepython, pandas | Market Data Acquisition |
-| **Frontend** | React, TypeScript, Tailwind | Data Visualization, UI |
-| **Database** | PostgreSQL | Persistent Storage |
-
-## Key Features
-
-- **Automated CAS Import**: Seamlessly parse and inject mutual fund data from standard PDF statements.
-- **Market Valuation**: Compare portfolio performance and valuations against benchmark indices (NIFTY 50, NIFTY 500, etc.).
-- **Conviction Metrics**: Advanced logic to assess fund valuations based on market climate and benchmark fundamentals.
-- **Futuristic UI**: A high-contrast, data-dense dashboard for an "architectural" view of your investments.
-
-## Getting Started
-
-### Prerequisites
-
-- Docker and Docker Compose
-- Maven (for local backend development)
-- Python 3.10+ (for local parser/scraper development)
-- Node.js & npm (for local frontend development)
-
-### Deployment
-
-To spin up the entire stack using Docker:
+The entire stack is containerized and orchestrated via Docker Compose.
 
 ```bash
-docker-compose up -d --build
+docker compose up --build -d
 ```
 
-The services will be available at:
-- Frontend: `http://localhost`
-- Backend: `http://localhost:8080`
-- Parser: `http://localhost:8000`
-
----
-For detailed design documentation of each component, refer to the `DESIGN.md` files in their respective directories.
+- **Dashboard**: `http://localhost:5173`
+- **Backend API**: `http://localhost:8080`
+- **Python Sidecar**: `http://localhost:8000`

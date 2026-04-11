@@ -6,8 +6,11 @@ import logging
 import httpx
 from datetime import date, datetime
 from decimal import Decimal
+from typing import List
 from fastapi import FastAPI, UploadFile, Form, HTTPException
+from pydantic import BaseModel
 import casparser
+import numpy as np
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -18,6 +21,13 @@ app = FastAPI(title="Mutual Fund CAS Parser Service")
 JAVA_BACKEND_URL = os.getenv("JAVA_BACKEND_URL", "http://java-backend:8080/api/cas/inject")
 API_KEY = os.getenv("PORTFOLIO_API_KEY", "dev-secret-key")
 
+try:
+    from hmmlearn import hmm
+    HMM_AVAILABLE = True
+except ImportError:
+    HMM_AVAILABLE = False
+    logger.warning("HMM service unavailable — install hmmlearn to enable regime detection.")
+
 # --- 1. JSON ENCODER FOR DECIMAL & DATE ---
 class AlphaNumericEncoder(json.JSONEncoder):
     def default(self, obj):
@@ -25,7 +35,20 @@ class AlphaNumericEncoder(json.JSONEncoder):
             return str(obj)
         return super().default(obj)
 
-# --- 2. GLOBAL HELPERS ---
+# --- 2. MODELS ---
+class HmmFitRequest(BaseModel):
+    amfi_code: str
+    returns: List[float]
+
+class HmmFitResponse(BaseModel):
+    amfi_code: str
+    current_state: str          # CALM_BULL | STRESSED_NEUTRAL | VOLATILE_BEAR
+    calm_bull_prob: float
+    stressed_neutral_prob: float
+    volatile_bear_prob: float
+    transition_to_bear_prob: float
+
+# --- 3. GLOBAL HELPERS ---
 def format_date(date_str):
     if not date_str: return None
     for fmt in ("%d-%b-%Y", "%d/%m/%Y", "%Y-%m-%d"):
@@ -112,6 +135,57 @@ async def push_to_java_backend(parsed_data: dict):
         logger.info("✅ Data successfully injected into Java Backend")
 
 # --- 5. ROUTES ---
+@app.post("/hmm/fit", response_model=HmmFitResponse)
+async def fit_hmm(req: HmmFitRequest):
+    if not HMM_AVAILABLE:
+        raise HTTPException(status_code=503, detail="HMM service unavailable — install hmmlearn")
+    
+    try:
+        X = np.array(req.returns).reshape(-1, 1)
+        # Fit 3-state HMM
+        model = hmm.GaussianHMM(n_components=3, covariance_type="full", n_iter=200, random_state=42)
+        model.fit(X)
+        
+        # Current state (last observation)
+        current_state_idx = model.predict(X)[-1]
+        
+        # State probabilities for the last observation
+        probs = model.predict_proba(X)[-1]
+        
+        # Label states by sorting means (Ascending: Bear < Neutral < Bull)
+        means = model.means_.flatten()
+        sorted_indices = np.argsort(means)
+        
+        idx_to_label = {
+            sorted_indices[0]: "VOLATILE_BEAR",
+            sorted_indices[1]: "STRESSED_NEUTRAL",
+            sorted_indices[2]: "CALM_BULL"
+        }
+        
+        # Transition matrix
+        transmat = model.transmat_
+        bear_idx = sorted_indices[0]
+        prob_to_bear = transmat[current_state_idx][bear_idx]
+        
+        return HmmFitResponse(
+            amfi_code=req.amfi_code,
+            current_state=idx_to_label[current_state_idx],
+            calm_bull_prob=float(probs[sorted_indices[2]]),
+            stressed_neutral_prob=float(probs[sorted_indices[1]]),
+            volatile_bear_prob=float(probs[sorted_indices[0]]),
+            transition_to_bear_prob=float(prob_to_bear)
+        )
+    except Exception as e:
+        logger.error(f"HMM fit failed for {req.amfi_code}: {e}")
+        return HmmFitResponse(
+            amfi_code=req.amfi_code,
+            current_state="STRESSED_NEUTRAL",
+            calm_bull_prob=0.33,
+            stressed_neutral_prob=0.33,
+            volatile_bear_prob=0.33,
+            transition_to_bear_prob=0.33
+        )
+
 @app.post("/api/parse")
 async def parse_cas(file: UploadFile, password: str = Form(...)):
     if not file.filename.lower().endswith('.pdf'):

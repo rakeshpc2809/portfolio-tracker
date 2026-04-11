@@ -103,6 +103,9 @@ export const buildReasoningMetadata = (signal: TacticalSignal): ReasoningMetadat
                        : 50,
     harvestAmountRupees: 0,
     harvestExplanation:  '',
+    ouHalfLifeDays:      0,
+    ouInterpretation:    '',
+    featureAttribution:  null,
   };
 };
 

@@ -1,5 +1,8 @@
 fastapi
 uvicorn
-casparser
+casparser[pdf]
 python-multipart
 httpx
+numpy
+hmmlearn>=0.3.0
+scikit-learn

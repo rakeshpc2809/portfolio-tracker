@@ -6,48 +6,48 @@ package com.oreki.cas_injector.rebalancing.dto;
  * any string-parsing or magic numbers.
  */
 public record ReasoningMetadata(
+    String primaryNarrative,    // e.g. "Kotak Small Cap is underweight by 4.2%"
+    String technicalLabel,      // e.g. "Z-Score: -2.1σ | H=0.42"
+    String noobHeadline,        // e.g. "This fund is on a rare sale. High confidence buy."
+    String uiMetaphor,          // RUBBER_BAND | WAVE_RIDER | THERMOMETER | etc
+    
+    double zScore,
+    double hurstExponent,
+    double volatilityTax,
+    String hurstRegime,
+    
+    String zScoreLabel,         // SLIGHTLY_CHEAP | OVERHEATED | etc
+    double historicalRarityPct, // how rare is this dip?
+    
+    double harvestAmountRupees,
+    String harvestExplanation,
 
-    // ── Primary narrative (one sentence, plain English) ─────────────────────
-    String primaryNarrative,
+    // ── OU fields (Task 2D) ──
+    double ouHalfLifeDays,
+    String ouInterpretation,
 
-    // ── Technical label shown in the "Signal" column ────────────────────────
-    String technicalLabel,        // e.g. "Z-Score: -2.3σ | H=0.42 (Mean Reverting)"
-
-    // ── "Noob" translation (the big headline in the Why Card) ───────────────
-    String noobHeadline,          // e.g. "This fund is on a rare discount."
-
-    // ── UI Visual Metaphor key for the frontend to render ───────────────────
-    // One of: "RUBBER_BAND" | "VOLATILITY_HARVEST" | "WAVE_RIDER" | "THERMOMETER" | "COOLING_OFF"
-    String uiMetaphor,
-
-    // ── Raw signal values ────────────────────────────────────────────────────
-    double zScore,                // Rolling 252-day Z-Score (e.g., -2.3)
-    double hurstExponent,         // H value (e.g., 0.42)
-    double volatilityTax,         // Annual variance drain as decimal (e.g., 0.032)
-    String hurstRegime,           // "MEAN_REVERTING" | "TRENDING" | "RANDOM_WALK"
-
-    // ── Human-readable Z-Score classification ───────────────────────────────
-    // One of: "STATISTICALLY_CHEAP" | "OVERHEATED" | "NEUTRAL" | "SLIGHTLY_CHEAP" | "SLIGHTLY_RICH" | "CRITICAL_REVIEW"
-    String zScoreLabel,
-
-    // ── Rarity context for the UI percentage tag ────────────────────────────
-    double historicalRarityPct,   // e.g., 2.3 (meaning: "only 2.3% of days are this cheap")
-
-    // ── Harvest context (only populated for SELL signals) ───────────────────
-    double harvestAmountRupees,   // e.g., 12500.0 (the "free money" from rebalancing)
-    String harvestExplanation     // e.g., "Capturing ₹12,500 in extra growth to fuel laggards."
-
+    // ── Feature Attribution (Task 5B) ──
+    FeatureAttribution featureAttribution
 ) {
-    /** Convenience factory: returns a neutral/default metadata when metrics are unavailable. */
-    public static ReasoningMetadata neutral(String schemeName) {
+    public record FeatureAttribution(
+        double zScoreContrib,
+        double hurstContrib,
+        double hmmContrib,
+        double ouContrib,
+        double taxContrib
+    ) {}
+
+    public static ReasoningMetadata neutral(String name) {
         return new ReasoningMetadata(
-            schemeName + " is within target range.",
+            name + " is within target range.",
             "Within Tolerance",
             "All good — no action needed.",
             "COOLING_OFF",
             0.0, 0.5, 0.0, "RANDOM_WALK",
             "NEUTRAL",
-            50.0, 0.0, ""
+            50.0, 0.0, "",
+            0.0, "",
+            new FeatureAttribution(0.4, 0.2, 0.2, 0.1, 0.1)
         );
     }
 }

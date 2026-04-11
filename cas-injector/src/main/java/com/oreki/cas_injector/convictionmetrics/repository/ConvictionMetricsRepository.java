@@ -49,7 +49,21 @@ public class ConvictionMetricsRepository {
             ADD COLUMN IF NOT EXISTS hurst_exponent      DOUBLE PRECISION DEFAULT 0.5,
             ADD COLUMN IF NOT EXISTS volatility_tax      DOUBLE PRECISION DEFAULT 0.0,
             ADD COLUMN IF NOT EXISTS hurst_regime        VARCHAR(20)      DEFAULT 'RANDOM_WALK',
-            ADD COLUMN IF NOT EXISTS historical_rarity_pct DOUBLE PRECISION DEFAULT 50.0;
+            ADD COLUMN IF NOT EXISTS historical_rarity_pct DOUBLE PRECISION DEFAULT 50.0,
+            ADD COLUMN IF NOT EXISTS hurst_20d           DOUBLE PRECISION DEFAULT 0.5,
+            ADD COLUMN IF NOT EXISTS hurst_60d           DOUBLE PRECISION DEFAULT 0.5,
+            ADD COLUMN IF NOT EXISTS multi_scale_regime  VARCHAR(20)      DEFAULT 'RANDOM_WALK',
+            ADD COLUMN IF NOT EXISTS ou_theta            DOUBLE PRECISION DEFAULT 0.0,
+            ADD COLUMN IF NOT EXISTS ou_mu               DOUBLE PRECISION DEFAULT 0.0,
+            ADD COLUMN IF NOT EXISTS ou_sigma            DOUBLE PRECISION DEFAULT 0.0,
+            ADD COLUMN IF NOT EXISTS ou_half_life        DOUBLE PRECISION DEFAULT 0.0,
+            ADD COLUMN IF NOT EXISTS ou_valid            BOOLEAN          DEFAULT FALSE,
+            ADD COLUMN IF NOT EXISTS ou_buy_threshold    DOUBLE PRECISION DEFAULT 0.0,
+            ADD COLUMN IF NOT EXISTS ou_sell_threshold   DOUBLE PRECISION DEFAULT 0.0,
+            ADD COLUMN IF NOT EXISTS hmm_state           VARCHAR(20)      DEFAULT 'STRESSED_NEUTRAL',
+            ADD COLUMN IF NOT EXISTS hmm_bull_prob       DOUBLE PRECISION DEFAULT 0.33,
+            ADD COLUMN IF NOT EXISTS hmm_bear_prob       DOUBLE PRECISION DEFAULT 0.33,
+            ADD COLUMN IF NOT EXISTS hmm_transition_bear DOUBLE PRECISION DEFAULT 0.33;
         """;
         jdbcTemplate.execute(addColumnsSql);
 

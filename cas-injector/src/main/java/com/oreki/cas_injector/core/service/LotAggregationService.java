@@ -88,7 +88,7 @@ public class LotAggregationService {
                 scheme.getName(), units, val, cost,
                 ltcgVal, ltcgGains, stcgVal, stcgGains,
                 finalDaysToNext, (int) ChronoUnit.DAYS.between(oldest, LocalDate.now()),
-                category, "ACTIVE", scheme.getIsin()
+                category, "ACTIVE", scheme.getIsin(), stcgGains * 0.20
             );
         }).collect(Collectors.toList());
     }

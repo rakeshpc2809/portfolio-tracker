@@ -6,5 +6,10 @@ public record TlhOpportunity(
     double harvestableAmount, // The exact ₹ amount to sell
     double estimatedCapitalLoss, // The exact tax write-off you will generate
     String taxBucket, // "STCL" (Short Term Capital Loss) or "LTCL" (Long Term)
-    String proxySchemeRecommendation // The correlated asset to buy immediately
-) {}
+    String proxySchemeRecommendation, // The correlated asset to buy immediately
+    OpportunityType type,
+    double estimatedTaxSaving,
+    String recommendation
+) {
+    public enum OpportunityType { TAX_LOSS_HARVEST, SIP_REDIRECT }
+}

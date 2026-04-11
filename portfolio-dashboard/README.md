@@ -1,73 +1,26 @@
-# React + TypeScript + Vite
+# portfolio-dashboard (React Frontend)
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+The visual interface for Portfolio OS, designed to transform complex quantitative signals into plain English, actionable insights.
 
-Currently, two official plugins are available:
+## Core Features
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+- **Unified Dashboard (`PortfolioView`)**: Displays high-level vital signs:
+  - **Portfolio CVaR**: Tail risk gauge alerting users if the portfolio is structurally dangerous.
+  - **Tax Efficiency**: Percentage of paper profits protected by LTCG.
+  - **Regime Pulse**: A visual breakdown of how many funds are currently in Bull vs. Bear states.
+  - **Half-life Clock**: The average OU mean reversion speed across the portfolio.
+- **Fund Matrix (`FundsListView`)**: A dense, sortable view of all holdings featuring:
+  - **Conviction Dots**: A 0-100 visual rating of a fund's structural health.
+  - **Price Zone Bar**: A visual slider showing the fund's current price relative to its 3-year historical high/low.
+  - **Action Pills**: Clear instructions (BUY, SELL, WATCH, HOLD, EXIT, HARVEST).
+  - **Learn Tooltips**: Radix UI-powered floating cards explaining complex financial jargon (like CVaR or Z-Score) in simple terms.
+- **Explanation Engine**: Translates raw math (Z-Scores, Hurst exponents) into UI Metaphors ("Rubber Band", "Wave Rider", "Cooling Off") so investors understand *why* the engine is making a recommendation.
 
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
-
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
-
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
-
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
+## Technology Stack
+- React 18
+- Vite
+- Tailwind CSS
+- Radix UI Primitives
+- Recharts (for Treemaps and Bar charts)
+- Framer Motion
+- Lucide React (Icons)

@@ -13,9 +13,16 @@ import lombok.extern.slf4j.Slf4j;
 @Service
 @Slf4j
 public class SystemicRiskMonitorService {
-    private static final double CRITICAL_CVAR_THRESHOLD = -3.50; 
+    public enum TailRiskLevel { NORMAL, ELEVATED, CRITICAL }
 
-    public boolean isSystemicRiskCritical(List<AggregatedHolding> holdings, Map<String, MarketMetrics> metricsMap, Map<String, String> nameToAmfiMap) {
+    private static final double CRITICAL_CVAR_THRESHOLD = -3.50; 
+    private static final double ELEVATED_CVAR_THRESHOLD = -2.50;
+
+    public TailRiskLevel assessTailRisk(
+            List<AggregatedHolding> holdings,
+            Map<String, MarketMetrics> metricsMap,
+            Map<String, String> nameToAmfiMap) {
+        
         double totalValue = 0.0, weightedCvar = 0.0;
         for (AggregatedHolding h : holdings) {
             String amfi = nameToAmfiMap.get(h.getSchemeName());
@@ -25,11 +32,22 @@ public class SystemicRiskMonitorService {
                 totalValue += val;
             }
         }
-        if (totalValue == 0) return false;
+        if (totalValue == 0) return TailRiskLevel.NORMAL;
         
         double portfolioCvar = weightedCvar / totalValue;
-        boolean isCritical = portfolioCvar < CRITICAL_CVAR_THRESHOLD;
-        if (isCritical) log.error("🚨 SYSTEMIC HALT: Portfolio CVaR at {}%.", String.format("%.2f", portfolioCvar));
-        return isCritical;
+        
+        if (portfolioCvar < CRITICAL_CVAR_THRESHOLD) {
+            log.error("🚨 CRITICAL Tail Risk: Portfolio CVaR at {}%.", String.format("%.2f", portfolioCvar));
+            return TailRiskLevel.CRITICAL;
+        } else if (portfolioCvar < ELEVATED_CVAR_THRESHOLD) {
+            log.warn("⚠️ ELEVATED Tail Risk: Portfolio CVaR at {}%.", String.format("%.2f", portfolioCvar));
+            return TailRiskLevel.ELEVATED;
+        }
+        
+        return TailRiskLevel.NORMAL;
+    }
+
+    public boolean isSystemicRiskCritical(List<AggregatedHolding> holdings, Map<String, MarketMetrics> metricsMap, Map<String, String> nameToAmfiMap) {
+        return assessTailRisk(holdings, metricsMap, nameToAmfiMap) == TailRiskLevel.CRITICAL;
     }
 }

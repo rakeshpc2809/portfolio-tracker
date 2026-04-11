@@ -19,4 +19,5 @@ public class AggregatedHolding {
     private String assetCategory;   // 11
     private String status;          // 12
     private String isin;            // 13 (Added for your Strategy check)
+    private Double stcgTaxEstimate; // 14 (Added for Phase 1E)
 }

@@ -4,6 +4,8 @@ import React from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import type { TacticalSignal, ReasoningMetadata, UIMetaphor } from '../../types/signals';
 import CurrencyValue from './CurrencyValue';
+import { Info } from 'lucide-react';
+import * as Tooltip from '@radix-ui/react-tooltip';
 
 // ── Visual Metaphor Components ─────────────────────────────────────────────────
 
@@ -228,6 +230,54 @@ const SignalNoiseTable: React.FC<{ meta: ReasoningMetadata }> = ({ meta }) => {
   );
 };
 
+const FeatureAttributionChart: React.FC<{ attr: any }> = ({ attr }) => {
+  if (!attr) return null;
+  const items = [
+    { label: "Price deviation", value: attr.zScoreContrib },
+    { label: "Trend regime", value: attr.hurstContrib },
+    { label: "Market state", value: attr.hmmContrib },
+    { label: "Recovery speed", value: attr.ouContrib },
+    { label: "Tax window", value: attr.taxContrib },
+  ];
+
+  return (
+    <div className="space-y-2 mt-4">
+      <Tooltip.Provider delayDuration={200}>
+        <div className="flex items-center gap-1.5 mb-2">
+          <p className="text-[10px] text-muted uppercase tracking-widest font-bold">Why this signal?</p>
+          <Tooltip.Root>
+            <Tooltip.Trigger asChild>
+              <Info size={10} className="text-muted cursor-help" />
+            </Tooltip.Trigger>
+            <Tooltip.Portal>
+              <Tooltip.Content className="bg-surface border border-border rounded-xl p-3 shadow-xl max-w-xs text-[12px] text-secondary z-50 animate-in fade-in zoom-in duration-200" sideOffset={5}>
+                <p className="text-[11px]">This shows what's driving the signal. Longer bar = bigger influence on the decision.</p>
+                <Tooltip.Arrow className="fill-border" />
+              </Tooltip.Content>
+            </Tooltip.Portal>
+          </Tooltip.Root>
+        </div>
+      </Tooltip.Provider>
+      <div className="space-y-1.5">
+        {items.map((item, i) => (
+          <div key={i} className="flex items-center gap-3">
+            <span className="text-[10px] text-secondary w-24 truncate">{item.label}</span>
+            <div className="flex-1 h-1.5 bg-white/5 rounded-full overflow-hidden">
+              <motion.div
+                className="h-full bg-buy/40"
+                initial={{ width: 0 }}
+                animate={{ width: `${item.value * 100}%` }}
+                transition={{ duration: 1, delay: i * 0.1 }}
+              />
+            </div>
+            <span className="text-[9px] text-muted w-8 text-right">{(item.value * 100).toFixed(0)}%</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
+
 interface Props {
   signal: TacticalSignal;
   isPrivate: boolean;
@@ -316,6 +366,10 @@ export const RecommendationDetailCard: React.FC<Props> = ({
         {meta.noobHeadline}
       </p>
 
+      {meta.ouHalfLifeDays > 0 && (
+        <p className="text-[11px] text-muted italic mb-3">{meta.ouInterpretation}</p>
+      )}
+
       <button
         className="text-[9px] text-muted uppercase tracking-widest font-bold flex items-center gap-1 hover:text-secondary transition-colors"
         onClick={e => { e.stopPropagation(); setExpanded(x => !x); }}
@@ -335,6 +389,8 @@ export const RecommendationDetailCard: React.FC<Props> = ({
             <div className="bg-white/[0.02] rounded-xl border border-white/5 px-4">
               <MetaphorVisual metaphor={meta.uiMetaphor} meta={meta} isPrivate={isPrivate} />
             </div>
+
+            <FeatureAttributionChart attr={meta.featureAttribution} />
 
             <SignalNoiseTable meta={meta} />
 

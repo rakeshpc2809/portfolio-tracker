@@ -1,29 +1,60 @@
 import { useState } from 'react';
-import { Search } from 'lucide-react';
-import ConvictionBadge from '../ui/ConvictionBadge';
+import { Search, Info } from 'lucide-react';
+import LearnTooltip from '../ui/LearnTooltip';
+import * as Tooltip from '@radix-ui/react-tooltip';
+import { motion } from 'framer-motion';
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
-function NavRangeBar({ percentile }: { percentile: number }) {
+function PriceZoneBar({ percentile }: { percentile: number }) {
   const pct = Math.min(100, Math.max(0, (percentile ?? 0.5) * 100));
-  const color = pct > 80 ? '#f87171' : pct < 30 ? '#34d399' : '#94a3b8';
+  const zone = pct > 70 ? 'Expensive' : pct < 30 ? 'Cheap' : 'Fair';
+  const color = pct > 70 ? 'text-exit' : pct < 30 ? 'text-buy' : 'text-muted';
+  
   return (
-    <div className="relative w-full h-[3px] bg-white/[0.06] rounded-full overflow-visible">
-      <div className="absolute top-0 left-0 h-full rounded-full transition-all duration-500"
-           style={{ width: `${pct}%`, background: color }} />
-      <div className="absolute top-1/2 -translate-y-1/2 w-[5px] h-[5px] rounded-full border border-black/40"
-           style={{ left: `calc(${pct}% - 2.5px)`, background: color }} />
+    <div className="space-y-2">
+      <div className="flex justify-between items-end">
+        <div className="flex items-center gap-1">
+          <LearnTooltip term="Z_SCORE">3yr range</LearnTooltip>
+          <Tooltip.Provider delayDuration={200}>
+            <Tooltip.Root>
+              <Tooltip.Trigger asChild>
+                <Info size={10} className="text-muted cursor-help" />
+              </Tooltip.Trigger>
+              <Tooltip.Portal>
+                <Tooltip.Content className="bg-surface border border-border rounded-xl p-3 shadow-xl max-w-xs text-[12px] text-secondary z-50 animate-in fade-in zoom-in duration-200" sideOffset={5}>
+                  <p className="text-[11px]">Where is this fund's current price compared to its own 3-year history? Green zone = historically cheap. Red zone = historically expensive.</p>
+                  <Tooltip.Arrow className="fill-border" />
+                </Tooltip.Content>
+              </Tooltip.Portal>
+            </Tooltip.Root>
+          </Tooltip.Provider>
+        </div>
+        <span className={`text-[10px] font-bold ${color}`}>{pct.toFixed(0)}th %ile — {zone}</span>
+      </div>
+      <div className="relative w-full h-1.5 bg-white/5 rounded-full overflow-hidden flex">
+        <div className="h-full bg-buy/20 w-[30%]" />
+        <div className="h-full bg-white/5 w-[40%]" />
+        <div className="h-full bg-exit/20 w-[30%]" />
+        <motion.div 
+          className="absolute top-0 w-1.5 h-1.5 bg-white rounded-full border border-black/50 shadow-[0_0_4px_rgba(255,255,255,0.5)]"
+          initial={{ left: 0 }}
+          animate={{ left: `calc(${pct}% - 3px)` }}
+          transition={{ duration: 1, ease: "easeOut" }}
+        />
+      </div>
     </div>
   );
 }
 
-function MiniStat({ label, value, color }: { label: string; value: string; color?: string }) {
-  return (
+function MiniStat({ label, value, color, term }: { label: string; value: string; color?: string; term?: string }) {
+  const content = (
     <div className="space-y-0.5">
       <p className="text-[8px] uppercase tracking-[0.15em] text-muted leading-none">{label}</p>
       <p className={`text-[11px] font-medium tabular-nums leading-none ${color ?? 'text-secondary'}`}>{value}</p>
     </div>
   );
+  return term ? <LearnTooltip term={term}>{content}</LearnTooltip> : content;
 }
 
 function ActionPill({ action }: { action: string }) {
@@ -39,6 +70,53 @@ function ActionPill({ action }: { action: string }) {
     <span className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-widest border ${map[action] ?? map.HOLD}`}>
       {action}
     </span>
+  );
+}
+
+function RegimeBadge({ metaphor, multiScaleRegime }: { metaphor: string; multiScaleRegime: string }) {
+  let label = '';
+  let colorClass = '';
+  let icon = '';
+  let tooltip = '';
+
+  if (multiScaleRegime === "FRACTAL_BREAKOUT") {
+    label = "Breakout"; colorClass = "text-violet-400"; icon = "🚀";
+    tooltip = "All time horizons show a trending signal — strong momentum confirmed across short and long term.";
+  } else if (multiScaleRegime === "STRONG_HOLD") {
+    label = "Momentum"; colorClass = "text-green-400"; icon = "🏄";
+  } else if (multiScaleRegime === "MEAN_REVERSION_RALLY") {
+    label = "Rally"; colorClass = "text-amber-400"; icon = "🎯";
+  } else if (metaphor === "RUBBER_BAND") {
+    label = "Rubber Band"; colorClass = "text-blue-400"; icon = "🔴";
+    tooltip = "This fund has stretched away from its fair value — like a rubber band, it tends to snap back.";
+  } else if (metaphor === "WAVE_RIDER") {
+    label = "Wave Rider"; colorClass = "text-teal-400"; icon = "🌊";
+    tooltip = "This fund is in a momentum trend. The engine is letting it run rather than trimming.";
+  } else if (metaphor === "VOLATILITY_HARVEST") {
+    label = "Harvest"; colorClass = "text-yellow-400"; icon = "⚡";
+    tooltip = "The market's ups and downs are creating a mathematical 'free money' opportunity here.";
+  } else if (metaphor === "COOLING_OFF") {
+    label = "Cooling Off"; colorClass = "text-gray-400"; icon = "🧊";
+  }
+
+  if (!label) return null;
+
+  return (
+    <Tooltip.Provider delayDuration={200}>
+      <Tooltip.Root>
+        <Tooltip.Trigger asChild>
+          <span className={`text-[9px] font-medium uppercase tracking-widest px-1.5 py-0.5 rounded bg-white/5 border border-white/10 ${colorClass} cursor-help`}>
+            {icon} {label}
+          </span>
+        </Tooltip.Trigger>
+        <Tooltip.Portal>
+          <Tooltip.Content className="bg-surface border border-border rounded-xl p-3 shadow-xl max-w-xs text-[12px] text-secondary z-50 animate-in fade-in zoom-in duration-200" sideOffset={5}>
+            <p className="text-[11px]">{tooltip || label}</p>
+            <Tooltip.Arrow className="fill-border" />
+          </Tooltip.Content>
+        </Tooltip.Portal>
+      </Tooltip.Root>
+    </Tooltip.Provider>
   );
 }
 
@@ -74,6 +152,30 @@ export default function FundsListView({
       if (sort === 'drift')      return Math.abs(parseFloat(b.deviation ?? '0')) - Math.abs(parseFloat(a.deviation ?? '0'));
       return 0;
     });
+
+  const renderConvictionDots = (score: number) => {
+    if (score === 0) return <span className="text-[10px] text-muted italic">Calculating...</span>;
+    const filledDots = Math.floor(score / 20);
+    return (
+      <Tooltip.Provider delayDuration={200}>
+        <Tooltip.Root>
+          <Tooltip.Trigger asChild>
+            <div className="flex gap-1 cursor-help">
+              {[...Array(5)].map((_, i) => (
+                <div key={i} className={`w-1.5 h-1.5 rounded-full ${i < filledDots ? 'bg-buy shadow-[0_0_4px_rgba(52,211,153,0.4)]' : 'bg-white/10'}`} />
+              ))}
+            </div>
+          </Tooltip.Trigger>
+          <Tooltip.Portal>
+            <Tooltip.Content className="bg-surface border border-border rounded-xl p-3 shadow-xl max-w-xs text-[12px] text-secondary z-50 animate-in fade-in zoom-in duration-200" sideOffset={5}>
+              <p className="text-[11px]">Conviction score blends risk, value, and tax efficiency on a 0-100 scale.</p>
+              <Tooltip.Arrow className="fill-border" />
+            </Tooltip.Content>
+          </Tooltip.Portal>
+        </Tooltip.Root>
+      </Tooltip.Provider>
+    );
+  };
 
   return (
     <div className="space-y-6 pb-32">
@@ -137,7 +239,6 @@ export default function FundsListView({
         {funds.map((fund: any) => {
           const drift = parseFloat(fund.deviation ?? '0');
           const xirr  = parseFloat(fund.xirr ?? '0');
-          const navPct = (fund.navPercentile3yr ?? 0.5) * 100;
           const mdd   = Math.abs(fund.maxDrawdown ?? 0);
           const sortino = fund.sortinoRatio ?? 0;
           const daysToLtcg = fund.daysToNextLtcg ?? 0;
@@ -145,13 +246,22 @@ export default function FundsListView({
           const driftColor = drift > 2 ? 'text-exit' : drift < -2 ? 'text-buy' : 'text-muted';
           const xirrColor  = xirr >= 0 ? 'text-buy' : 'text-exit';
 
+          const signalSentence = fund.reasoningMetadata?.noobHeadline || (
+            fund.action === 'BUY' ? "Engine says: rare discount — worth adding" :
+            fund.action === 'SELL' ? "Engine says: trim overheated position" :
+            fund.action === 'WATCH' ? "Engine says: market is shaky — hold off" :
+            fund.action === 'HOLD' ? "Engine says: on track — no action needed" :
+            fund.action === 'EXIT' ? "Engine says: this fund is being wound down" : ""
+          );
+
           return (
-            <div
+            <motion.div
               key={fund.schemeName}
+              layout
               onClick={() => onFundClick(fund.schemeName)}
               className="group bg-surface border border-white/[0.06] rounded-xl p-5 cursor-pointer hover:border-white/15 hover:bg-white/[0.015] transition-all duration-150 space-y-4"
             >
-              {/* ── Row 1: Name + Action + Conviction ── */}
+              {/* ── Row 1: Category + Action + Conviction ── */}
               <div className="flex items-start justify-between gap-3">
                 <div className="space-y-1.5 min-w-0">
                   <p className="text-[9px] font-semibold text-muted uppercase tracking-[0.15em] truncate">
@@ -162,25 +272,19 @@ export default function FundsListView({
                   </p>
                 </div>
                 <div className="flex flex-col items-end gap-1.5 shrink-0">
-                  <ConvictionBadge score={fund.convictionScore} />
-                  <ActionPill action={fund.action ?? 'HOLD'} />
+                  <div className="flex items-center gap-2">
+                    <RegimeBadge metaphor={fund.reasoningMetadata?.uiMetaphor} multiScaleRegime={fund.multiScaleRegime} />
+                    <ActionPill action={fund.action ?? 'HOLD'} />
+                  </div>
+                  {renderConvictionDots(fund.convictionScore)}
                 </div>
               </div>
 
-              {/* ── Row 2: NAV Range Bar ── */}
-              <div className="space-y-1.5">
-                <div className="flex justify-between text-[8px] text-muted uppercase tracking-widest">
-                  <span>3yr low</span>
-                  <span className={navPct > 80 ? 'text-exit' : navPct < 30 ? 'text-buy' : 'text-muted'}>
-                    {navPct.toFixed(0)}th %ile
-                  </span>
-                  <span>3yr high</span>
-                </div>
-                <NavRangeBar percentile={fund.navPercentile3yr} />
-              </div>
+              {/* ── Row 2: Price Zone Bar ── */}
+              <PriceZoneBar percentile={fund.navPercentile3yr} />
 
-              {/* ── Row 3: 6 Mini Stats ── */}
-              <div className="grid grid-cols-3 gap-x-3 gap-y-3 pt-1">
+              {/* ── Row 3: 4 Primary Stats ── */}
+              <div className="grid grid-cols-4 gap-x-2 pt-1">
                 <MiniStat
                   label="Value"
                   value={isPrivate ? '••••' : `₹${((fund.currentValue ?? 0) / 1000).toFixed(0)}k`}
@@ -189,48 +293,42 @@ export default function FundsListView({
                   label="XIRR"
                   value={`${xirr >= 0 ? '+' : ''}${xirr.toFixed(1)}%`}
                   color={xirrColor}
+                  term="XIRR"
                 />
                 <MiniStat
                   label="Drift"
                   value={`${drift >= 0 ? '+' : ''}${drift.toFixed(1)}%`}
                   color={driftColor}
-                />
-                <MiniStat
-                  label="Sortino"
-                  value={sortino > 0 ? sortino.toFixed(2) : '—'}
-                  color={sortino > 1.5 ? 'text-buy' : sortino > 0.8 ? 'text-secondary' : 'text-exit'}
+                  term="Drift"
                 />
                 <MiniStat
                   label="Max DD"
                   value={mdd > 0 ? `-${mdd.toFixed(1)}%` : '—'}
                   color={mdd > 25 ? 'text-exit' : mdd > 10 ? 'text-warning' : 'text-secondary'}
                 />
-                <MiniStat
-                  label={daysToLtcg > 0 ? `${daysToLtcg}d→LTCG` : 'Tax'}
-                  value={daysToLtcg > 0 ? 'Wait' : 'LTCG OK'}
-                  color={daysToLtcg > 0 && daysToLtcg <= 45 ? 'text-yellow-400' : 'text-secondary'}
-                />
               </div>
 
-              {/* ── Row 4: Conviction Score Bar ── */}
-              <div className="pt-1 border-t border-white/[0.04] space-y-1.5">
-                <div className="flex justify-between text-[8px] uppercase tracking-widest text-muted">
-                  <span>Conviction</span>
-                  <span className={(fund.convictionScore ?? 0) >= 65 ? 'text-buy' : (fund.convictionScore ?? 0) >= 45 ? 'text-secondary' : 'text-exit'}>
-                    {fund.convictionScore ?? 0}/100
-                  </span>
+              {/* ── Row 4: Signal Sentence + Secondary Stats ── */}
+              <div className="pt-3 border-t border-white/[0.04] space-y-2">
+                <div className="flex justify-between items-center">
+                  <p className="text-[10px] text-secondary font-medium italic opacity-80">{signalSentence}</p>
                 </div>
-                <div className="h-[2px] w-full bg-white/[0.05] rounded-full overflow-hidden">
-                  <div
-                    className="h-full rounded-full transition-all duration-500"
-                    style={{
-                      width: `${fund.convictionScore ?? 0}%`,
-                      background: (fund.convictionScore ?? 0) >= 65 ? '#34d399' : (fund.convictionScore ?? 0) >= 45 ? '#94a3b8' : '#f87171',
-                    }}
-                  />
+                <div className="flex gap-4">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[8px] text-muted uppercase tracking-wider font-bold">Sortino</span>
+                    <span className={`text-[10px] font-mono ${sortino > 1.5 ? 'text-buy' : sortino > 0.8 ? 'text-secondary' : 'text-exit'}`}>
+                      {sortino > 0 ? sortino.toFixed(2) : '—'}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[8px] text-muted uppercase tracking-wider font-bold">Tax</span>
+                    <span className={`text-[10px] font-medium ${daysToLtcg > 0 && daysToLtcg <= 45 ? 'text-yellow-400' : 'text-secondary'}`}>
+                      {daysToLtcg > 0 ? `⚠ STCG (${daysToLtcg}d)` : 'LTCG OK'}
+                    </span>
+                  </div>
                 </div>
               </div>
-            </div>
+            </motion.div>
           );
         })}
       </div>

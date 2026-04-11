@@ -20,6 +20,8 @@ public class HurstExponentService {
     private static final double MEAN_REVERTING_THRESHOLD = 0.45;
     private static final double TRENDING_THRESHOLD       = 0.55;
     private static final int    LOOKBACK_DAYS            = 252;
+    private static final int    LOOKBACK_SHORT           = 20;
+    private static final int    LOOKBACK_MID             = 60;
 
     /**
      * Computes and persists Hurst Exponent + Volatility Tax for all funds
@@ -42,7 +44,6 @@ public class HurstExponentService {
         for (String amfi : amfiCodes) {
             try {
                 // 2. Fetch last LOOKBACK_DAYS + 1 NAV values in ascending date order
-                // Actually, the DESIGN.md says descending then reverse, I'll just fetch ascending.
                 String navSql = """
                     SELECT nav FROM (
                         SELECT nav, nav_date FROM fund_history
@@ -55,19 +56,27 @@ public class HurstExponentService {
                 if (navs.size() < LOOKBACK_DAYS + 1) continue;
 
                 // Convert to log daily returns
-                double[] returns = new double[LOOKBACK_DAYS];
+                double[] returnsAll = new double[LOOKBACK_DAYS];
                 for (int i = 0; i < LOOKBACK_DAYS; i++) {
                     double prevNav = navs.get(i);
                     double todayNav = navs.get(i + 1);
                     if (prevNav > 0) {
-                        returns[i] = Math.log(todayNav / prevNav);
+                        returnsAll[i] = Math.log(todayNav / prevNav);
                     }
                 }
 
-                double hurst       = calculateHurst(returns);
-                double volTax      = calculateVolatilityTax(returns);
-                String regime      = classifyRegime(hurst);
-                double rarityPct   = calculateHistoricalRarityPct(returns);
+                // Multi-scale windows
+                double[] returnsShort = Arrays.copyOfRange(returnsAll, LOOKBACK_DAYS - LOOKBACK_SHORT, LOOKBACK_DAYS);
+                double[] returnsMid   = Arrays.copyOfRange(returnsAll, LOOKBACK_DAYS - LOOKBACK_MID, LOOKBACK_DAYS);
+
+                double hurstShort = returnsShort.length >= LOOKBACK_SHORT ? calculateHurst(returnsShort) : 0.5;
+                double hurstMid   = returnsMid.length >= LOOKBACK_MID ? calculateHurst(returnsMid) : 0.5;
+                double hurst      = calculateHurst(returnsAll);
+
+                double volTax            = calculateVolatilityTax(returnsAll);
+                String regime            = classifyRegime(hurst);
+                String multiScaleRegime  = classifyMultiScaleRegime(hurstShort, hurstMid, hurst);
+                double rarityPct         = calculateHistoricalRarityPct(returnsAll);
 
                 // 3. Persist to fund_conviction_metrics (latest calculation_date row)
                 jdbcTemplate.update("""
@@ -75,10 +84,13 @@ public class HurstExponentService {
                     SET hurst_exponent        = ?,
                         volatility_tax        = ?,
                         hurst_regime          = ?,
-                        historical_rarity_pct = ?
+                        historical_rarity_pct = ?,
+                        hurst_20d             = ?,
+                        hurst_60d             = ?,
+                        multi_scale_regime    = ?
                     WHERE amfi_code = ?
                     AND calculation_date = (SELECT MAX(calculation_date) FROM fund_conviction_metrics)
-                    """, hurst, volTax, regime, rarityPct, amfi);
+                    """, hurst, volTax, regime, rarityPct, hurstShort, hurstMid, multiScaleRegime, amfi);
 
                 success++;
             } catch (Exception e) {
@@ -86,6 +98,13 @@ public class HurstExponentService {
             }
         }
         log.info("✅ Hurst Engine complete. Processed {}/{} funds.", success, amfiCodes.size());
+    }
+
+    private String classifyMultiScaleRegime(double h20, double h60, double h252) {
+        if (h20 > 0.55 && h60 > 0.55 && h252 > 0.55) return "FRACTAL_BREAKOUT";
+        if (h20 > 0.75) return "STRONG_HOLD";
+        if (h20 > 0.55 && h252 < 0.50) return "MEAN_REVERSION_RALLY";
+        return classifyRegime(h252);
     }
 
     /**

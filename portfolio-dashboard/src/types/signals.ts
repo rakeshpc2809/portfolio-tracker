@@ -4,6 +4,14 @@ export type HurstRegime = 'MEAN_REVERTING' | 'TRENDING' | 'RANDOM_WALK';
 export type ZScoreLabel = 'STATISTICALLY_CHEAP' | 'SLIGHTLY_CHEAP' | 'NEUTRAL' | 'SLIGHTLY_RICH' | 'OVERHEATED' | 'CRITICAL_REVIEW';
 export type UIMetaphor  = 'RUBBER_BAND' | 'VOLATILITY_HARVEST' | 'WAVE_RIDER' | 'THERMOMETER' | 'COOLING_OFF';
 
+export interface FeatureAttribution {
+  zScoreContrib: number;
+  hurstContrib: number;
+  hmmContrib:   number;
+  ouContrib:    number;
+  taxContrib:   number;
+}
+
 export interface ReasoningMetadata {
   primaryNarrative:     string;
   technicalLabel:       string;
@@ -17,6 +25,9 @@ export interface ReasoningMetadata {
   historicalRarityPct:  number;
   harvestAmountRupees:  number;
   harvestExplanation:   string;
+  ouHalfLifeDays:       number;
+  ouInterpretation:     string;
+  featureAttribution:   FeatureAttribution | null;
 }
 
 export interface TacticalSignal {
@@ -37,4 +48,12 @@ export interface TacticalSignal {
   lastBuyDate:         string | null;
   justifications:      string[];
   reasoningMetadata:   ReasoningMetadata | null; // null = legacy signal, render fallback
+  hurst20d:            number;
+  hurst60d:            number;
+  multiScaleRegime:    string;
+  ouHalfLife:          number;
+  ouValid:             boolean;
+  ouBuyThreshold:      number;
+  ouSellThreshold:     number;
+  hrpOverrideActive:   boolean;
 }

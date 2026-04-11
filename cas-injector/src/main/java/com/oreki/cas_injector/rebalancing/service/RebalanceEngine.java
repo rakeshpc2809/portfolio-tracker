@@ -3,18 +3,26 @@ package com.oreki.cas_injector.rebalancing.service;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 
 import org.springframework.stereotype.Service;
 
 import com.oreki.cas_injector.convictionmetrics.dto.MarketMetrics;
 import com.oreki.cas_injector.core.dto.AggregatedHolding;
+import com.oreki.cas_injector.core.service.SystemicRiskMonitorService;
+import com.oreki.cas_injector.core.service.SystemicRiskMonitorService.TailRiskLevel;
 import com.oreki.cas_injector.core.utils.SignalType;
 import com.oreki.cas_injector.rebalancing.dto.ReasoningMetadata;
 import com.oreki.cas_injector.rebalancing.dto.StrategyTarget;
 import com.oreki.cas_injector.rebalancing.dto.TacticalSignal;
 
+import lombok.RequiredArgsConstructor;
+
 @Service
+@RequiredArgsConstructor
 public class RebalanceEngine {
+
+    private final SystemicRiskMonitorService systemicRiskMonitor;
 
     // ── Thresholds ────────────────────────────────────────────────────────────
     private static final double DRIFT_TOLERANCE     = 2.5;   // ±2.5% before action
@@ -26,7 +34,6 @@ public class RebalanceEngine {
     private static final double Z_BUY_MILD          = -1.0;  // Mild discount — buy confirmed by drift
     private static final double Z_SELL_STRONG       =  2.0;  // "Overheated" — harvest now
     private static final double Z_SELL_MILD         =  1.0;  // Mild richness — sell confirmed by drift
-    private static final double Z_CRITICAL          = -4.0;  // "Sanity Bound" from DESIGN-v2.md
 
     // Hurst regime
     private static final double H_TRENDING          = 0.55;  // Above this: "Riding the Wave" override
@@ -37,7 +44,24 @@ public class RebalanceEngine {
             StrategyTarget    target,
             MarketMetrics     metrics,
             double            totalPortfolioValue,
-            String            amfiCode) {
+            String            amfiCode,
+            List<AggregatedHolding> allHoldings,
+            Map<String, String> nameToAmfiMap) {
+
+        TailRiskLevel tailRisk = systemicRiskMonitor.assessTailRisk(
+            allHoldings, Map.of(amfiCode, metrics), nameToAmfiMap);
+
+        if (tailRisk == TailRiskLevel.CRITICAL) {
+            List<String> justifications = new ArrayList<>();
+            justifications.add("🚨 Tail Risk Alert: Portfolio CVaR has breached the -3.5% " +
+                "danger threshold. All new buy signals are suspended until systemic risk normalises. " +
+                "This is your portfolio's safety circuit breaker.");
+            ReasoningMetadata meta = buildCriticalReviewMetadata(holding, metrics.rollingZScore252(), metrics.hurstExponent(), metrics.hurstRegime(), metrics.historicalRarityPct(), target.targetPortfolioPct() - (totalPortfolioValue > 0 ? (holding.getCurrentValue() / totalPortfolioValue * 100.0) : 0), metrics);
+            return buildSignal(holding, amfiCode, SignalType.WATCH, 0.0, target.targetPortfolioPct(), 
+                (totalPortfolioValue > 0 ? (holding.getCurrentValue() / totalPortfolioValue * 100.0) : 0), target.sipPct(), "ACTIVE", metrics, justifications, meta);
+        }
+
+        boolean elevatedRisk = tailRisk == TailRiskLevel.ELEVATED;
 
         double targetPct = target.targetPortfolioPct();
         double sipPct    = target.sipPct();
@@ -59,6 +83,10 @@ public class RebalanceEngine {
         String status = resolveStatus(targetPct, sipPct, actualPct);
         SignalType action = SignalType.HOLD;
         List<String> justifications = new ArrayList<>();
+        
+        if (elevatedRisk) {
+            justifications.add("⚠️ Elevated tail risk detected (CVaR < -2.5%). Position sizing reduced. Monitor closely.");
+        }
 
         // ══════════════════════════════════════════════════════════════════════
         // CASE 1: DROPPED FUND — full exit logic
@@ -72,7 +100,7 @@ public class RebalanceEngine {
                 action = SignalType.HOLD;
             }
 
-            ReasoningMetadata meta = buildDroppedMetadata(holding, z, H, vt, regime);
+            ReasoningMetadata meta = buildDroppedMetadata(holding, z, H, vt, regime, metrics);
             return buildSignal(holding, amfiCode, action, diffAmount, targetPct, actualPct,
                     sipPct, status, metrics, justifications, meta);
         }
@@ -91,7 +119,7 @@ public class RebalanceEngine {
                     "Keeping position open to capture remaining momentum.",
                     H, z, Z_SELL_STRONG));
 
-                ReasoningMetadata meta = buildWaveRiderMetadata(holding, z, H, vt, regime, overweightPct);
+                ReasoningMetadata meta = buildWaveRiderMetadata(holding, z, H, vt, regime, overweightPct, metrics);
                 return buildSignal(holding, amfiCode, action, 0, targetPct, actualPct,
                         sipPct, status, metrics, justifications, meta);
             }
@@ -104,7 +132,23 @@ public class RebalanceEngine {
 
             double harvestAmount = (overweightPct / 100.0) * totalPortfolioValue * vt;
 
-            if (z >= Z_SELL_STRONG) {
+            double effectiveSellThreshold = metrics.ouValid() ? metrics.ouSellThreshold() : Z_SELL_STRONG;
+            
+            // HMM Bull Regime Override
+            if ("CALM_BULL".equals(metrics.hmmState()) && metrics.hmmBullProb() > 0.65) {
+                effectiveSellThreshold += 0.5;
+                justifications.add(String.format(Locale.US,
+                    "🌊 Bull Regime Override: HMM confidence in Bull state is %.0f%%. Allowing momentum to run slightly longer before trimming (Threshold raised to %.2fσ).",
+                    metrics.hmmBullProb() * 100, effectiveSellThreshold));
+            }
+
+            if (metrics.ouValid()) {
+                justifications.add(String.format(Locale.US,
+                    "📐 OU-Calibrated Exit: Optimal sell zone (%.2fσ) used based on half-life of %.0f days.",
+                    metrics.ouSellThreshold(), metrics.ouHalfLife()));
+            }
+
+            if (z >= effectiveSellThreshold) {
                 justifications.add(String.format(Locale.US,
                     "Volatility Harvest: Z-Score +%.2fσ — fund is statistically overheated " +
                     "(only %.1f%% of days are this expensive). Trim now to capture ₹%,.0f " +
@@ -120,10 +164,10 @@ public class RebalanceEngine {
             }
 
             action = applyTaxOverride(holding, action, justifications, totalPortfolioValue,
-                    overweightPct, STCG_WAIT_DAYS);
+                    overweightPct, STCG_WAIT_DAYS, metrics);
 
             ReasoningMetadata meta = buildHarvestMetadata(holding, z, H, vt, regime, rarity,
-                    harvestAmount, action);
+                    harvestAmount, action, metrics, totalPortfolioValue, overweightPct);
             return buildSignal(holding, amfiCode, action, diffAmount, targetPct, actualPct,
                     sipPct, status, metrics, justifications, meta);
         }
@@ -133,17 +177,20 @@ public class RebalanceEngine {
         // ══════════════════════════════════════════════════════════════════════
         if (actualPct < targetPct - DRIFT_TOLERANCE) {
             double deficit = targetPct - actualPct;
+            
+            if (elevatedRisk) {
+                diffAmount = diffAmount / 2.0;
+            }
 
-            // ── SANITY BOUND: DESIGN-v2.md requirement ───────────────────────
-            if (z < Z_CRITICAL) {
+            // ── HMM Safety Gate ──
+            if ("VOLATILE_BEAR".equals(metrics.hmmState()) && metrics.hmmTransitionBearProb() > 0.60) {
                 action = SignalType.WATCH;
-                justifications.add(String.format(Locale.US,
-                    "CRITICAL REVIEW: Z-Score %.2fσ is below sanity bound (%.1fσ). " +
-                    "This may indicate a structural crash rather than a healthy dip. " +
-                    "Manual review required before buying.",
-                    z, Z_CRITICAL));
-                
-                ReasoningMetadata meta = buildCriticalReviewMetadata(holding, z, H, regime, rarity, deficit);
+                justifications.add("🧠 Regime Intelligence: The Hidden Markov Model detects a " +
+                    String.format("%.0f%%", metrics.hmmTransitionBearProb() * 100) +
+                    " probability of remaining in a Volatile Bear regime. " +
+                    "Waiting for the market floor before deploying capital. " +
+                    "This is not a permanent hold — the model re-evaluates every night.");
+                ReasoningMetadata meta = buildWatchMetadata(holding, z, H, regime, deficit, metrics);
                 return buildSignal(holding, amfiCode, action, 0, targetPct, actualPct,
                         sipPct, status, metrics, justifications, meta);
             }
@@ -158,13 +205,22 @@ public class RebalanceEngine {
                     "Wait for Z-Score to confirm the dip is over.",
                     H, z, Z_BUY_MILD, deficit));
 
-                ReasoningMetadata meta = buildWatchMetadata(holding, z, H, regime, deficit);
+                ReasoningMetadata meta = buildWatchMetadata(holding, z, H, regime, deficit, metrics);
                 return buildSignal(holding, amfiCode, action, 0, targetPct, actualPct,
                         sipPct, status, metrics, justifications, meta);
             }
 
+            // ── OU-CALIBRATED ENTRY ──
+            double effectiveBuyThreshold = metrics.ouValid() ? metrics.ouBuyThreshold() : Z_BUY_STRONG;
+            if (metrics.ouValid()) {
+                justifications.add(String.format(Locale.US,
+                    "📐 OU-Calibrated Entry: This fund's mean-reversion half-life is %.0f trading days. " +
+                    "The optimal buy zone (%.2fσ) is tighter than the default threshold, reflecting faster recovery speed.",
+                    metrics.ouHalfLife(), metrics.ouBuyThreshold()));
+            }
+
             // ── MEAN REVERTING + CHEAP: Classic "Rubber Band" buy ─────────────
-            if (H < H_MEAN_REVERTING && z <= Z_BUY_STRONG) {
+            if (H < H_MEAN_REVERTING && z <= effectiveBuyThreshold) {
                 justifications.add(String.format(Locale.US,
                     "Rubber Band Buy: H=%.2f (Mean Reverting) + Z-Score %.2fσ. " +
                     "This fund is statistically cheap in only %.1f%% of historical days. " +
@@ -172,13 +228,19 @@ public class RebalanceEngine {
                     H, z, rarity));
                 action = SignalType.BUY;
             }
+            else if (metrics.ouValid() && metrics.ouHalfLife() < 20 && z < -0.8) {
+                action = SignalType.BUY;
+                justifications.add(String.format(Locale.US,
+                    "⚡ Fast Reverter: Historical data shows this fund recovers half its discount in under 20 trading days (half-life: %.0f days) — deploy before the window closes.",
+                    metrics.ouHalfLife()));
+            }
             else if (metrics.convictionScore() > 0 && metrics.convictionScore() < MIN_BUY_CONVICTION) {
                 action = SignalType.WATCH;
                 justifications.add(String.format(Locale.US,
                     "BUY suppressed: Conviction %d < threshold %d. " +
                     "Underweight by %.2f%% but fundamentals are deteriorating. Review fund.",
                     metrics.convictionScore(), MIN_BUY_CONVICTION, deficit));
-            } else {
+            } else if (z <= effectiveBuyThreshold) {
                 justifications.add(String.format(Locale.US,
                     "Underweight by %.2f%%. Z-Score %.2fσ (%.1f%% historical rarity). " +
                     "Conviction: %d/100. Status: %s.",
@@ -187,7 +249,7 @@ public class RebalanceEngine {
             }
 
             ReasoningMetadata meta = buildRubberBandMetadata(holding, z, H, regime, rarity,
-                    deficit, action);
+                    deficit, action, metrics);
             return buildSignal(holding, amfiCode, action, diffAmount, targetPct, actualPct,
                     sipPct, status, metrics, justifications, meta);
         }
@@ -213,31 +275,44 @@ public class RebalanceEngine {
     }
 
     private SignalType applyTaxOverride(AggregatedHolding h, SignalType action,
-            List<String> justs, double totalValue, double overweightPct, int stcgWaitDays) {
+            List<String> justs, double totalValue, double overweightPct, int stcgWaitDays, MarketMetrics metrics) {
         if (h.getLtcgAmount() > 0) {
             justs.add(String.format(Locale.US,
-                "Tax Strategy: Selling oldest lots first — ₹%.2f in LTCG gains. Use HIFO.",
+                "Tax Strategy: Selling oldest lots first — ₹%,.0f in LTCG gains. Use HIFO.",
                 h.getLtcgAmount()));
             return SignalType.SELL;
         }
+        
         if (h.getStcgValue() > 0 && h.getDaysToNextLtcg() > 0 && h.getDaysToNextLtcg() <= stcgWaitDays) {
-            justs.add(String.format(Locale.US,
-                "Action overridden to HOLD: %d days until LTCG on ₹%.2f. Redirect SIP instead.",
-                h.getDaysToNextLtcg(), h.getStcgValue()));
-            return SignalType.HOLD;
-        }
-        if (h.getStcgValue() > 0 && h.getDaysToNextLtcg() > stcgWaitDays) {
-            double stcgTax  = h.getStcgAmount() * 0.20;
-            double driftCost = (overweightPct / 100.0) * totalValue * 0.015;
-            if (stcgTax >= driftCost) {
+            double driftCostAnnual = (Math.abs(overweightPct) / 100.0) * totalValue * metrics.volatilityTax();
+            double taxHit = h.getStcgTaxEstimate() != null ? h.getStcgTaxEstimate() : 0.0;
+
+            if (driftCostAnnual > taxHit) {
                 justs.add(String.format(Locale.US,
-                    "HOLD: STCG tax ₹%.2f exceeds drift drag ₹%.2f. Pause SIP instead.",
-                    stcgTax, driftCost));
+                    "💡 Wealth Optimal: The estimated annual drift cost (%s) exceeds the tax bill (%s). " +
+                    "Rebalancing now preserves more long-term wealth than deferring.",
+                    String.format("₹%,.0f", driftCostAnnual), String.format("₹%,.0f", taxHit)));
+                return action;
+            } else {
+                justs.add(String.format(Locale.US,
+                    "Tax Shield Active: Waiting %d days saves %s in tax — more than the %s drift cost.",
+                    h.getDaysToNextLtcg(), String.format("₹%,.0f", taxHit), String.format("₹%,.0f", driftCostAnnual)));
+                return SignalType.HOLD;
+            }
+        }
+        
+        if (h.getStcgValue() > 0 && h.getDaysToNextLtcg() > stcgWaitDays) {
+            double taxHit  = h.getStcgTaxEstimate() != null ? h.getStcgTaxEstimate() : (h.getStcgAmount() * 0.20);
+            double driftCost = (overweightPct / 100.0) * totalValue * metrics.volatilityTax();
+            if (taxHit >= driftCost) {
+                justs.add(String.format(Locale.US,
+                    "HOLD: STCG tax %s exceeds drift drag %s. Pause SIP instead.",
+                    String.format("₹%,.0f", taxHit), String.format("₹%,.0f", driftCost)));
                 return SignalType.HOLD;
             }
             justs.add(String.format(Locale.US,
-                "STCG override lifted: Tax ₹%.2f < drift drag ₹%.2f. Trim now.",
-                stcgTax, driftCost));
+                "STCG override lifted: Tax %s < drift drag %s. Trim now.",
+                String.format("₹%,.0f", taxHit), String.format("₹%,.0f", driftCost)));
         }
         return action;
     }
@@ -245,33 +320,39 @@ public class RebalanceEngine {
     private void applyTaxJustifications(AggregatedHolding h, List<String> justs, int stcgWaitDays) {
         if (h.getLtcgAmount() > 0)
             justs.add(String.format(Locale.US,
-                "Tax Benefit: Exiting unlocks ₹%.2f in LTCG. Stay within ₹1.25L annual limit.",
+                "Tax Benefit: Exiting unlocks ₹%,.0f in LTCG. Stay within ₹1.25L annual limit.",
                 h.getLtcgAmount()));
         if (h.getStcgAmount() > 0 && h.getDaysToNextLtcg() > 0 && h.getDaysToNextLtcg() <= stcgWaitDays)
             justs.add(String.format(Locale.US,
-                "Exit deferred: %d days until LTCG on ₹%.2f. Waiting saves 20%% STCG.",
+                "Exit deferred: %d days until LTCG on ₹%,.0f. Waiting saves 20%% STCG.",
                 h.getDaysToNextLtcg(), h.getStcgValue()));
     }
 
     // ── ReasoningMetadata builders ─────────────────────────────────────────────
 
     private ReasoningMetadata buildRubberBandMetadata(AggregatedHolding h, double z,
-            double H, String regime, double rarity, double deficit, SignalType action) {
+            double H, String regime, double rarity, double deficit, SignalType action, MarketMetrics metrics) {
         boolean isStrong = z <= Z_BUY_STRONG;
         String zLabel    = z <= Z_BUY_STRONG ? "STATISTICALLY_CHEAP" : "SLIGHTLY_CHEAP";
         String metaphor  = "RUBBER_BAND";
         String noob = isStrong
             ? String.format("This fund is on a rare %.0f%%-of-days discount. It's a stretched rubber band — a snapback is statistically due.", rarity)
             : String.format("The fund is %.2f%% underweight and showing a mild price dip.", deficit);
+        
+        double ouHalfLife = metrics.ouHalfLife();
+        String ouInterp = metrics.ouValid() ? formatOuInterpretation(ouHalfLife) : "";
+
+        ReasoningMetadata.FeatureAttribution attr = computeAttribution(z, H, metrics, 0.0, 0.0);
+
         return new ReasoningMetadata(
             h.getSchemeName() + " is underweight by " + String.format("%.2f%%", deficit),
             String.format("Z-Score: %.2fσ | H=%.2f (%s)", z, H, regime),
-            noob, metaphor, z, H, 0.0, regime, zLabel, rarity, 0.0, ""
+            noob, metaphor, z, H, 0.0, regime, zLabel, rarity, 0.0, "", ouHalfLife, ouInterp, attr
         );
     }
 
     private ReasoningMetadata buildHarvestMetadata(AggregatedHolding h, double z,
-            double H, double vt, String regime, double rarity, double harvest, SignalType action) {
+            double H, double vt, String regime, double rarity, double harvest, SignalType action, MarketMetrics metrics, double totalValue, double overweightPct) {
         String zLabel   = z >= Z_SELL_STRONG ? "OVERHEATED" : "SLIGHTLY_RICH";
         String metaphor = z >= Z_SELL_STRONG ? "THERMOMETER" : "VOLATILITY_HARVEST";
         String noob = z >= Z_SELL_STRONG
@@ -280,51 +361,100 @@ public class RebalanceEngine {
         String harvestExpl = String.format(
             "Rebalancing captures ₹%,.0f in variance drag (VT=%.2f%% p.a.) that would otherwise erode returns.",
             harvest, vt * 100);
+
+        double ouHalfLife = metrics.ouHalfLife();
+        String ouInterp = metrics.ouValid() ? formatOuInterpretation(ouHalfLife) : "";
+
+        double taxHit = h.getStcgTaxEstimate() != null ? h.getStcgTaxEstimate() : 0.0;
+        double driftCost = (Math.abs(overweightPct) / 100.0) * totalValue * vt;
+        ReasoningMetadata.FeatureAttribution attr = computeAttribution(z, H, metrics, taxHit, driftCost);
+
         return new ReasoningMetadata(
             "Trim " + h.getSchemeName() + " — drifted overweight",
             String.format("Z-Score: +%.2fσ | H=%.2f (%s) | VT=%.2f%%", z, H, regime, vt * 100),
-            noob, metaphor, z, H, vt, regime, zLabel, rarity, harvest, harvestExpl
+            noob, metaphor, z, H, vt, regime, zLabel, rarity, harvest, harvestExpl, ouHalfLife, ouInterp, attr
         );
     }
 
     private ReasoningMetadata buildWaveRiderMetadata(AggregatedHolding h, double z,
-            double H, double vt, String regime, double overweightPct) {
+            double H, double vt, String regime, double overweightPct, MarketMetrics metrics) {
+        double ouHalfLife = metrics.ouHalfLife();
+        String ouInterp = metrics.ouValid() ? formatOuInterpretation(ouHalfLife) : "";
+        ReasoningMetadata.FeatureAttribution attr = computeAttribution(z, H, metrics, 0.0, 0.0);
         return new ReasoningMetadata(
             h.getSchemeName() + " is trending upward — holding overweight position",
             String.format("H=%.2f (Trending) | Z=%.2fσ — not yet overheated", H, z),
             String.format("Riding the Wave — this fund is in a strong uptrend (H=%.2f). We won't cut profits yet. Wait for Z>+%.1fσ to harvest.", H, Z_SELL_STRONG),
-            "WAVE_RIDER", z, H, vt, regime, "NEUTRAL", 50.0, 0.0, ""
+            "WAVE_RIDER", z, H, vt, regime, "NEUTRAL", 50.0, 0.0, "", ouHalfLife, ouInterp, attr
         );
     }
 
     private ReasoningMetadata buildWatchMetadata(AggregatedHolding h, double z,
-            double H, String regime, double deficit) {
+            double H, String regime, double deficit, MarketMetrics metrics) {
+        double ouHalfLife = metrics.ouHalfLife();
+        String ouInterp = metrics.ouValid() ? formatOuInterpretation(ouHalfLife) : "";
+        ReasoningMetadata.FeatureAttribution attr = computeAttribution(z, H, metrics, 0.0, 0.0);
         return new ReasoningMetadata(
             h.getSchemeName() + " is underweight but in a downtrend — waiting",
             String.format("H=%.2f (Trending Down) | Z=%.2fσ — no discount yet", H, z),
             String.format("Don't catch a falling knife. The fund is %.2f%% underweight but still trending down (H=%.2f). We'll buy once Z-Score confirms the dip is done.", deficit, H),
-            "COOLING_OFF", z, H, 0.0, regime, "NEUTRAL", 50.0, 0.0, ""
+            "COOLING_OFF", z, H, 0.0, regime, "NEUTRAL", 50.0, 0.0, "", ouHalfLife, ouInterp, attr
         );
     }
 
     private ReasoningMetadata buildCriticalReviewMetadata(AggregatedHolding h, double z,
-            double H, String regime, double rarity, double deficit) {
+            double H, String regime, double rarity, double deficit, MarketMetrics metrics) {
+        double ouHalfLife = metrics.ouHalfLife();
+        String ouInterp = metrics.ouValid() ? formatOuInterpretation(ouHalfLife) : "";
+        ReasoningMetadata.FeatureAttribution attr = computeAttribution(z, H, metrics, 0.0, 0.0);
         return new ReasoningMetadata(
             h.getSchemeName() + " requires CRITICAL REVIEW",
             String.format("Z-Score: %.2fσ | H=%.2f (%s)", z, H, regime),
             "This fund is crashing harder than usual. It's below our sanity bound — manual review needed to ensure it's not a structural failure.",
-            "COOLING_OFF", z, H, 0.0, regime, "CRITICAL_REVIEW", rarity, 0.0, ""
+            "COOLING_OFF", z, H, 0.0, regime, "CRITICAL_REVIEW", rarity, 0.0, "", ouHalfLife, ouInterp, attr
         );
     }
 
     private ReasoningMetadata buildDroppedMetadata(AggregatedHolding h, double z,
-            double H, double vt, String regime) {
+            double H, double vt, String regime, MarketMetrics metrics) {
+        double ouHalfLife = metrics.ouHalfLife();
+        String ouInterp = metrics.ouValid() ? formatOuInterpretation(ouHalfLife) : "";
+        ReasoningMetadata.FeatureAttribution attr = computeAttribution(z, H, metrics, 0.0, 0.0);
         return new ReasoningMetadata(
             h.getSchemeName() + " has been removed from the strategy",
             "Status: DROPPED — Strategic Exit",
             "This fund is no longer part of your investment plan. Time to exit cleanly.",
-            "COOLING_OFF", z, H, vt, regime, "NEUTRAL", 50.0, 0.0, ""
+            "COOLING_OFF", z, H, vt, regime, "NEUTRAL", 50.0, 0.0, "", ouHalfLife, ouInterp, attr
         );
+    }
+
+    private String formatOuInterpretation(double ouHalfLife) {
+        if (ouHalfLife < 20) return String.format("This fund snaps back fast — half its discount gone in under %.0f trading days.", ouHalfLife);
+        if (ouHalfLife < 60) return String.format("Moderate recovery pace — expect the discount to narrow over %.0f trading days.", ouHalfLife);
+        return String.format("Patient trade — full reversion may take %.0f+ trading days. Size accordingly.", ouHalfLife);
+    }
+
+    private ReasoningMetadata.FeatureAttribution computeAttribution(double z, double H, MarketMetrics metrics, double taxHit, double driftCost) {
+        double zScoreContrib = clamp(Math.abs(z) / 4.0, 0, 1);
+        double hurstContrib = "FRACTAL_BREAKOUT".equals(metrics.multiScaleRegime()) ? 0.8 :
+                             "MEAN_REVERTING".equals(metrics.hurstRegime()) ? 0.6 : 0.3;
+        double hmmContrib = "CALM_BULL".equals(metrics.hmmState()) ? 0.8 :
+                           "VOLATILE_BEAR".equals(metrics.hmmState()) ? 0.2 : 0.5;
+        double ouContrib = metrics.ouValid() ? clamp((180 - metrics.ouHalfLife()) / 180, 0.1, 0.9) : 0.1;
+        double taxContrib = (taxHit > 0) ? clamp(1.0 - taxHit / (taxHit + driftCost + 0.001), 0, 1) : 0.5;
+
+        double sum = zScoreContrib + hurstContrib + hmmContrib + ouContrib + taxContrib;
+        return new ReasoningMetadata.FeatureAttribution(
+            zScoreContrib / sum,
+            hurstContrib / sum,
+            hmmContrib / sum,
+            ouContrib / sum,
+            taxContrib / sum
+        );
+    }
+
+    private double clamp(double val, double min, double max) {
+        return Math.max(min, Math.min(max, val));
     }
 
     private TacticalSignal buildSignal(AggregatedHolding h, String amfi, SignalType action,
@@ -336,7 +466,9 @@ public class RebalanceEngine {
             round(targetPct), round(actualPct), round(sipPct), status,
             m.convictionScore(), m.sortinoRatio(), m.maxDrawdown(),
             m.navPercentile3yr(), m.drawdownFromAth(), m.returnZScore(),
-            m.lastBuyDate(), justs, meta);
+            m.lastBuyDate(), justs, meta,
+            m.hurst20d(), m.hurst60d(), m.multiScaleRegime(),
+            m.ouHalfLife(), m.ouValid(), m.ouBuyThreshold(), m.ouSellThreshold(), false);
     }
 
     private double round(double v) { return Math.round(v * 100.0) / 100.0; }

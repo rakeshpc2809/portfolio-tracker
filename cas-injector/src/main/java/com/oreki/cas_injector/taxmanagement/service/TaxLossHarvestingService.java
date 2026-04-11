@@ -114,7 +114,7 @@ public class TaxLossHarvestingService {
             // 5. Evaluate the accumulated FIFO harvest
             if (accumCapitalLoss >= MIN_ABSOLUTE_LOSS_THRESHOLD) {
                 String taxBucket = isShortTerm ? "STCL (Offsets any gain)" : "LTCL (Offsets only LTCG)";
-                String proxy = proxyMap.getOrDefault(scheme.getName().trim(), "Search for similar category peer");
+                String proxy = proxyMap.getOrDefault(scheme.getAmfiCode(), "Search for similar category peer");
 
                 opportunities.add(new TlhOpportunity(
                     scheme.getName(),
@@ -122,11 +122,43 @@ public class TaxLossHarvestingService {
                     accumHarvestAmount,
                     accumCapitalLoss, // The exact tax write-off value
                     taxBucket,
-                    proxy
+                    proxy,
+                    TlhOpportunity.OpportunityType.TAX_LOSS_HARVEST,
+                    accumCapitalLoss * (isShortTerm ? 0.20 : 0.125),
+                    String.format("Harvesting this loss saves ₹%,.0f in future taxes.", accumCapitalLoss * (isShortTerm ? 0.20 : 0.125))
                 ));
                 
                 log.info("🪓 TLH Found: Sell ₹{} of {} to bank ₹{} in {}", 
                     Math.round(accumHarvestAmount), scheme.getName(), Math.round(accumCapitalLoss), taxBucket);
+            }
+        }
+
+        // --- SECOND PASS: SIP REDIRECT ---
+        for (Map.Entry<Scheme, List<TaxLot>> entry : lotsByScheme.entrySet()) {
+            Scheme scheme = entry.getKey();
+            String proxyFundName = proxyMap.get(scheme.getAmfiCode());
+            if (proxyFundName == null) continue;
+
+            double totalCost = entry.getValue().stream().mapToDouble(l -> l.getCostBasisPerUnit().doubleValue() * l.getRemainingUnits().doubleValue()).sum();
+            double currentNav = amfiService.getLatestSchemeDetails(scheme.getAmfiCode()).getNav().doubleValue();
+            double totalValue = entry.getValue().stream().mapToDouble(l -> l.getRemainingUnits().doubleValue() * currentNav).sum();
+            double unrealizedGain = totalValue - totalCost;
+
+            if (unrealizedGain > 0.20 * totalCost) {
+                opportunities.add(new TlhOpportunity(
+                    scheme.getName(),
+                    scheme.getAmfiCode(),
+                    0.0,
+                    0.0,
+                    "N/A",
+                    proxyFundName,
+                    TlhOpportunity.OpportunityType.SIP_REDIRECT,
+                    unrealizedGain * 0.125,
+                    "🔄 Stop SIP to " + scheme.getName() + 
+                    ". Redirect to " + proxyFundName + 
+                    " to build fresh cost-basis. This maintains your sector exposure " +
+                    "while creating future loss-recognition capacity."
+                ));
             }
         }
 

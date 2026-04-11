@@ -4,7 +4,70 @@ import {
 } from "recharts";
 import { HeartPulse } from 'lucide-react';
 import MetricWithTooltip from '../ui/MetricWithTooltip';
-import CurrencyValue from '../ui/CurrencyValue';
+import LearnTooltip from '../ui/LearnTooltip';
+
+const ACTION_COLORS: Record<string, string> = {
+  BUY: '#34d399',
+  SELL: '#f87171',
+  WATCH: '#fbbf24',
+  EXIT: '#ef4444',
+  HOLD: '#6366f1',
+  DEFAULT: '#94a3b8'
+};
+
+const CustomTreemapContent = (props: any) => {
+  const { x, y, width, height, name, action } = props;
+  const color = ACTION_COLORS[action as string] || ACTION_COLORS.HOLD;
+
+  return (
+    <g>
+      <rect
+        x={x}
+        y={y}
+        width={width}
+        height={height}
+        style={{
+          fill: color,
+          stroke: 'rgba(9,9,15,0.8)',
+          strokeWidth: 2,
+        }}
+      />
+      {width > 80 && height > 30 && (
+        <text
+          x={x + 5}
+          y={y + 15}
+          fill="#fff"
+          fontSize={10}
+          fontWeight="bold"
+        >
+          {name.length > 20 ? name.substring(0, 20) + '...' : name}
+        </text>
+      )}
+      {width > 50 && action && (
+        <rect
+          x={x + width - 45}
+          y={y + 5}
+          width={40}
+          height={14}
+          rx={7}
+          fill="rgba(0,0,0,0.2)"
+        />
+      )}
+      {width > 50 && action && (
+        <text
+          x={x + width - 25}
+          y={y + 15}
+          textAnchor="middle"
+          fill="#fff"
+          fontSize={8}
+          fontWeight="bold"
+        >
+          {action}
+        </text>
+      )}
+    </g>
+  );
+};
 
 export default function PortfolioView({ 
   portfolioData, 
@@ -25,23 +88,12 @@ export default function PortfolioView({
   const totalUnrealizedGainPos = breakdown.reduce((a: number, s: any) => a + Math.max(0, (s.unrealizedGain || 0)), 0);
   const taxEfficiency = totalUnrealizedGainPos > 0 ? totalUnrealizedLTCG / totalUnrealizedGainPos : 0;
 
-  const highConv = breakdown.filter((s: any) => s.convictionScore >= 65).length;
-  const midConv = breakdown.filter((s: any) => s.convictionScore >= 45 && s.convictionScore < 65).length;
-  const lowConv = breakdown.filter((s: any) => s.convictionScore < 45).length;
-  const totalFunds = breakdown.length || 1;
-
-  const unrealizedPct = portfolioData.totalInvestedAmount 
-    ? (portfolioData.totalUnrealizedGain / portfolioData.totalInvestedAmount) * 100 
-    : 0;
-  const unrealizedAbsPct = Math.min(100, Math.abs(unrealizedPct));
-  const isUnrealizedNegative = unrealizedPct < 0;
-
   // Prep Treemap Data (Nested hierarchy)
   const treemapData = Object.entries(
     breakdown.reduce((acc: any, s: any) => {
       const b = s.bucket || 'OTHERS';
       if (!acc[b]) acc[b] = { name: b.replace(/_/g, ' '), children: [] };
-      acc[b].children.push({ name: s.schemeName, size: s.currentValue || 0 });
+      acc[b].children.push({ name: s.schemeName, size: s.currentValue || 0, action: s.action });
       return acc;
     }, {})
   ).map(([_, val]: any) => val);
@@ -55,6 +107,11 @@ export default function PortfolioView({
     }))
     .sort((a: any, b: any) => b.Personal - a.Personal);
 
+  const formatCurrency = (val: number) => {
+    if (isPrivate) return '₹••••';
+    return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(val);
+  };
+
   return (
     <div className="space-y-10 pb-32">
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -63,7 +120,7 @@ export default function PortfolioView({
           <div className="pl-3">
             <MetricWithTooltip 
               label="Portfolio Value" 
-              value={<CurrencyValue isPrivate={isPrivate} value={totalValue} />}
+              value={formatCurrency(totalValue)}
               tooltip="The current market value of all active holdings."
             />
           </div>
@@ -84,7 +141,7 @@ export default function PortfolioView({
           <div className="pl-3">
             <MetricWithTooltip 
               label="Unrealised P&L" 
-              value={<CurrencyValue isPrivate={isPrivate} value={portfolioData.totalUnrealizedGain} />}
+              value={formatCurrency(portfolioData.totalUnrealizedGain)}
               valueClass={portfolioData.totalUnrealizedGain >= 0 ? "text-buy glow-buy" : "text-exit glow-exit"}
               tooltip="Current profit or loss from holdings you haven't sold yet."
             />
@@ -95,7 +152,7 @@ export default function PortfolioView({
           <div className="pl-3">
             <MetricWithTooltip 
               label="Tax Exposure (STCG)" 
-              value={<CurrencyValue isPrivate={isPrivate} value={portfolioData.totalSTCG} />}
+              value={formatCurrency(portfolioData.totalSTCG)}
               valueClass="text-warning"
               tooltip="Estimated tax if you sold all units held for less than 1 year today."
             />
@@ -104,10 +161,14 @@ export default function PortfolioView({
       </div>
 
       <section className="bg-surface border border-border p-8 rounded-xl">
-        <div className="flex items-center justify-between mb-8">
+        <div className="flex items-center justify-between mb-2">
           <h3 className="text-primary text-sm font-medium tracking-tight">Strategy Allocation Treemap</h3>
           <span className="text-muted text-[10px] uppercase tracking-widest">Box size = Market Value</span>
         </div>
+        <p className="text-[10px] text-muted mb-6">
+          Box size = portfolio value. Color = what the engine recommends.
+          Hover any box for details.
+        </p>
         
         <div className="h-[400px] w-full bg-white/[0.02] rounded-lg overflow-hidden border border-white/5">
           <ResponsiveContainer width="100%" height="100%">
@@ -116,7 +177,7 @@ export default function PortfolioView({
               dataKey="size"
               aspectRatio={4 / 3}
               stroke="rgba(9,9,15,0.8)"
-              fill="#818cf8"
+              content={<CustomTreemapContent />}
             >
               <RechartsTooltip 
                 content={({ active, payload }) => {
@@ -125,9 +186,12 @@ export default function PortfolioView({
                     return (
                       <div className="bg-surface-elevated border border-border p-3 rounded-lg shadow-2xl backdrop-blur-md">
                         <p className="text-[10px] text-muted uppercase tracking-widest mb-1">{data.name}</p>
-                        <p className="text-xs font-bold text-primary">
+                        <p className="text-xs font-bold text-primary mb-1">
                           {isPrivate ? '••••' : `₹${(data.size / 1000).toFixed(1)}k`}
                         </p>
+                        {data.action && (
+                          <p className="text-[9px] font-bold text-buy">{data.action} Signal</p>
+                        )}
                       </div>
                     );
                   }
@@ -137,16 +201,31 @@ export default function PortfolioView({
             </Treemap>
           </ResponsiveContainer>
         </div>
+
+        <div className="flex gap-4 flex-wrap mt-3">
+          {[
+            {label:'On sale — good entry', color:'#34d399', action:'BUY'},
+            {label:'Overheated — trim', color:'#f87171', action:'SELL'},
+            {label:'Watching', color:'#fbbf24', action:'WATCH'},
+            {label:'Holding steady', color:'#6366f1', action:'HOLD'},
+          ].map(item => (
+            <div key={item.action} className="flex items-center gap-2">
+              <div className="w-3 h-3 rounded-sm" style={{background: item.color}}/>
+              <span className="text-[10px] text-muted">{item.label}</span>
+            </div>
+          ))}
+        </div>
       </section>
 
       <section>
         <h3 className="text-muted text-[10px] font-medium uppercase tracking-widest mb-4 flex items-center gap-2">
           <HeartPulse size={12} className="text-accent" /> Vital Signs
         </h3>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          {/* 1. Portfolio CVaR */}
           <div className="bg-surface border border-border p-6 rounded-xl space-y-4">
             <MetricWithTooltip 
-              label="Portfolio CVaR" 
+              label={<LearnTooltip term="CVaR">Portfolio CVaR</LearnTooltip>}
               value={`${weightedCVaR.toFixed(2)}%`}
               tooltip="Expected loss on the worst 5% of trading days. Closer to zero is safer."
             />
@@ -157,11 +236,19 @@ export default function PortfolioView({
               />
             </div>
             <div className="flex justify-between items-center text-[9px] text-muted uppercase tracking-tighter">
-              <span>Risky</span>
-              <span>Safe</span>
+              {weightedCVaR < -3.5 ? (
+                <span className="text-exit">⚠ Critical — buys paused</span>
+              ) : weightedCVaR < -2.5 ? (
+                <span className="text-warning">Elevated risk</span>
+              ) : weightedCVaR < -1.5 ? (
+                <span className="text-warning">Moderate risk</span>
+              ) : (
+                <span className="text-buy">Safe</span>
+              )}
             </div>
           </div>
 
+          {/* 2. Tax Efficiency */}
           <div className="bg-surface border border-border p-6 rounded-xl space-y-4">
             <MetricWithTooltip 
               label="Tax Efficiency (Unrealised)" 
@@ -174,48 +261,76 @@ export default function PortfolioView({
                 style={{ width: `${taxEfficiency * 100}%` }} 
               />
             </div>
-            <div className="flex justify-between items-center text-[9px] text-muted uppercase tracking-tighter">
-              <span>Low LTCG</span>
-              <span>Tax Optimized</span>
+            <div className="flex flex-col gap-1">
+              <div className="flex justify-between items-center text-[9px] text-muted uppercase tracking-tighter">
+                {taxEfficiency < 0.4 ? (
+                  <span className="text-exit">Low LTCG</span>
+                ) : taxEfficiency < 0.7 ? (
+                  <span className="text-warning">Building</span>
+                ) : (
+                  <span className="text-buy">Tax Optimised</span>
+                )}
+              </div>
+              <p className="text-[8px] text-muted opacity-60">% of unrealised gains that qualify for the lower 12.5% LTCG rate</p>
             </div>
           </div>
 
-          <div className="bg-surface border border-border p-6 rounded-xl space-y-4">
-            <MetricWithTooltip 
-              label="Conviction Distribution" 
-              value={`${highConv} High / ${midConv} Mid`}
-              tooltip="Distribution of conviction scores across your active funds."
-            />
-            <div className="h-2 w-full bg-white/5 rounded-full overflow-hidden flex">
-              <div style={{ width: `${(highConv/totalFunds)*100}%` }} className="h-full bg-buy shadow-[0_0_10px_rgba(52,211,153,0.3)]" />
-              <div style={{ width: `${(midConv/totalFunds)*100}%` }} className="h-full bg-warning shadow-[0_0_10px_rgba(251,191,36,0.3)]" />
-              <div style={{ width: `${(lowConv/totalFunds)*100}%` }} className="h-full bg-exit shadow-[0_0_10px_rgba(248,113,113,0.3)]" />
-            </div>
-            <div className="flex gap-4">
-              <span className="text-[10px] text-buy font-bold">{highConv} high</span>
-              <span className="text-[10px] text-warning font-bold">{midConv} mid</span>
-              <span className="text-[10px] text-exit font-bold">{lowConv} low</span>
-            </div>
-          </div>
+          {/* 3. Regime Pulse (HMM) */}
+          {(() => {
+            const bull = breakdown.filter((s: any) => s.hmmState === 'CALM_BULL').length;
+            const bear = breakdown.filter((s: any) => s.hmmState === 'VOLATILE_BEAR').length;
+            const neutralCount = breakdown.length - bull - bear;
+            const total = breakdown.length || 1;
 
-          <div className="bg-surface border border-border p-6 rounded-xl space-y-4">
-            <MetricWithTooltip 
-              label="Unrealised Gain %" 
-              value={`${unrealizedPct.toFixed(1)}%`}
-              valueClass={isUnrealizedNegative ? "text-exit glow-exit" : "text-buy glow-buy"}
-              tooltip="Absolute return on currently active capital."
-            />
-            <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden">
-              <div 
-                className={`h-full transition-all duration-500 ${isUnrealizedNegative ? 'bg-exit shadow-[0_0_10px_rgba(248,113,113,0.3)]' : 'bg-buy shadow-[0_0_10px_rgba(52,211,153,0.3)]'}`}
-                style={{ width: `${unrealizedAbsPct}%` }} 
-              />
-            </div>
-            <div className="flex justify-between items-center text-[9px] text-muted uppercase tracking-tighter">
-              <span>0%</span>
-              <span>{Math.max(10, Math.ceil(unrealizedAbsPct / 10) * 10)}%</span>
-            </div>
-          </div>
+            return (
+              <div className="bg-surface border border-border p-6 rounded-xl space-y-4">
+                <MetricWithTooltip 
+                  label="Regime Pulse" 
+                  value={`${bull} Bull / ${bear} Bear`}
+                  tooltip="How many of your funds are currently in a bull vs bear regime according to the Hidden Markov Model analysis."
+                />
+                <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden flex">
+                  <div style={{ width: `${(bull/total)*100}%` }} className="h-full bg-buy shadow-[0_0_8px_rgba(52,211,153,0.3)]" />
+                  <div style={{ width: `${(neutralCount/total)*100}%` }} className="h-full bg-white/10" />
+                  <div style={{ width: `${(bear/total)*100}%` }} className="h-full bg-exit shadow-[0_0_8px_rgba(248,113,113,0.3)]" />
+                </div>
+                <div className="flex justify-between items-center text-[9px] text-muted uppercase tracking-tighter">
+                  <span>Market climate across funds</span>
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* 4. Half-life Clock (OU) */}
+          {(() => {
+            const validFunds = breakdown.filter((s: any) => s.ouValid);
+            const avgHalfLife = validFunds.length > 0 
+              ? validFunds.reduce((acc: number, s: any) => acc + s.ouHalfLife, 0) / validFunds.length 
+              : 0;
+
+            return (
+              <div className="bg-surface border border-border p-6 rounded-xl space-y-4">
+                <MetricWithTooltip 
+                  label="Avg. Reversion Speed" 
+                  value={avgHalfLife > 0 ? `${avgHalfLife.toFixed(0)} days` : 'N/A'}
+                  tooltip="How long it typically takes for a fund's discount to halve (OU Process half-life)."
+                />
+                <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden">
+                  <div 
+                    className={`h-full transition-all duration-500 ${avgHalfLife < 20 ? 'bg-warning shadow-[0_0_8px_rgba(251,191,36,0.3)]' : avgHalfLife > 60 ? 'bg-accent shadow-[0_0_8px_rgba(129,140,248,0.3)]' : 'bg-white/20'}`} 
+                    style={{ width: `${Math.min(100, avgHalfLife)}%` }} 
+                  />
+                </div>
+                <div className="flex flex-col gap-1 text-[9px] text-muted uppercase tracking-tighter">
+                  {avgHalfLife === 0 ? <span>Waiting for data</span> :
+                   avgHalfLife < 20 ? <span className="text-warning">Fast market — act quickly</span> :
+                   avgHalfLife > 60 ? <span className="text-accent">Patient market — discounts persist</span> :
+                   <span>Normal reversion pace</span>
+                  }
+                </div>
+              </div>
+            );
+          })()}
         </div>
       </section>
 

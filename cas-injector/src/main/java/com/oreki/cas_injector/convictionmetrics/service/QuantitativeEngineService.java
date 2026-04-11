@@ -19,9 +19,11 @@ public class QuantitativeEngineService {
     private final ConvictionMetricsRepository convictionMetricsRepository;
     private final BucketZScorerService bucketZScorerService;
     private final HurstExponentService hurstExponentService;
+    private final OrnsteinUhlenbeckService ouService;
+    private final HmmRegimeService hmmRegimeService;
 
     @Getter private final AtomicBoolean isRunning = new AtomicBoolean(false);
-    @Getter private final AtomicInteger currentStep = new AtomicInteger(0); // 0-6
+    @Getter private final AtomicInteger currentStep = new AtomicInteger(0); // 0-7
     @Getter private String lastStatusMessage = "Idle";
 
     /**
@@ -35,7 +37,7 @@ public class QuantitativeEngineService {
         }
 
         try {
-            log.info("🧮 Starting Advanced Quantitative Math Engine (Sortino, CVaR, MDD, NAV Signals, Hurst, Z-Score)...");
+            log.info("🧮 Starting Advanced Quantitative Math Engine (Sortino, CVaR, MDD, NAV Signals, Hurst, Z-Score, OU, HMM)...");
             long startTime = System.currentTimeMillis();
 
             // 1. Run existing Sortino/CVaR/MDD block
@@ -64,9 +66,19 @@ public class QuantitativeEngineService {
             lastStatusMessage = "Running Hurst Exponent R/S Analysis...";
             hurstExponentService.computeAndPersistHurstMetrics();
 
+            // 6. Run new OU Process Calibration
+            currentStep.set(6);
+            lastStatusMessage = "Calibrating Ornstein-Uhlenbeck Mean Reversion...";
+            ouService.computeAndPersistOUMetrics();
+
+            // 7. Run HMM Regime Filter
+            currentStep.set(7);
+            lastStatusMessage = "Detecting HMM Market Regimes...";
+            hmmRegimeService.computeAndPersistHmmStates();
+
             long endTime = System.currentTimeMillis();
             lastStatusMessage = "Complete! Updated " + mainMetricsRows + " funds.";
-            log.info("✅ Math Engine Complete! Main Metrics updated for {} funds. NAV Signals updated for {} rows. Z-Score/Hurst complete in {} ms.", 
+            log.info("✅ Math Engine Complete! Main Metrics updated for {} funds. NAV Signals updated for {} rows. Z-Score/Hurst/OU/HMM complete in {} ms.", 
                 mainMetricsRows, navSignalRows, (endTime - startTime));
         } catch (Exception e) {
             lastStatusMessage = "Failed: " + e.getMessage();
