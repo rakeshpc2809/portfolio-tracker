@@ -6,32 +6,49 @@ import { motion, AnimatePresence } from 'framer-motion';
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
-function PriceZoneBar({ percentile }: { percentile: number }) {
-  const pct = Math.min(100, Math.max(0, (percentile ?? 0.5) * 100));
-  const zone = pct > 70 
-    ? 'Expensive vs 1yr' 
-    : pct < 30 
-    ? 'Cheap vs 1yr' 
-    : 'Fair value zone';
-  const color = pct > 70 ? 'text-exit' : pct < 30 ? 'text-buy' : 'text-muted';
+function ZScoreBar({ zScore, rarityPct }: { zScore: number; rarityPct: number }) {
+  const z = Math.max(-4, Math.min(4, zScore ?? 0));
+  const pct = ((z + 4) / 8) * 100; // Map -4..+4 -> 0..100%
+  const zone = z <= -2 ? 'Statistically cheap' 
+             : z <= -1 ? 'Mild discount'
+             : z >= 2  ? 'Statistically stretched'
+             : z >= 1  ? 'Mild premium'
+             : 'Fair value';
+  const color = z <= -1.5 ? 'text-buy' : z >= 1.5 ? 'text-exit' : 'text-muted';
   
   return (
     <div className="space-y-3">
       <div className="flex justify-between items-end">
         <div className="flex items-center gap-1.5 group cursor-help">
           <LearnTooltip term="Z_SCORE">
-            <span className="text-[10px] font-black uppercase tracking-widest text-muted group-hover:text-secondary transition-colors">1yr Range Pulse</span>
+            <span className="text-[10px] font-black uppercase tracking-widest text-muted group-hover:text-secondary transition-colors">Statistical Pricing</span>
           </LearnTooltip>
           <Info size={10} className="text-hint group-hover:text-accent transition-all" />
         </div>
-        <span className={`text-[10px] font-black uppercase tracking-tighter ${color}`}>{pct.toFixed(0)}% — {zone}</span>
+        <div className="text-right">
+          <span className={`text-[10px] font-black uppercase tracking-tighter ${color}`}>{z.toFixed(1)}σ — {zone}</span>
+          {Math.abs(z) >= 1.5 && (
+            <p className="text-[8px] font-black text-muted uppercase tracking-widest mt-0.5 opacity-60">
+              Only {rarityPct.toFixed(1)}% of days this {z < 0 ? 'cheap' : 'expensive'}
+            </p>
+          )}
+        </div>
       </div>
       <div 
         className="relative w-full h-2 rounded-full overflow-hidden border border-white/5 bg-black/20 shadow-inner"
         style={{
-          background: 'linear-gradient(to right, rgba(74,222,128,0.15) 0%, rgba(255,255,255,0.02) 30%, rgba(255,255,255,0.02) 70%, rgba(248,113,113,0.15) 100%)'
+          background: 'linear-gradient(to right, #313244 0%, #313244 25%, #181825 25%, #181825 40%, #181825 60%, #181825 75%, #313244 75%, #313244 100%)'
         }}
       >
+        {/* Zone Tints */}
+        <div className="absolute inset-0 flex">
+          <div className="h-full bg-buy/10" style={{ width: '25%' }} />
+          <div className="h-full bg-buy/5" style={{ width: '15%' }} />
+          <div className="h-full" style={{ width: '20%' }} />
+          <div className="h-full bg-exit/5" style={{ width: '15%' }} />
+          <div className="h-full bg-exit/10" style={{ width: '25%' }} />
+        </div>
+
         <motion.div 
           className="absolute top-0 w-2 h-2 bg-white rounded-full border border-black/50 shadow-[0_0_10px_rgba(255,255,255,0.8)] z-10"
           initial={{ left: 0 }}
@@ -310,7 +327,7 @@ export default function FundsListView({
                 </div>
 
                 {/* ── Price Pulse ── */}
-                <PriceZoneBar percentile={fund.navPercentile3yr} />
+                <ZScoreBar zScore={fund.rollingZScore252} rarityPct={fund.historicalRarityPct ?? 50} />
 
                 {/* ── Performance Matrix ── */}
                 <div className="grid grid-cols-4 gap-2 py-2">

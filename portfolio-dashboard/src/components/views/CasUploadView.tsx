@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { uploadCas, triggerBackfill, triggerForceSync, fetchAdminStatus } from "@/services/api";
 import { Upload, ShieldCheck, FileText, AlertCircle, CheckCircle2, Database, Zap, Loader2, Info, TrendingUp } from "lucide-react";
+import SockJS from 'sockjs-client';
+import { Client } from '@stomp/stompjs';
 
 const CasUploadView: React.FC<{ pan: string }> = ({ pan }) => {
   const [file, setFile] = useState<File | null>(null);
@@ -11,8 +13,9 @@ const CasUploadView: React.FC<{ pan: string }> = ({ pan }) => {
   const [adminStatus, setAdminStatus] = useState<any>(null);
   const [syncing, setSyncing] = useState(false);
   const [backfilling, setBackfilling] = useState(false);
+  const [engineProgress, setEngineProgress] = useState<any>(null);
 
-  // Polling for admin status
+  // Polling for backfill status (WebSocket only for engine for now)
   useEffect(() => {
     const interval = setInterval(async () => {
       try {
@@ -23,6 +26,23 @@ const CasUploadView: React.FC<{ pan: string }> = ({ pan }) => {
       }
     }, 3000);
     return () => clearInterval(interval);
+  }, []);
+
+  // WebSocket Connection for Engine Progress
+  useEffect(() => {
+    const client = new Client({
+      webSocketFactory: () => new SockJS('/api/ws'),
+      onConnect: () => {
+        client.subscribe('/topic/engine-progress', (msg) => {
+          const data = JSON.parse(msg.body);
+          setEngineProgress(data);
+        });
+      },
+      debug: (str) => console.log('STOMP: ' + str),
+    });
+
+    client.activate();
+    return () => { client.deactivate(); };
   }, []);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -97,7 +117,7 @@ const CasUploadView: React.FC<{ pan: string }> = ({ pan }) => {
             <div className="px-6 pt-6 pb-4 border-b border-border bg-white/[0.01]">
               <div className="flex items-center gap-2 mb-1">
                 <Upload className="h-5 w-5 text-accent" />
-                <h3 className="text-sm font-bold text-primary uppercase tracking-widest">CAS PDF Upload</h3>
+                <h3 className="text-sm font-bold text-primary uppercase tracking-widest">Consolidated PDF Statement</h3>
               </div>
               <p className="text-[10px] text-muted mt-1 uppercase tracking-wider font-semibold">
                 Processes CAS PDF locally and injects into database.
@@ -109,7 +129,7 @@ const CasUploadView: React.FC<{ pan: string }> = ({ pan }) => {
                   <div className="flex flex-col items-center justify-center p-8 border border-border rounded-xl bg-white/[0.01] hover:bg-white/[0.03] transition-all cursor-pointer group/upload relative overflow-hidden">
                     <div className="absolute inset-0 bg-accent/5 opacity-0 group-hover/upload:opacity-100 transition-opacity" />
                     <FileText className="h-12 w-12 text-muted/20 mb-4 group-hover/upload:text-accent/40 group-hover/upload:scale-110 transition-all duration-500" />
-                    <label className="text-[10px] font-black uppercase tracking-[0.2em] text-muted mb-4 group-hover/upload:text-secondary transition-colors">Select Consolidated Statement</label>
+                    <label className="text-[10px] font-black uppercase tracking-[0.2em] text-muted mb-4 group-hover/upload:text-secondary transition-colors">Select Statement</label>
                     <input
                       id="cas-file-input"
                       type="file"
@@ -227,7 +247,7 @@ const CasUploadView: React.FC<{ pan: string }> = ({ pan }) => {
               <div className="space-y-4">
                 <div className="flex justify-between items-center">
                   <span className="text-[10px] font-black uppercase tracking-[0.2em] text-primary">Quantitative Engine</span>
-                  {adminStatus?.engine?.isRunning && (
+                  {(adminStatus?.engine?.isRunning || (engineProgress && engineProgress.step < 7 && engineProgress.step > 0)) && (
                     <span className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-buy/10 text-buy text-[9px] font-black uppercase border border-buy/20 shadow-[0_0_10px_rgba(52,211,153,0.2)]">
                       <Loader2 className="h-2.5 w-2.5 animate-spin" />
                       Computing
@@ -235,23 +255,29 @@ const CasUploadView: React.FC<{ pan: string }> = ({ pan }) => {
                   )}
                 </div>
                 <p className="text-[11px] text-secondary leading-relaxed font-medium">
-                  Triggers 4-phase calculation: Risk indexing, NAV signals, Peer-relative Z-Scoring and Conviction updates.
+                  Triggers 7-phase calculation: Risk indexing, NAV signals, Peer-relative Z-Scoring, Conviction, Hurst, OU Reversion, and HMM Regimes.
                 </p>
-                {adminStatus?.engine?.isRunning && (
+                {(adminStatus?.engine?.isRunning || (engineProgress && engineProgress.step < 7 && engineProgress.step > 0)) && (
                   <div className="space-y-2.5 bg-white/[0.02] p-4 rounded-xl border border-border">
                     <div className="flex justify-between text-[9px] font-black uppercase tracking-widest text-muted">
                       <span>Execution Phase</span>
-                      <span className="text-secondary">{adminStatus.engine.step} / 4</span>
+                      <span className="text-secondary">{engineProgress?.step || adminStatus?.engine?.step} / 7</span>
                     </div>
                     <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden">
                       <div 
                         className="h-full bg-buy transition-all duration-700 shadow-[0_0_12px_rgba(52,211,153,0.5)]" 
-                        style={{ width: `${(adminStatus.engine.step / 4) * 100}%` }}
+                        style={{ width: `${((engineProgress?.step || adminStatus?.engine?.step) / 7) * 100}%` }}
                       />
                     </div>
                     <p className="text-[9px] text-buy/80 font-bold uppercase tracking-tighter italic">
-                      {adminStatus.engine.message}
+                      {engineProgress?.message || adminStatus?.engine?.message}
                     </p>
+                  </div>
+                )}
+                {engineProgress?.step === 7 && (
+                  <div className="flex items-center gap-2 text-buy bg-buy/10 p-3 rounded-xl border border-buy/20 animate-in fade-in zoom-in duration-500">
+                    <CheckCircle2 size={14} />
+                    <span className="text-[9px] font-black uppercase tracking-widest">Engine Cycle Complete ✓</span>
                   </div>
                 )}
                 <button 

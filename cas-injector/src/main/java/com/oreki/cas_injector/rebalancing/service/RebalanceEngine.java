@@ -71,7 +71,7 @@ public class RebalanceEngine {
         String regime = metrics.hurstRegime();
         double rarity = metrics.historicalRarityPct();
 
-        String status = resolveStatus(originalSheetPct, sipPct, actualPct);
+        String status = resolveStatus(targetPct, sipPct, actualPct, originalSheetPct);
         SignalType action = SignalType.HOLD;
         List<String> justifications = new ArrayList<>();
         
@@ -113,6 +113,12 @@ public class RebalanceEngine {
 
         if (actualPct < targetPct - DRIFT_TOLERANCE) {
             double deficit = targetPct - actualPct;
+            
+            if ("NEW_ENTRY".equals(status)) {
+                action = SignalType.BUY;
+                justifications.add("New Position: This fund is on your strategy but not yet purchased. Initial entry signal — deploy via SIP or lumpsum.");
+            }
+
             if ("VOLATILE_BEAR".equals(metrics.hmmState()) && metrics.hmmTransitionBearProb() > 0.60) {
                 ReasoningMetadata meta = buildWatchMetadata(holding, z, H, regime, deficit, metrics);
                 return buildSignal(holding, amfiCode, SignalType.WATCH, 0, targetPct, actualPct, sipPct, status, metrics, justifications, meta);
@@ -135,8 +141,9 @@ public class RebalanceEngine {
         return buildSignal(holding, amfiCode, SignalType.HOLD, 0, targetPct, actualPct, sipPct, status, metrics, justifications, meta);
     }
 
-    private String resolveStatus(double targetPct, double sipPct, double actualPct) {
-        if (targetPct == 0.0 && sipPct == 0.0 && actualPct > 0.0) return "DROPPED";
+    private String resolveStatus(double targetPct, double sipPct, double actualPct, double originalSheetPct) {
+        if (originalSheetPct == 0.0 && sipPct == 0.0 && actualPct > 0.0) return "DROPPED";
+        if (targetPct > 0.0 && actualPct == 0.0) return "NEW_ENTRY";
         if (sipPct > 0.0 && actualPct < targetPct) return "ACCUMULATOR";
         return "ACTIVE";
     }

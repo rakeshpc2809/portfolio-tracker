@@ -24,7 +24,7 @@ export const fetchMasterPortfolio = async (investorPan: string, sip: number = 75
     const mergedData = (dashboard.schemeBreakdown || []).map((item: any) => {
       return {
         ...item,
-        cleanCategory: normalizeCategory(item.category),
+        cleanCategory: normalizeCategory(item.category, item.schemeName),
         shortName: item.schemeName ? item.schemeName.substring(0, 25) + "..." : "Unknown Fund",
         deviation: (parseFloat(item.allocationPercentage || 0) - parseFloat(item.plannedPercentage || 0)).toFixed(2)
       };
@@ -104,6 +104,19 @@ export const triggerForceSync = async (pan: string) => {
 export const fetchAdminStatus = async () => {
   const response = await authenticatedFetch(`${BASE_URL}/admin/status`);
   if (!response.ok) throw new Error("Failed to fetch admin status");
+  return response.json();
+};
+
+export const fetchPerformanceData = async (pan: string) => {
+  const res = await authenticatedFetch(`${BASE_URL}/dashboard/performance/${pan}`);
+  if (!res.ok) return null;
+  return res.json();
+};
+
+export const checkInvestorExistence = async (pan: string) => {
+  const response = await authenticatedFetch(`${BASE_URL}/investor/check/${pan}`);
+  if (response.status === 404) return null;
+  if (!response.ok) throw new Error("Verification failed");
   return response.json();
 };
 

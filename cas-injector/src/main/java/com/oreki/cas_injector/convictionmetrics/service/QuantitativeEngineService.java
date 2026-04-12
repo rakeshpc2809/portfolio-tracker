@@ -4,20 +4,22 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 
 import com.oreki.cas_injector.convictionmetrics.repository.ConvictionMetricsRepository;
 
 import lombok.Getter;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 @Service
 @Slf4j
-@RequiredArgsConstructor
 public class QuantitativeEngineService {
 
     private final ConvictionMetricsRepository convictionMetricsRepository;
@@ -25,16 +27,38 @@ public class QuantitativeEngineService {
     private final HurstExponentService hurstExponentService;
     private final OrnsteinUhlenbeckService ouService;
     private final HmmRegimeService hmmRegimeService;
+    private final SimpMessagingTemplate messagingTemplate;
+    private final Executor taskExecutor;
 
     @Getter private final AtomicBoolean isRunning = new AtomicBoolean(false);
     @Getter private final AtomicInteger currentStep = new AtomicInteger(0); // 0-7
     @Getter private String lastStatusMessage = "Idle";
 
-    /**
-     * This method triggers the native PostgreSQL Window Functions
-     * to calculate quantitative metrics for every fund.
-     */
-  public void runNightlyMathEngine() {
+    public QuantitativeEngineService(
+            ConvictionMetricsRepository convictionMetricsRepository,
+            BucketZScorerService bucketZScorerService,
+            HurstExponentService hurstExponentService,
+            OrnsteinUhlenbeckService ouService,
+            HmmRegimeService hmmRegimeService,
+            SimpMessagingTemplate messagingTemplate,
+            @Qualifier("mathEngineExecutor") Executor taskExecutor) {
+        this.convictionMetricsRepository = convictionMetricsRepository;
+        this.bucketZScorerService = bucketZScorerService;
+        this.hurstExponentService = hurstExponentService;
+        this.ouService = ouService;
+        this.hmmRegimeService = hmmRegimeService;
+        this.messagingTemplate = messagingTemplate;
+        this.taskExecutor = taskExecutor;
+    }
+
+    private void updateStatus(int step, String message) {
+        this.currentStep.set(step);
+        this.lastStatusMessage = message;
+        messagingTemplate.convertAndSend("/topic/engine-progress", 
+            Map.of("step", step, "message", message, "total", 7));
+    }
+
+    public void runNightlyMathEngine() {
         if (isRunning.getAndSet(true)) {
             log.warn("Math Engine already running.");
             return;
@@ -43,7 +67,7 @@ public class QuantitativeEngineService {
         try {
             if (convictionMetricsRepository.getHistoryCount() == 0) {
                 log.warn("⚠️ Math Engine aborted: fund_history is empty. Please run 'Full History Refresh' first.");
-                lastStatusMessage = "Failed: History missing. Run 'Full History Refresh' first.";
+                updateStatus(0, "Failed: History missing. Run 'Full History Refresh' first.");
                 isRunning.set(false);
                 return;
             }
@@ -51,52 +75,50 @@ public class QuantitativeEngineService {
             log.info("🧮 Starting Advanced Quantitative Math Engine (Sortino, CVaR, MDD, NAV Signals, Hurst, Z-Score, OU, HMM)...");
             long startTime = System.currentTimeMillis();
 
-            // 1. Run existing Sortino/CVaR/MDD block
-            currentStep.set(1);
-            lastStatusMessage = "Calculating main risk metrics (Sortino, CVaR)...";
+            // 1. Run main risk metrics
+            updateStatus(1, "Calculating main risk metrics (Sortino, CVaR)...");
             int mainMetricsRows = convictionMetricsRepository.runNightlyMathEngine();
 
-            // 2. Run existing NAV Signals block (Percentile, ATH Drawdown, Return Z-Score)
-            currentStep.set(2);
-            lastStatusMessage = "Updating NAV signals (Percentile, ATH)...";
+            // 2. Run NAV Signals
+            updateStatus(2, "Updating NAV signals (Percentile, ATH)...");
             int navSignalRows = convictionMetricsRepository.updateNavSignals();
 
-            // 3. Run existing Bucket Z-Scorer (CQS)
-            currentStep.set(3);
-            lastStatusMessage = "Computing relative Bucket Z-Scores...";
+            // 3. Run Bucket Z-Scorer
+            updateStatus(3, "Computing relative Bucket Z-Scores...");
             bucketZScorerService.computeBucketCqs();
 
-            // 4. Run new Rolling Z-Score & Volatility Tax via SQL
-            currentStep.set(4);
-            lastStatusMessage = "Computing Rolling 252-day Z-Score & Volatility Tax...";
-            int zScoreRows = convictionMetricsRepository.updateRollingZScoreAndVolatilityTax();
-            log.info("📈 Rolling Z-Score updated for {} funds.", zScoreRows);
+            // 4. Run Rolling Z-Score & Volatility Tax
+            updateStatus(4, "Computing Rolling 252-day Z-Score & Volatility Tax...");
+            convictionMetricsRepository.updateRollingZScoreAndVolatilityTax();
 
-            // ─── OPTIMISATION: Load NAV series once for all Java services ───
+            // ─── Pre-load caches ───
             Map<String, double[]> returnsCache = loadAllReturns(252);
             Map<String, double[]> navsCache = loadAllNavs(252);
 
-            // 5. Run new Hurst Exponent (Java R/S Analysis)
-            currentStep.set(1);
-            lastStatusMessage = "Running Hurst Exponent R/S Analysis...";
-            hurstExponentService.computeAndPersistHurstMetrics(returnsCache);
+            // Parallel execution of independent steps 5, 6, 7
+            updateStatus(5, "Running Hurst, OU and HMM in parallel...");
+            
+            CompletableFuture<Void> hurstFuture = CompletableFuture.runAsync(
+                () -> hurstExponentService.computeAndPersistHurstMetrics(returnsCache),
+                taskExecutor
+            );
+            CompletableFuture<Void> ouFuture = CompletableFuture.runAsync(
+                () -> ouService.computeAndPersistOUMetrics(navsCache),
+                taskExecutor
+            );
+            CompletableFuture<Void> hmmFuture = CompletableFuture.runAsync(
+                () -> hmmRegimeService.computeAndPersistHmmStates(returnsCache),
+                taskExecutor
+            );
 
-            // 6. Run new OU Process Calibration
-            currentStep.set(6);
-            lastStatusMessage = "Calibrating Ornstein-Uhlenbeck Mean Reversion...";
-            ouService.computeAndPersistOUMetrics(navsCache);
-
-            // 7. Run HMM Regime Filter
-            currentStep.set(7);
-            lastStatusMessage = "Detecting HMM Market Regimes...";
-            hmmRegimeService.computeAndPersistHmmStates(returnsCache);
+            CompletableFuture.allOf(hurstFuture, ouFuture, hmmFuture).join();
 
             long endTime = System.currentTimeMillis();
-            lastStatusMessage = "Complete! Updated " + mainMetricsRows + " funds.";
+            updateStatus(7, "Complete! Updated " + mainMetricsRows + " funds.");
             log.info("✅ Math Engine Complete! Main Metrics updated for {} funds. NAV Signals updated for {} rows. Z-Score/Hurst/OU/HMM complete in {} ms.", 
                 mainMetricsRows, navSignalRows, (endTime - startTime));
         } catch (Exception e) {
-            lastStatusMessage = "Failed: " + e.getMessage();
+            updateStatus(0, "Failed: " + e.getMessage());
             log.error("🚨 Math Engine Failed to execute native SQL or Java services.", e);
         } finally {
             isRunning.set(false);
@@ -166,11 +188,8 @@ public class QuantitativeEngineService {
             List<Double> navsDesc = entry.getValue();
             if (navsDesc.size() < days + 1) continue;
 
-            // Reverse to get chronological order for return calculation
             double[] returns = new double[days];
             for (int i = 0; i < days; i++) {
-                // navsDesc is [latest, yesterday, ..., oldest]
-                // logReturn = log(latest/yesterday)
                 double today = navsDesc.get(i); 
                 double prev  = navsDesc.get(i + 1);
                 if (prev > 0) {

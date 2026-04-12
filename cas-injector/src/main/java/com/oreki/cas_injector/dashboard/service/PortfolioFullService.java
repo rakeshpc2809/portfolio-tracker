@@ -15,6 +15,10 @@ import org.springframework.stereotype.Service;
 
 import com.oreki.cas_injector.dashboard.dto.DashboardSummaryDTO;
 import com.oreki.cas_injector.dashboard.dto.UnifiedTacticalPayload;
+import com.oreki.cas_injector.dashboard.dto.PortfolioPerformanceDTO;
+import com.oreki.cas_injector.dashboard.dto.SnapshotPoint;
+import com.oreki.cas_injector.dashboard.dto.BenchmarkPoint;
+import com.oreki.cas_injector.dashboard.dto.PeriodReturns;
 import com.oreki.cas_injector.rebalancing.dto.SipLineItem;
 import com.oreki.cas_injector.rebalancing.dto.TacticalSignal;
 import com.oreki.cas_injector.rebalancing.service.PortfolioOrchestrator;
@@ -36,14 +40,106 @@ public class PortfolioFullService {
     private final JdbcTemplate jdbcTemplate;
     private final TaxLossHarvestingService taxLossHarvestingService;
     private final TaxLotRepository taxLotRepository;
+    private final BenchmarkService benchmarkService;
+
+    public PortfolioPerformanceDTO getPerformanceHistory(String pan) {
+        // 1. Fetch portfolio_snapshot rows ordered by date ASC
+        List<Map<String, Object>> snapshots = jdbcTemplate.queryForList("""
+            SELECT snapshot_date, total_value, total_invested
+            FROM portfolio_snapshot
+            WHERE pan = ?
+            ORDER BY snapshot_date ASC
+            """, pan);
+
+        List<SnapshotPoint> history = snapshots.stream().map(r -> new SnapshotPoint(
+            r.get("snapshot_date").toString(),
+            ((Number) r.get("total_value")).doubleValue(),
+            ((Number) r.get("total_invested")).doubleValue()
+        )).toList();
+
+        // 2. Fetch Nifty 50 history for the same date range, normalize to 100 at first snapshot date
+        if (!history.isEmpty()) {
+            String fromDate = history.get(0).date();
+            List<Map<String, Object>> niftyRows = jdbcTemplate.queryForList("""
+                SELECT date, closing_price
+                FROM index_fundamentals
+                WHERE index_name = 'NIFTY 50'
+                AND date >= ?::date
+                ORDER BY date ASC
+                """, fromDate);
+
+            double firstClose = niftyRows.isEmpty() ? 1.0 :
+                ((Number) niftyRows.get(0).get("closing_price")).doubleValue();
+            
+            List<BenchmarkPoint> niftyHistory = niftyRows.stream().map(r ->
+                new BenchmarkPoint(
+                    r.get("date").toString(),
+                    ((Number) r.get("closing_price")).doubleValue() / firstClose * 100
+                )
+            ).toList();
+
+            // 3. Compute period returns from snapshots
+            PeriodReturns periods = computePeriodReturns(history);
+            
+            // 4. Compute alpha
+            DashboardSummaryDTO summary = dashboardService.getInvestorSummary(pan);
+            double xirr = 0;
+            try {
+                xirr = Double.parseDouble(summary.getOverallXirr().replace("%", ""));
+            } catch (Exception e) {
+                log.warn("Failed to parse XIRR for alpha calculation: {}", summary.getOverallXirr());
+            }
+            double benchmarkXirr = benchmarkService.getBenchmarkReturn("", "", "NIFTY 50");
+            double alpha = xirr - benchmarkXirr;
+
+            // 5. Total gain breakdown
+            double currentValue = history.get(history.size()-1).value();
+            double totalInvested = history.get(history.size()-1).invested();
+            double totalGain = currentValue - totalInvested;
+
+            return new PortfolioPerformanceDTO(
+                history, niftyHistory, 
+                totalInvested > 0 ? (totalGain / totalInvested) * 100 : 0,
+                xirr, periods, alpha, totalGain,
+                totalInvested, // SIP contribution proxy
+                totalGain // market gain
+            );
+        }
+        
+        return new PortfolioPerformanceDTO(List.of(), List.of(), 0, 0, 
+            new PeriodReturns(0,0,0,0,0,0), 0, 0, 0, 0);
+    }
+
+    private PeriodReturns computePeriodReturns(List<SnapshotPoint> history) {
+        double latest = history.isEmpty() ? 0 : history.get(history.size()-1).value();
+        return new PeriodReturns(
+            findReturn(history, latest, 30),
+            findReturn(history, latest, 90),
+            findReturn(history, latest, 180),
+            findReturn(history, latest, 365),
+            findReturn(history, latest, 1095),
+            history.size() > 1 ? (latest / history.get(0).value() - 1) * 100 : 0
+        );
+    }
+
+    private double findReturn(List<SnapshotPoint> h, double latest, int daysBack) {
+        LocalDate target = LocalDate.now().minusDays(daysBack);
+        return h.stream()
+            .filter(p -> !LocalDate.parse(p.date()).isAfter(target))
+            .reduce((a, b) -> b)
+            .map(p -> p.value() > 0 ? (latest / p.value() - 1) * 100 : 0.0)
+            .orElse(0.0);
+    }
 
     /**
      * Entry point from Controller. NOT cached.
      * Combines heavy cached base data with lightweight tactical payload.
      */
     public DashboardSummaryDTO getFullPortfolioWithTactical(String pan, double monthlySip, double lumpsum) {
+        log.info("🎯 Building Full Portfolio Dashboard for PAN: {}", pan);
         // Hits cache for heavy stuff
         DashboardSummaryDTO summary = getBasePortfolioCached(pan);
+        log.info("📦 Base portfolio loaded for {}. Schemes found: {}", pan, summary.getSchemeBreakdown().size());
         
         // Lightweight - NOT cached (depends on SIP sliders)
         List<SipLineItem> sipPlan = orchestrator.computeSipPlan(pan, monthlySip);
@@ -131,6 +227,7 @@ public class PortfolioFullService {
     public DashboardSummaryDTO getBasePortfolioCached(String pan) {
         log.info("🧮 Calculating Base Portfolio for {} (Cache Miss)", pan);
         DashboardSummaryDTO summary = dashboardService.getInvestorSummary(pan);
+        log.info("📊 Raw summary for {} has {} schemes", pan, summary.getSchemeBreakdown().size());
         enrichWithMetricsAndTax(summary, pan);
         return summary;
     }

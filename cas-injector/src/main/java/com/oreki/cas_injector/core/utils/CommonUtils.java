@@ -7,6 +7,7 @@ import java.security.MessageDigest;
 import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
+import java.util.Map;
 import java.util.function.BiFunction;
 import java.util.function.Function;
 
@@ -173,5 +174,25 @@ public static final Function<List<TransactionDTO>, BigDecimal> SOLVE_XIRR = txs 
         }
 
         return "OTHER_STCG";
+    };
+
+    /**
+     * Maps common bucket/category keywords to canonical benchmark indices
+     */
+    public static final Map<String, String> CATEGORY_TO_BENCHMARK = Map.of(
+        "LARGE",      "NIFTY 50",
+        "MID",        "NIFTY MIDCAP 150",
+        "SMALL",      "NIFTY SMALLCAP 250",
+        "FLEXI",      "NIFTY 500",
+        "DEBT",       "NIFTY 10 YR BENCHMARK G-SEC",
+        "GOLD",       "GOLD_PRICE_INDEX"
+    );
+
+    public static final BiFunction<String, String, String> DETERMINE_BENCHMARK = (bucket, category) -> {
+        String search = (bucket + " " + category).toUpperCase();
+        return CATEGORY_TO_BENCHMARK.entrySet().stream()
+            .filter(e -> search.contains(e.getKey()))
+            .map(Map.Entry::getValue)
+            .findFirst().orElse("NIFTY 50");
     };
 }

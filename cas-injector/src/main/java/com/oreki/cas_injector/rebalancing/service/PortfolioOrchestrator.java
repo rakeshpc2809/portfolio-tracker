@@ -286,13 +286,33 @@ public class PortfolioOrchestrator {
             return sig;
         }).collect(Collectors.toList());
 
-        if (cash <= 0.0) return activeDrafts.stream().filter(s -> SignalType.WATCH != s.action()).map(s -> createSignal(s, SignalType.BUY, s.amount(), s.justifications())).collect(Collectors.toList());
+        if (cash <= 0.0) return activeDrafts.stream()
+            .filter(s -> SignalType.WATCH != s.action())
+            .map(s -> createSignal(s, SignalType.BUY, s.amount(), s.justifications()))
+            .collect(Collectors.toList());
 
-        double totalDemand = activeDrafts.stream().filter(s -> SignalType.BUY == s.action()).mapToDouble(s -> Double.parseDouble(s.amount()) * Math.max(0.2, s.convictionScore() / 100.0)).sum();
+        double totalDemand = activeDrafts.stream()
+            .filter(s -> SignalType.BUY == s.action())
+            .mapToDouble(s -> Double.parseDouble(s.amount()))
+            .sum();
+
         return activeDrafts.stream().map(sig -> {
             if (SignalType.BUY != sig.action()) return sig;
+            
             double baseAmount = Double.parseDouble(sig.amount());
-            double allocatedAmount = totalDemand > 0.0 ? (baseAmount * Math.max(0.2, sig.convictionScore() / 100.0) / totalDemand) * cash : baseAmount;
+            double scoreMult = Math.max(0.2, sig.convictionScore() / 100.0);
+            
+            double allocatedAmount;
+            if (cash >= totalDemand || totalDemand == 0) {
+                allocatedAmount = baseAmount; // Enough cash — everyone gets their Kelly amount
+            } else {
+                double convictionShare = scoreMult / activeDrafts.stream()
+                    .filter(s -> SignalType.BUY == s.action())
+                    .mapToDouble(s -> Math.max(0.2, s.convictionScore() / 100.0))
+                    .sum();
+                allocatedAmount = convictionShare * cash; // Pro-rata by conviction
+            }
+
             List<String> justs = new ArrayList<>(sig.justifications());
             justs.add(String.format("Allocated ₹%,.0f.", allocatedAmount));
             return createSignal(sig, SignalType.BUY, String.format("%.2f", allocatedAmount), justs);

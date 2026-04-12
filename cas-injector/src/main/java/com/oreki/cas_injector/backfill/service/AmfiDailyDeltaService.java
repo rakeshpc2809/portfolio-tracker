@@ -18,6 +18,8 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 
+import com.oreki.cas_injector.core.model.Investor;
+import com.oreki.cas_injector.core.repository.InvestorRepository;
 import com.oreki.cas_injector.convictionmetrics.service.ConvictionScoringService;
 import com.oreki.cas_injector.convictionmetrics.service.QuantitativeEngineService;
 
@@ -32,6 +34,7 @@ public class AmfiDailyDeltaService {
     private final QuantitativeEngineService quantitativeEngineService;
     private final ConvictionScoringService convictionScoringService;
     private final CacheManager cacheManager;
+    private final InvestorRepository investorRepository;
 
     private static final String AMFI_TXT_URL = "https://www.amfiindia.com/spages/NAVAll.txt";
     private static final DateTimeFormatter DATE_FORMATTER = DateTimeFormatter.ofPattern("dd-MMM-yyyy");
@@ -39,12 +42,14 @@ public class AmfiDailyDeltaService {
     public AmfiDailyDeltaService(JdbcTemplate jdbcTemplate, RestTemplate restTemplate, 
                                  QuantitativeEngineService quantitativeEngineService,
                                  ConvictionScoringService convictionScoringService,
-                                 CacheManager cacheManager) {
+                                 CacheManager cacheManager,
+                                 InvestorRepository investorRepository) {
         this.jdbcTemplate = jdbcTemplate;
         this.restTemplate = restTemplate;
         this.quantitativeEngineService = quantitativeEngineService;
         this.convictionScoringService = convictionScoringService;
         this.cacheManager = cacheManager;
+        this.investorRepository = investorRepository;
     }
 
     // 🌟 THE NEW RESILIENCE FIX 🌟
@@ -108,20 +113,24 @@ public class AmfiDailyDeltaService {
 
             // Trigger engines
             quantitativeEngineService.runNightlyMathEngine();
-            convictionScoringService.calculateAndSaveFinalScores("CFXPR4533R");
+            investorRepository.findAll().forEach(investor -> {
+                convictionScoringService.calculateAndSaveFinalScores(investor.getPan());
+            });
 
-            // Evict portfolio cache
-            if (cacheManager.getCache("portfolioCache") != null) {
-                cacheManager.getCache("portfolioCache").clear();
-                log.info("🧹 Portfolio cache evicted.");
-            }
-            if (cacheManager.getCache("dashboardSummary") != null) {
-                cacheManager.getCache("dashboardSummary").clear();
-                log.info("🧹 Dashboard summary cache evicted.");
-            }
+            // Evict caches
+            evictCache("portfolioCache");
+            evictCache("dashboardSummary");
+            evictCache("dashboardSummaryV3");
 
         } catch (Exception e) {
             log.error("🚨 Failed to sync AMFI delta.", e);
+        }
+    }
+
+    private void evictCache(String name) {
+        if (cacheManager.getCache(name) != null) {
+            cacheManager.getCache(name).clear();
+            log.info("🧹 Cache evicted: {}", name);
         }
     }
 }

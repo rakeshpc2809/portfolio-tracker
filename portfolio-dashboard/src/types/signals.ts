@@ -49,6 +49,17 @@ export interface TacticalSignal {
   lastBuyDate:         string | null;
   justifications:      string[];
   reasoningMetadata:   ReasoningMetadata | null; // null = legacy signal, render fallback
+  
+  // Advanced Quantitative Metrics (from SchemePerformanceDTO)
+  rollingZScore252:    number;
+  historicalRarityPct: number;
+  hurstExponent:       number;
+  volatilityTax:       number;
+  hurstRegime:         string;
+  hmmState:            string;
+  hmmBullProb:         number;
+  hmmBearProb:         number;
+
   hurst20d:            number;
   hurst60d:            number;
   multiScaleRegime:    string;

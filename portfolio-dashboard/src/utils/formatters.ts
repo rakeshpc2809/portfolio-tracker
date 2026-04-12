@@ -34,10 +34,12 @@ export const formatCurrencyShort = (val: number): string => {
   return `₹${Math.round(val)}`;
 };
 
-export const normalizeCategory = (rawCat: string): string => {
+export const normalizeCategory = (rawCat: string, schemeName: string = ""): string => {
   if (!rawCat) return "Other";
   const c = rawCat.toUpperCase();
-  if (c.includes("GOLD")) return "Gold";
+  const n = schemeName.toUpperCase();
+  
+  if (c.includes("GOLD") || n.includes("GOLD")) return "Gold";
   if (c.includes("ARBITRAGE")) return "Arbitrage";
   if (c.includes("EQUITY") || c.includes("INDEX") || c.includes("GROWTH")) return "Equity";
   if (c.includes("DEBT") || c.includes("LIQUID") || c.includes("BOND") || c.includes("GILT")) return "Debt";

@@ -127,11 +127,15 @@ public class ConvictionMetricsRepository {
             CREATE TABLE IF NOT EXISTS portfolio_snapshot (
                 pan VARCHAR(20) NOT NULL,
                 snapshot_date DATE NOT NULL,
-                total_value DOUBLE PRECISION NOT NULL,
+                total_value DOUBLE PRECISION DEFAULT 0,
+                total_invested DOUBLE PRECISION DEFAULT 0,
                 PRIMARY KEY (pan, snapshot_date)
             );
         """;
         jdbcTemplate.execute(createSnapshotTableSql);
+
+        // Ensure column exists for older databases
+        jdbcTemplate.execute("ALTER TABLE portfolio_snapshot ADD COLUMN IF NOT EXISTS total_invested DOUBLE PRECISION DEFAULT 0");
     }
 
     public long getHistoryCount() {

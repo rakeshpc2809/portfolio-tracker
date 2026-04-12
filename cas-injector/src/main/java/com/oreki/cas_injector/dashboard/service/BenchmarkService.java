@@ -3,6 +3,7 @@ package com.oreki.cas_injector.dashboard.service;
 import java.util.Map;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
+import com.oreki.cas_injector.core.utils.CommonUtils;
 import lombok.RequiredArgsConstructor;
 
 @Service
@@ -11,36 +12,36 @@ public class BenchmarkService {
 
     private final JdbcTemplate jdbcTemplate;
 
-    // Maps common bucket/category keywords to canonical benchmark indices
-    private static final Map<String, String> CATEGORY_TO_BENCHMARK = Map.of(
-        "LARGE",      "NIFTY 50",
-        "MID",        "NIFTY MIDCAP 150",
-        "SMALL",      "NIFTY SMALLCAP 250",
-        "FLEXI",      "NIFTY 500",
-        "DEBT",       "NIFTY 10 YR BENCHMARK G-SEC",
-        "GOLD",       "GOLD_PRICE_INDEX"
-    );
-
     /**
      * Fetches actual 1-year annualized return from index_fundamentals if available.
-     * Uses PE ratio change as a proxy for price return.
+     * Uses a robust CTE approach to find the price exactly 365 days ago.
      */
     public double getBenchmarkReturn(String bucket, String category, String benchmarkIndex) {
         String targetIndex = (benchmarkIndex != null && !benchmarkIndex.isEmpty()) 
-            ? benchmarkIndex 
-            : CATEGORY_TO_BENCHMARK.entrySet().stream()
-                .filter(e -> (bucket + " " + category).toUpperCase().contains(e.getKey()))
-                .map(Map.Entry::getValue)
-                .findFirst().orElse("NIFTY 50");
+            ? benchmarkIndex.trim().toUpperCase() 
+            : CommonUtils.DETERMINE_BENCHMARK.apply(bucket, category);
 
         try {
             String sql = """
-                SELECT (closing_price / NULLIF(LAG(closing_price, 252) OVER (ORDER BY date), 0) - 1) * 100
-                FROM index_fundamentals
-                WHERE index_name = ?
-                ORDER BY date DESC LIMIT 1
+                WITH latest AS (
+                    SELECT closing_price, date
+                    FROM index_fundamentals
+                    WHERE index_name = ?
+                    ORDER BY date DESC
+                    LIMIT 1
+                ),
+                year_ago AS (
+                    SELECT closing_price
+                    FROM index_fundamentals
+                    WHERE index_name = ?
+                    AND date <= (SELECT date FROM latest) - INTERVAL '365 days'
+                    ORDER BY date DESC
+                    LIMIT 1
+                )
+                SELECT (latest.closing_price / NULLIF(year_ago.closing_price, 0) - 1) * 100
+                FROM latest, year_ago
                 """;
-            Double result = jdbcTemplate.queryForObject(sql, Double.class, targetIndex);
+            Double result = jdbcTemplate.queryForObject(sql, Double.class, targetIndex, targetIndex);
             if (result != null) return result;
         } catch (Exception e) {
             // Fallback to constants if data is missing or query fails
@@ -54,5 +55,37 @@ public class BenchmarkService {
         if (cat.contains("ARBITRAGE")) return 8.5;
         
         return 14.8; 
+    }
+
+    public Map<String, Double> getBenchmarkReturnsForAllPeriods(String benchmarkIndex) {
+        String index = (benchmarkIndex == null || benchmarkIndex.isEmpty()) ? "NIFTY 50" : benchmarkIndex.trim().toUpperCase();
+        
+        return Map.of(
+            "1M", computeReturnForPeriod(index, 30),
+            "3M", computeReturnForPeriod(index, 90),
+            "6M", computeReturnForPeriod(index, 180),
+            "1Y", computeReturnForPeriod(index, 365),
+            "3Y", computeReturnForPeriod(index, 1095)
+        );
+    }
+
+    private double computeReturnForPeriod(String index, int days) {
+        try {
+            String sql = """
+                WITH latest AS (
+                    SELECT closing_price, date FROM index_fundamentals WHERE index_name = ? ORDER BY date DESC LIMIT 1
+                ),
+                past AS (
+                    SELECT closing_price FROM index_fundamentals WHERE index_name = ? 
+                    AND date <= (SELECT date FROM latest) - CAST(? || ' days' AS INTERVAL)
+                    ORDER BY date DESC LIMIT 1
+                )
+                SELECT (latest.closing_price / NULLIF(past.closing_price, 0) - 1) * 100 FROM latest, past
+                """;
+            Double res = jdbcTemplate.queryForObject(sql, Double.class, index, index, days);
+            return res != null ? res : 0.0;
+        } catch (Exception e) {
+            return 0.0;
+        }
     }
 }

@@ -26,8 +26,8 @@ const DEFINITIONS: Record<string, { definition: string; whyItMatters: string }> 
     whyItMatters: "Large drift = your portfolio no longer matches your intended plan. Rebalancing brings it back."
   },
   Z_SCORE: {
-    definition: "How unusual is this fund's current price compared to its own 2-year history? -2 means 'cheaper than 97.5% of historical observations'. +2 means 'more expensive than 97.5% of historical observations'.",
-    whyItMatters: "Extreme Z-scores trigger BUY or SELL signals."
+    definition: "Measures how far today's NAV is from the fund's own 1-year average, relative to its typical daily swings. -2σ means the fund is cheaper than 97.5% of recent history — a statistical buy signal. +2σ means it's more expensive than 97.5% of recent history.",
+    whyItMatters: "Extreme Z-scores trigger BUY or SELL signals based on statistical rarity."
   },
 };
 

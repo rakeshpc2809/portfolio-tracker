@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { fetchMasterPortfolio } from "./services/api";
 import Dashboard from "./components/layout/Dashboard";
+import LoginScreen from "./components/ui/LoginScreen";
 
 function useDebounce<T>(value: T, delay: number): T {
   const [debounced, setDebounced] = useState(value);
@@ -13,9 +14,10 @@ function useDebounce<T>(value: T, delay: number): T {
 }
 
 export default function App() {
+  const [pan, setPan] = useState<string | null>(localStorage.getItem('portfolio_pan'));
   const [portfolioData, setPortfolioData] = useState<any>(null);
   const [tacticalPayload, setTacticalPayload] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sipAmount, setSipAmount] = useState(75000);
   const [lumpsum, setLumpsum] = useState(0);
@@ -24,13 +26,28 @@ export default function App() {
   const debouncedSip = useDebounce(sipAmount, 600);
   const debouncedLumpsum = useDebounce(lumpsum, 600);
 
-  const investorPan = "CFXPR4533R";
+  const handleLogin = (newPan: string) => {
+    localStorage.setItem('portfolio_pan', newPan);
+    setPan(newPan);
+  };
+
+  const handleSetup = () => {
+    setPan('SETUP');
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem('portfolio_pan');
+    setPan(null);
+    setPortfolioData(null);
+  };
 
   useEffect(() => {
+    if (!pan || pan === 'SETUP') return;
+
     const loadData = async () => {
       setLoading(true);
       try {
-        const portfolio = await fetchMasterPortfolio(investorPan, debouncedSip, debouncedLumpsum);
+        const portfolio = await fetchMasterPortfolio(pan, debouncedSip, debouncedLumpsum);
         
         setPortfolioData(portfolio);
         setTacticalPayload(portfolio.tacticalPayload || {
@@ -52,7 +69,48 @@ export default function App() {
     };
 
     loadData();
-  }, [debouncedSip, debouncedLumpsum]);
+  }, [pan, debouncedSip, debouncedLumpsum]);
+
+  if (!pan) {
+    return (
+      <AnimatePresence mode="wait">
+        <LoginScreen onLogin={handleLogin} onSetup={handleSetup} />
+      </AnimatePresence>
+    );
+  }
+
+  if (pan === 'SETUP') {
+    return (
+      <AnimatePresence mode="wait">
+        <motion.div 
+          key="setup"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ duration: 0.4 }}
+        >
+          <Dashboard 
+            portfolioData={{ 
+              schemeBreakdown: [], 
+              tacticalPayload: { 
+                sipPlan: [], 
+                opportunisticSignals: [], 
+                activeSellSignals: [], 
+                exitQueue: [], 
+                harvestOpportunities: [] 
+              } 
+            }} 
+            sipAmount={sipAmount} 
+            setSipAmount={setSipAmount}
+            lumpsum={lumpsum}
+            setLumpsum={setLumpsum}
+            pan="NEW_USER"
+            onLogout={handleLogout}
+            initialTab="upload"
+          />
+        </motion.div>
+      </AnimatePresence>
+    );
+  }
 
   return (
     <AnimatePresence mode="wait">
@@ -106,12 +164,20 @@ export default function App() {
       ) : error ? (
         <div className="fixed inset-0 bg-[#09090f] flex flex-col items-center justify-center gap-4 px-8 text-center">
           <p className="text-red-400 font-medium text-xs uppercase tracking-widest">{error}</p>
-          <button 
-            onClick={() => window.location.reload()}
-            className="px-4 py-2 bg-white/5 border border-white/10 rounded text-[10px] font-bold uppercase tracking-widest text-muted hover:text-white transition-colors"
-          >
-            Retry Connection
-          </button>
+          <div className="flex gap-4">
+            <button 
+              onClick={() => window.location.reload()}
+              className="px-4 py-2 bg-white/5 border border-white/10 rounded text-[10px] font-bold uppercase tracking-widest text-muted hover:text-white transition-colors"
+            >
+              Retry Connection
+            </button>
+            <button 
+              onClick={handleLogout}
+              className="px-4 py-2 bg-white/5 border border-white/10 rounded text-[10px] font-bold uppercase tracking-widest text-muted hover:text-white transition-colors"
+            >
+              Switch Account
+            </button>
+          </div>
         </div>
       ) : (
         <motion.div 
@@ -126,6 +192,8 @@ export default function App() {
             setSipAmount={setSipAmount}
             lumpsum={lumpsum}
             setLumpsum={setLumpsum}
+            pan={pan}
+            onLogout={handleLogout}
           />
         </motion.div>
       )}

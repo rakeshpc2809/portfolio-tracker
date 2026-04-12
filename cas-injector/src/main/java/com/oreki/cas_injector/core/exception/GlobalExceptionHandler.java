@@ -4,11 +4,13 @@ import jakarta.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.client.RestClientException;
 
 import java.time.LocalDateTime;
+import java.util.stream.Collectors;
 
 @Slf4j
 @RestControllerAdvice
@@ -30,6 +32,27 @@ public class GlobalExceptionHandler {
         );
         
         return new ResponseEntity<>(apiError, HttpStatus.BAD_GATEWAY);
+    }
+
+    /**
+     * Catches validation errors from @Valid
+     */
+    @ExceptionHandler(MethodArgumentNotValidException.class)
+    public ResponseEntity<ApiError> handleValidation(MethodArgumentNotValidException ex, HttpServletRequest request) {
+        String message = ex.getBindingResult().getFieldErrors().stream()
+            .map(e -> e.getField() + ": " + e.getDefaultMessage())
+            .collect(Collectors.joining(", "));
+        
+        log.warn("Validation failed: {}", message);
+
+        ApiError apiError = new ApiError(
+            LocalDateTime.now(),
+            HttpStatus.BAD_REQUEST.value(),
+            "Validation Failed",
+            message,
+            request.getRequestURI()
+        );
+        return new ResponseEntity<>(apiError, HttpStatus.BAD_REQUEST);
     }
 
     /**

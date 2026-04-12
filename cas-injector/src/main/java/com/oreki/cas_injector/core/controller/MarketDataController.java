@@ -18,7 +18,10 @@ public class MarketDataController {
     @PostMapping("/index-history")
     public ResponseEntity<String> saveIndexHistory(@RequestBody List<IndexFundamentals> history) {
         for (IndexFundamentals item : history) {
-            indexRepo.findByIndexNameAndDate(item.getIndexName(), item.getDate())
+            String cleanName = item.getIndexName() != null ? item.getIndexName().trim().toUpperCase() : "UNKNOWN";
+            item.setIndexName(cleanName);
+
+            indexRepo.findByIndexNameAndDate(cleanName, item.getDate())
                 .ifPresentOrElse(
                     existing -> {
                         existing.setClosingPrice(item.getClosingPrice());

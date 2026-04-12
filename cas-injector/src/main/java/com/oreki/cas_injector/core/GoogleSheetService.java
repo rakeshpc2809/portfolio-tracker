@@ -2,6 +2,7 @@ package com.oreki.cas_injector.core;
 
 import java.io.StringReader;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
@@ -9,6 +10,9 @@ import org.apache.commons.csv.CSVFormat;
 import org.apache.commons.csv.CSVParser;
 import org.apache.commons.csv.CSVRecord;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.retry.annotation.Backoff;
+import org.springframework.retry.annotation.Recover;
+import org.springframework.retry.annotation.Retryable;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 
@@ -33,6 +37,11 @@ public class GoogleSheetService {
         this.restTemplate = restTemplate;
     }
 
+    @Retryable(
+        retryFor = { Exception.class },
+        maxAttempts = 3,
+        backoff = @Backoff(delay = 2000, multiplier = 2)
+    )
     public List<StrategyTarget> fetchLatestStrategy() {
         long now = System.currentTimeMillis();
         if (cachedTargets != null && (now - cacheTimestamp) < CACHE_TTL_MS) {
@@ -69,9 +78,8 @@ public class GoogleSheetService {
             List<String> headers = parser.getHeaderNames();
             log.info("📊 Detected CSV Headers: {}", headers);
 
-            // If headers are empty, the Google Sheet likely has a blank first row.
             if (headers.isEmpty()) {
-                 log.error("🚨 Headers are empty! Please ensure row 1 in your Google Sheet contains your column names (ISIN, Scheme Name, etc.) and is not a blank row.");
+                 log.error("🚨 Headers are empty! Please ensure row 1 contains column names.");
                  return targets;
             }
 
@@ -81,51 +89,41 @@ public class GoogleSheetService {
                 String rawName = getFuzzyValue(recordMap, "Scheme Name", "Fund Name", "SchemeName");
                 String isin = getFuzzyValue(recordMap, "ISIN", "ISIN Code", "ISDN");
 
-                if (isin == null || isin.isBlank()) {
-                    if (rawName != null && !rawName.isBlank()) {
-                        log.warn("⚠️ Skipping row. Missing ISIN for fund: {}", rawName);
-                    }
-                    continue; 
-                }
+                if (isin == null || isin.isBlank()) continue; 
 
                 double target = parseValue(getFuzzyValue(recordMap, "Target %", "Planned %", "Target", "Planned"));
                 double sip = parseValue(getFuzzyValue(recordMap, "SIP %", "SIP"));
                 
-                // 🚀 NEW: Extract Status (e.g., "ACTIVE", "DROPPED")
                 String status = getFuzzyValue(recordMap, "Status", "Fund Status", "State");
-                if (status == null || status.isBlank()) {
-                    status = "ACTIVE"; // Default to ACTIVE if the column is empty
-                }
+                if (status == null || status.isBlank()) status = "ACTIVE";
 
                 String bucket = getFuzzyValue(recordMap, "Bucket", "Fund Bucket", "Type");
-                if (bucket == null || bucket.isBlank()) {
-                    bucket = "CORE";
-                }
+                if (bucket == null || bucket.isBlank()) bucket = "CORE";
 
-                // ✅ Updated constructor with 6 arguments
                 targets.add(new StrategyTarget(isin.trim(), rawName, target, sip, status.trim().toUpperCase(), bucket.trim().toUpperCase()));
             }
             
             cachedTargets = targets;
             cacheTimestamp = now;
-            log.info("✅ Successfully loaded {} strategy targets from Google Sheets.", targets.size());
+            log.info("✅ Successfully loaded {} strategy targets.", targets.size());
 
         } catch (Exception e) {
-            log.error("🚨 Google Sheet Sync Failed. Details: {}", e.getMessage());
-            return cachedTargets != null ? cachedTargets : new ArrayList<>();
+            log.error("🚨 Google Sheet Sync Failed: {}", e.getMessage());
+            throw new RuntimeException(e); // Trigger retry
         }
         return targets;
     }
 
-    /**
-     * Fuzzy Header Matcher using the Record's Map
-     */
+    @Recover
+    public List<StrategyTarget> fetchLatestStrategyFallback(Exception e) {
+        log.error("🚨 Google Sheet unavailable after 3 retries: {}. Returning last known cache.", e.getMessage());
+        return cachedTargets != null ? cachedTargets : Collections.emptyList();
+    }
+
     private String getFuzzyValue(Map<String, String> rowData, String... possibleNames) {
         for (String headerKey : rowData.keySet()) {
-            if (headerKey == null || headerKey.trim().isEmpty()) continue; // Skip blank Google Sheet columns
-            
+            if (headerKey == null || headerKey.trim().isEmpty()) continue;
             for (String possibleName : possibleNames) {
-                // Compare ignoring spaces and case
                 if (headerKey.replace(" ", "").equalsIgnoreCase(possibleName.replace(" ", ""))) {
                     return rowData.get(headerKey);
                 }

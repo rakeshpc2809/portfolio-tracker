@@ -40,12 +40,29 @@ export default function FundDetailView({
   const normalizedHistory = useMemo(() => {
     if (!history || !history.fund || history.fund.length < 2) return [];
     
-    // Reverse because they come from API in DESC order
-    const fData = [...history.fund].reverse();
+    // Logic: If user bought recently, we still want to show at least 6 months of context
+    const sixMonthsAgo = new Date();
+    sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+    const contextDate = sixMonthsAgo.toISOString().split('T')[0];
+
+    // Anchor is either entry date OR context date (whichever is earlier)
+    const entryDate = fund.lastBuyDate || history.fund[history.fund.length - 1].navDate;
+    // We actually want to show data SINCE anchor, but ensure anchor isn't too recent for the visual
+    const filterDate = entryDate < contextDate ? entryDate : contextDate;
+
+    // Filter and Reverse because they come from API in DESC order
+    const fData = [...history.fund]
+      .filter(d => d.navDate >= filterDate)
+      .reverse();
+    
     const bData = (history.benchmark && history.benchmark.length > 0) 
-      ? [...history.benchmark].reverse() 
+      ? [...history.benchmark].filter(d => d.date >= filterDate).reverse() 
       : [];
 
+    if (fData.length < 2) return [];
+
+    // Find the closest point to the ACTUAL entry date for marking on the chart if needed
+    // But for normalization, we use the first point in the filtered series
     const oldestFundNav = fData[0].nav;
     const oldestBenchPrice = bData.length > 0 ? bData[0].closingPrice : 1;
 
@@ -72,7 +89,7 @@ export default function FundDetailView({
     }
 
     return series;
-  }, [history]);
+  }, [history, fund.lastBuyDate]);
 
   // Design Improvement 5: Use real sub-scores if available, otherwise estimate
   const hasRealScores = fund.yieldScore != null && fund.riskScore != null && fund.valueScore != null;
@@ -198,7 +215,7 @@ export default function FundDetailView({
                 </div>
                 <div className="flex-none px-4 py-2 rounded-2xl bg-white/[0.03] border border-white/5 space-y-1">
                   <p className="text-[8px] font-black uppercase tracking-widest text-muted opacity-60">Mean Inversion Pulse</p>
-                  <p className="text-xs font-black text-buy uppercase tracking-tighter">{fund.ouHalfLife > 0 ? `${fund.ouHalfLife.toFixed(1)} Days` : 'INACTIVE'}</p>
+                  <p className="text-xs font-black text-buy uppercase tracking-tighter">{fund.ouHalfLife > 0.01 ? `${fund.ouHalfLife.toFixed(1)} Days` : 'STABLE'}</p>
                 </div>
                 <div className="flex-none px-4 py-2 rounded-2xl bg-white/[0.03] border border-white/5 space-y-1">
                   <p className="text-[8px] font-black uppercase tracking-widest text-muted opacity-60">Fractal Force</p>
@@ -210,11 +227,11 @@ export default function FundDetailView({
                 </div>
                 <div className="flex-none px-4 py-2 rounded-2xl bg-white/[0.03] border border-white/5 space-y-1">
                   <p className="text-[8px] font-black uppercase tracking-widest text-muted opacity-60">Range Index</p>
-                  <p className="text-xs font-black text-primary uppercase tracking-tighter">{(fund.navPercentile3yr * 100).toFixed(0)}%</p>
+                  <p className="text-xs font-black text-primary uppercase tracking-tighter">{Math.round((fund.navPercentile3yr || 0) * 100)}%</p>
                 </div>
                 <div className="flex-none px-4 py-2 rounded-2xl bg-white/[0.03] border border-white/5 space-y-1">
                   <p className="text-[8px] font-black uppercase tracking-widest text-muted opacity-60">Correction</p>
-                  <p className="text-xs font-black text-exit uppercase tracking-tighter">{(fund.drawdownFromAth * 100).toFixed(1)}%</p>
+                  <p className="text-xs font-black text-exit uppercase tracking-tighter">{(Math.abs(fund.drawdownFromAth || 0) * 100).toFixed(1)}%</p>
                 </div>
               </div>
 
@@ -314,7 +331,7 @@ export default function FundDetailView({
               <section className="bg-surface-elevated border border-white/5 p-8 rounded-[2.5rem] space-y-8 shadow-inner group hover:border-white/10 transition-all">
                 <div className="flex items-center justify-between">
                   <h3 className="text-primary text-[10px] font-black uppercase tracking-[0.2em]">Contextual Positioning</h3>
-                  <span className="text-muted text-[9px] font-black uppercase tracking-widest opacity-40">1-Year Velocity</span>
+                  <span className="text-muted text-[9px] font-black uppercase tracking-widest opacity-40">1-Year History · Indexed to 100</span>
                 </div>
                 
                 {/* Historical Performance Line Chart */}
@@ -326,7 +343,7 @@ export default function FundDetailView({
                   ) : history && normalizedHistory.length > 0 ? (
                     <ResponsiveLine
                       data={normalizedHistory}
-                      margin={{ top: 20, right: 20, bottom: 20, left: 40 }}
+                      margin={{ top: 20, right: 20, bottom: 20, left: 45 }}
                       xScale={{ type: 'point' }}
                       yScale={{ type: 'linear', min: 'auto', max: 'auto' }}
                       axisTop={null}
@@ -336,22 +353,40 @@ export default function FundDetailView({
                         tickSize: 0,
                         tickPadding: 10,
                         tickRotation: 0,
+                        legend: 'Value',
+                        legendOffset: -35,
+                        legendPosition: 'middle'
                       }}
                       enableGridX={false}
                       enableGridY={true}
-                      colors={d => (d as any).color as string}
+                      colors={d => (d as any).seriesColor as string}
                       lineWidth={2}
                       enablePoints={false}
                       useMesh={true}
                       theme={{
-                        axis: { ticks: { text: { fill: "rgba(255,255,255,0.3)", fontSize: 10 } } },
+                        axis: { 
+                          ticks: { text: { fill: "rgba(255,255,255,0.3)", fontSize: 10 } },
+                          legend: { text: { fill: "rgba(255,255,255,0.2)", fontSize: 8, fontWeight: 900, textTransform: 'uppercase' } }
+                        },
                         grid: { line: { stroke: "rgba(255,255,255,0.05)" } },
-                        tooltip: { container: { background: "#0f172a", color: "#f1f5f9", fontSize: 12, borderRadius: 12 } }
+                        tooltip: { container: { background: "#181825", color: "#cdd6f4", fontSize: 12, borderRadius: 12 } }
                       }}
+                      tooltip={({ point }) => (
+                        <div className="bg-surface-overlay/95 backdrop-blur-2xl border border-white/10 p-4 rounded-2xl shadow-2xl space-y-2">
+                          <p className="text-[10px] font-black text-muted uppercase tracking-widest">{point.data.x.toString()}</p>
+                          <div className="flex items-center gap-3">
+                            <div className="w-2 h-2 rounded-full" style={{ background: point.seriesColor }} />
+                            <p className="text-sm font-black text-primary">{point.seriesId}: {point.data.yFormatted}</p>
+                          </div>
+                          <p className={`text-[9px] font-bold uppercase ${parseFloat(point.data.yFormatted as string) >= 100 ? 'text-buy' : 'text-exit'}`}>
+                            {parseFloat(point.data.yFormatted as string) >= 100 ? '+' : ''}{(parseFloat(point.data.yFormatted as string) - 100).toFixed(1)}% vs Start
+                          </p>
+                        </div>
+                      )}
                     />
                   ) : (
-                    <div className="h-full w-full flex items-center justify-center text-muted text-[10px] uppercase font-black opacity-30">
-                      No historical data available
+                    <div className="h-full w-full flex items-center justify-center text-muted text-[10px] uppercase font-black opacity-30 px-10 text-center">
+                      Historical data loading or insufficient data points
                     </div>
                   )}
                 </div>
@@ -382,7 +417,7 @@ export default function FundDetailView({
                     <div className="space-y-1">
                       <p className="text-muted text-[9px] font-black uppercase tracking-[0.2em] opacity-50">Correction Depth</p>
                       <p className="text-xl font-black text-exit tracking-tighter tabular-nums">
-                        {((fund.drawdownFromAth || 0) * 100).toFixed(1)}%
+                        {(Math.abs(fund.drawdownFromAth || 0) * 100).toFixed(1)}%
                       </p>
                     </div>
                   </div>

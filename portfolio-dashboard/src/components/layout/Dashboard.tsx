@@ -9,7 +9,8 @@ import {
   Lock,
   Unlock,
   PieChart,
-  Upload
+  Upload,
+  LogOut
 } from 'lucide-react';
 import * as Switch from '@radix-ui/react-switch';
 import * as Tabs from '@radix-ui/react-tabs';
@@ -19,6 +20,7 @@ import StatusRing from '../ui/StatusRing';
 // Views
 import TodayBriefView from '../views/TodayBriefView';
 import PortfolioView from '../views/PortfolioView';
+import PerformanceView from '../views/PerformanceView';
 import RebalanceView from '../views/RebalanceView';
 import TaxView from '../views/TaxView';
 import LedgerView from '../views/LedgerView';
@@ -31,23 +33,28 @@ export default function Dashboard({
   sipAmount,
   setSipAmount,
   lumpsum,
-  setLumpsum 
+  setLumpsum,
+  pan,
+  onLogout,
+  initialTab = 'today'
 }: { 
   portfolioData: any;
   sipAmount: number;
   setSipAmount: (val: number) => void;
   lumpsum: number;
   setLumpsum: (val: number) => void;
+  pan: string;
+  onLogout: () => void;
+  initialTab?: string;
 }) {
-  const [activeTab, setActiveTab] = useState('today');
+  const [activeTab, setActiveTab] = useState(initialTab);
   const [isPrivate, setIsPrivate] = useState(false);
   const [selectedFundName, setSelectedFundName] = useState<string | null>(null);
-
-  const investorPan = "CFXPR4533R";
 
   const tabs = [
     { id: 'today', label: 'Today', icon: <Zap size={14}/> },
     { id: 'portfolio', label: 'Portfolio', icon: <LayoutDashboard size={14}/> },
+    { id: 'performance', label: 'Performance', icon: <TrendingUp size={14}/> },
     { id: 'funds', label: 'Each Fund', icon: <PieChart size={14}/> },
     { id: 'rebalance', label: 'Rebalance', icon: <ArrowLeftRight size={14}/> },
     { id: 'tax', label: 'Tax', icon: <ShieldCheck size={14}/> },
@@ -60,10 +67,10 @@ export default function Dashboard({
   const mask = (val: string) => isPrivate ? "••••" : val;
 
   const stats = [
-    { label: 'Value', value: formatCurrencyShort(portfolioData.currentValueAmount || 0), glow: 'glow-accent' },
-    { label: 'XIRR', value: portfolioData.overallXirr || '0%', color: parseFloat(portfolioData.overallXirr || '0') >= 0 ? 'text-buy' : 'text-exit', glow: parseFloat(portfolioData.overallXirr || '0') >= 0 ? 'glow-buy' : 'glow-exit' },
-    { label: 'P&L', value: ((portfolioData.totalUnrealizedGain || 0) >= 0 ? '+' : '') + formatCurrencyShort(portfolioData.totalUnrealizedGain || 0), color: (portfolioData.totalUnrealizedGain || 0) >= 0 ? 'text-buy' : 'text-exit', glow: (portfolioData.totalUnrealizedGain || 0) >= 0 ? 'glow-buy' : 'glow-exit' },
-    { label: 'Tax', value: formatCurrencyShort(portfolioData.totalSTCG || 0), color: 'text-warning' },
+    { label: 'Value', value: formatCurrencyShort(portfolioData?.currentValueAmount || 0), glow: 'glow-accent' },
+    { label: 'Return', value: portfolioData?.overallReturn || '0%', color: parseFloat(portfolioData?.overallReturn || '0') >= 0 ? 'text-buy' : 'text-exit', glow: parseFloat(portfolioData?.overallReturn || '0') >= 0 ? 'glow-buy' : 'glow-exit' },
+    { label: 'XIRR', value: portfolioData?.overallXirr || '0%', color: parseFloat(portfolioData?.overallXirr || '0') >= 0 ? 'text-buy' : 'text-exit', glow: parseFloat(portfolioData?.overallXirr || '0') >= 0 ? 'glow-buy' : 'glow-exit' },
+    { label: 'Tax', value: formatCurrencyShort(portfolioData?.totalSTCG || 0), color: 'text-warning' },
   ];
 
   const avgConviction = Math.round(
@@ -72,7 +79,7 @@ export default function Dashboard({
     Math.max(1, (portfolioData?.schemeBreakdown ?? []).length)
   );
 
-  const headerGlow = parseFloat(portfolioData.overallXirr || '0') > 0 
+  const headerGlow = parseFloat(portfolioData?.overallXirr || '0') > 0 
     ? 'after:bg-buy/[0.02]' 
     : 'after:bg-exit/[0.02]';
 
@@ -121,6 +128,17 @@ export default function Dashboard({
             </Switch.Root>
             {isPrivate ? <Lock size={12} className="text-muted" /> : <Unlock size={12} className="text-muted" />}
           </div>
+
+          <div className="h-6 w-px bg-border mx-2" />
+
+          <button 
+            onClick={onLogout}
+            className="flex items-center gap-2 px-3 py-1.5 rounded-lg hover:bg-exit/10 text-muted hover:text-exit transition-all group"
+            title="Switch Account"
+          >
+            <LogOut size={14} className="group-hover:translate-x-0.5 transition-transform" />
+            <span className="text-[9px] font-black uppercase tracking-widest hidden sm:inline">Exit</span>
+          </button>
         </div>
       </header>
 
@@ -156,9 +174,13 @@ export default function Dashboard({
           </Tabs.Content>
           
           <Tabs.Content value="portfolio" className="outline-none focus:ring-0">
-            <PortfolioView portfolioData={portfolioData} isPrivate={isPrivate} />
+            <PortfolioView portfolioData={portfolioData} isPrivate={isPrivate} onFundClick={setSelectedFundName} />
           </Tabs.Content>
 
+          <Tabs.Content value="performance" className="outline-none focus:ring-0">
+            <PerformanceView pan={pan} isPrivate={isPrivate} portfolioData={portfolioData} />
+          </Tabs.Content>
+          
           <Tabs.Content value="funds" className="outline-none focus:ring-0">
             <FundsListView 
               portfolioData={portfolioData} 
@@ -177,15 +199,15 @@ export default function Dashboard({
           </Tabs.Content>
           
           <Tabs.Content value="tax" className="outline-none focus:ring-0">
-            <TaxView portfolioData={portfolioData} isPrivate={isPrivate} pan={investorPan} />
+            <TaxView portfolioData={portfolioData} isPrivate={isPrivate} pan={pan} />
           </Tabs.Content>
           
           <Tabs.Content value="ledger" className="outline-none focus:ring-0">
-            <LedgerView investorPan={investorPan} isPrivate={isPrivate} />
+            <LedgerView investorPan={pan} isPrivate={isPrivate} />
           </Tabs.Content>
 
           <Tabs.Content value="upload" className="outline-none focus:ring-0">
-            <CasUploadView pan={investorPan} />
+            <CasUploadView pan={pan} />
           </Tabs.Content>
         </Tabs.Root>
       </main>

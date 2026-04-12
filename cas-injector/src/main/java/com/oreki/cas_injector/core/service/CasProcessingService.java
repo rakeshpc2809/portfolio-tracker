@@ -14,6 +14,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.cache.CacheManager;
 
 import com.oreki.cas_injector.backfill.service.NavService;
+import com.oreki.cas_injector.core.dto.SchemeDetailsDTO;
 import com.oreki.cas_injector.core.model.Folio;
 import com.oreki.cas_injector.core.model.Investor;
 import com.oreki.cas_injector.core.model.Scheme;
@@ -43,7 +44,9 @@ public class CasProcessingService {
 
     @Transactional
     public void processJson(JsonNode root) {
-        String pan = root.path("pan").asText();
+        String rawPan = root.path("pan").asText();
+        String pan = rawPan != null ? rawPan.trim().toUpperCase() : "UNKNOWN";
+        
         Investor investor = investorRepo.findById(pan).orElseGet(() -> 
             investorRepo.save(Investor.builder()
                 .pan(pan)
@@ -103,8 +106,9 @@ public class CasProcessingService {
             return existingScheme;
         }
 
-        String extractedCategory = navService.getLatestSchemeDetails(amfiCode).getCategory();
-        log.info("🚨 STEP 1 - NavService Returned: " + extractedCategory);
+        SchemeDetailsDTO details = navService.getLatestSchemeDetails(amfiCode);
+        String extractedCategory = details.getCategory();
+        String benchmark = CommonUtils.DETERMINE_BENCHMARK.apply("", extractedCategory);
 
         Scheme newScheme = Scheme.builder()
             .isin(isin)
@@ -112,6 +116,7 @@ public class CasProcessingService {
             .amfiCode(amfiCode)
             .folio(folio)
             .assetCategory(extractedCategory)
+            .benchmarkIndex(benchmark)
             .build();
 
         return schemeRepo.save(newScheme);
