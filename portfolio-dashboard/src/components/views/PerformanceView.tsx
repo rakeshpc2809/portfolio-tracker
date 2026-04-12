@@ -1,11 +1,14 @@
 import { useEffect, useState, useMemo } from 'react';
 import { ResponsiveLine } from '@nivo/line';
-import { Activity } from 'lucide-react';
+import { Activity, Target } from 'lucide-react';
 import { formatCurrency } from '../../utils/formatters';
 import { motion } from 'framer-motion';
+import { Slider } from '../ui/slider';
+
 export default function PerformanceView({ 
   pan, 
-  isPrivate 
+  isPrivate,
+  portfolioData
 }: { 
   portfolioData: any; 
   pan: string; 
@@ -13,6 +16,10 @@ export default function PerformanceView({
 }) {
   const [perf, setPerf] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+
+  // Goal Projector State
+  const [goalAmount, setGoalAmount] = useState(10000000); // ₹1Cr default
+  const [monthlyAddition, setMonthlyAddition] = useState(0);
 
   useEffect(() => {
     setLoading(true);
@@ -55,6 +62,22 @@ export default function PerformanceView({
 
     return [portfolioSeries, benchmarkSeries];
   }, [perf]);
+
+  // Goal Projector Computation
+  const xirr = perf?.xirr ?? 0;
+  const currentValue = portfolioData?.currentValueAmount ?? 0;
+
+  const yearsToGoal = useMemo(() => {
+    if (xirr <= 0 || currentValue <= 0 || currentValue >= goalAmount) return null;
+    const monthlyRate = Math.pow(1 + xirr / 100, 1 / 12) - 1;
+    let n = 0;
+    let fv = currentValue;
+    while (fv < goalAmount && n < 600) { // max 50 years
+      fv = fv * (1 + monthlyRate) + monthlyAddition;
+      n++;
+    }
+    return n < 600 ? n / 12 : null;
+  }, [xirr, currentValue, goalAmount, monthlyAddition]);
 
   if (loading) {
     return (
@@ -180,7 +203,7 @@ export default function PerformanceView({
             </thead>
             <tbody className="divide-y divide-white/5">
               {[
-                { label: '1 Month', val: perf.periodReturns.oneMonth, bench: 1.2 }, // Bench should ideally come from backend
+                { label: '1 Month', val: perf.periodReturns.oneMonth, bench: 1.2 }, 
                 { label: '3 Months', val: perf.periodReturns.threeMonth, bench: 4.5 },
                 { label: '6 Months', val: perf.periodReturns.sixMonth, bench: 8.2 },
                 { label: '1 Year', val: perf.periodReturns.oneYear, bench: 14.8 },
@@ -199,6 +222,91 @@ export default function PerformanceView({
               ))}
             </tbody>
           </table>
+        </div>
+      </section>
+
+      {/* Goal Projector Section */}
+      <section className="bg-accent/5 backdrop-blur-xl border border-accent/10 p-10 rounded-[2.5rem] shadow-2xl space-y-10">
+        <div className="flex items-center gap-4">
+          <div className="p-3 bg-accent/10 rounded-2xl text-accent border border-accent/20">
+            <Target size={24} />
+          </div>
+          <div>
+            <h3 className="text-primary text-[10px] font-black uppercase tracking-[0.3em]">Wealth Goal Projector</h3>
+            <p className="text-sm font-bold text-secondary">Based on your actual {xirr.toFixed(1)}% XIRR engine performance</p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-16">
+          <div className="space-y-10">
+            <div className="space-y-6">
+              <div className="flex justify-between items-center">
+                <label className="text-[10px] font-black uppercase tracking-widest text-muted">Target Corpus</label>
+                <span className="text-sm font-black text-accent">{formatCurrency(goalAmount)}</span>
+              </div>
+              <Slider 
+                value={[goalAmount]} 
+                min={2500000} 
+                max={100000000} 
+                step={500000} 
+                onValueChange={([val]) => setGoalAmount(val)}
+              />
+            </div>
+
+            <div className="space-y-6">
+              <div className="flex justify-between items-center">
+                <label className="text-[10px] font-black uppercase tracking-widest text-muted">Monthly Contribution (SIP)</label>
+                <span className="text-sm font-black text-secondary">{formatCurrency(monthlyAddition)}</span>
+              </div>
+              <Slider 
+                value={[monthlyAddition]} 
+                min={0} 
+                max={200000} 
+                step={5000} 
+                onValueChange={([val]) => setMonthlyAddition(val)}
+              />
+            </div>
+          </div>
+
+          <div className="bg-black/20 rounded-[2rem] p-8 border border-white/5 flex flex-col justify-center items-center text-center relative overflow-hidden">
+            <div className="absolute top-0 left-0 w-full h-1 bg-accent/20" />
+            
+            {yearsToGoal ? (
+              <motion.div 
+                initial={{ opacity: 0, scale: 0.9 }}
+                animate={{ opacity: 1, scale: 1 }}
+                className="space-y-4"
+              >
+                <p className="text-[10px] font-black uppercase tracking-[0.2em] text-muted">Estimated Arrival</p>
+                <div className="flex items-baseline justify-center gap-2">
+                  <span className="text-6xl font-black text-primary tracking-tighter">{yearsToGoal.toFixed(1)}</span>
+                  <span className="text-xl font-bold text-secondary">Years</span>
+                </div>
+                <p className="text-xs font-bold text-accent uppercase tracking-widest pt-2 px-6 py-2 bg-accent/10 rounded-full">
+                  At your current velocity
+                </p>
+              </motion.div>
+            ) : (
+              <div className="space-y-2">
+                <p className="text-exit font-black uppercase text-[10px] tracking-widest">Goal Out of Range</p>
+                <p className="text-muted text-xs font-medium">Increase SIP or XIRR expectations</p>
+              </div>
+            )}
+
+            <div className="mt-8 w-full space-y-2">
+              <div className="flex justify-between text-[9px] font-black uppercase text-muted tracking-widest px-1">
+                <span>Progress</span>
+                <span>{Math.min(100, (currentValue / goalAmount) * 100).toFixed(1)}%</span>
+              </div>
+              <div className="h-2 w-full bg-white/5 rounded-full overflow-hidden border border-white/5">
+                <motion.div 
+                  initial={{ width: 0 }}
+                  animate={{ width: `${Math.min(100, (currentValue / goalAmount) * 100)}%` }}
+                  className="h-full bg-accent shadow-[0_0_15px_rgba(129,140,248,0.5)]"
+                />
+              </div>
+            </div>
+          </div>
         </div>
       </section>
     </div>

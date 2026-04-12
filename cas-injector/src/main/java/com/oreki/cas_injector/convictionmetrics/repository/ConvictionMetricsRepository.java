@@ -302,7 +302,7 @@ public class ConvictionMetricsRepository {
                 value_score = ?,
                 pain_score = ?,
                 friction_score = ?
-            WHERE amfi_code = ? 
+            WHERE LTRIM(amfi_code, '0') = LTRIM(?, '0') 
             AND calculation_date = (SELECT MAX(calculation_date) FROM fund_conviction_metrics)
         """;
         int updated = jdbcTemplate.update(updateSql, finalScore, yield, risk, value, pain, friction, amfiCode);
@@ -496,7 +496,7 @@ public class ConvictionMetricsRepository {
         String updateSql = """
             UPDATE fund_conviction_metrics 
             SET conviction_score = ?
-            WHERE amfi_code = ? 
+            WHERE LTRIM(amfi_code, '0') = LTRIM(?, '0') 
             AND calculation_date = (SELECT MAX(calculation_date) FROM fund_conviction_metrics)
         """;
         int updated = jdbcTemplate.update(updateSql, finalScore, amfiCode);

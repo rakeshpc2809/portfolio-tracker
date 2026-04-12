@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { uploadCas, triggerBackfill, triggerForceSync, fetchAdminStatus } from "@/services/api";
-import { Upload, ShieldCheck, FileText, AlertCircle, CheckCircle2, Database, Zap, Loader2, Info, TrendingUp } from "lucide-react";
+import { Upload, ShieldCheck, FileText, AlertCircle, CheckCircle2, Database, Zap, Loader2, Info, TrendingUp, Activity } from "lucide-react";
 import SockJS from 'sockjs-client';
 import { Client } from '@stomp/stompjs';
 
@@ -14,6 +14,8 @@ const CasUploadView: React.FC<{ pan: string }> = ({ pan }) => {
   const [syncing, setSyncing] = useState(false);
   const [backfilling, setBackfilling] = useState(false);
   const [engineProgress, setEngineProgress] = useState<any>(null);
+  const [rescoring, setRescoring] = useState(false);
+  const [rescoreStatus, setRescoreStatus] = useState('');
 
   // Polling for backfill status (WebSocket only for engine for now)
   useEffect(() => {
@@ -98,6 +100,19 @@ const CasUploadView: React.FC<{ pan: string }> = ({ pan }) => {
       alert(err.message);
     } finally {
       setSyncing(false);
+    }
+  };
+
+  const handleRescore = async () => {
+    setRescoring(true);
+    setRescoreStatus('');
+    try {
+      await triggerForceSync(pan);
+      setRescoreStatus('✓ Scores updated. Refresh the dashboard to see results.');
+    } catch {
+      setRescoreStatus('❌ Scoring failed. Check server logs.');
+    } finally {
+      setRescoring(false);
     }
   };
 
@@ -288,6 +303,34 @@ const CasUploadView: React.FC<{ pan: string }> = ({ pan }) => {
                   <Zap size={14} className="group-hover:scale-110 transition-transform fill-current" />
                   Sync Metrics Engine
                 </button>
+              </div>
+
+              <div className="h-px bg-border mx-2" />
+
+              {/* Personal Scoring Section */}
+              <div className="space-y-4 bg-accent/5 p-6 rounded-2xl border border-accent/10">
+                <div className="flex items-center gap-2">
+                  <Activity size={16} className="text-accent" />
+                  <h3 className="text-[10px] font-black uppercase tracking-widest text-primary">
+                    Personal Conviction
+                  </h3>
+                </div>
+                <p className="text-[11px] text-secondary leading-relaxed font-medium">
+                  Recalculates your personal conviction scores using your tax lots and performance data. Run this after a new CAS upload.
+                </p>
+                <button
+                  onClick={handleRescore}
+                  disabled={rescoring}
+                  className="w-full h-10 px-4 py-2 bg-accent/10 border border-accent/20 rounded-xl text-accent text-[10px] font-black uppercase tracking-widest hover:bg-accent hover:text-white transition-all disabled:opacity-40 flex items-center justify-center gap-2"
+                >
+                  {rescoring ? <Loader2 className="h-3 w-3 animate-spin" /> : <ShieldCheck size={14} />}
+                  {rescoring ? 'Calculating...' : 'Recalculate My Scores'}
+                </button>
+                {rescoreStatus && (
+                  <p className={`text-[10px] font-bold uppercase tracking-tight text-center ${rescoreStatus.includes('✓') ? 'text-buy' : 'text-exit'}`}>
+                    {rescoreStatus}
+                  </p>
+                )}
               </div>
             </div>
           </div>

@@ -67,6 +67,7 @@ public class AmfiDailyDeltaService {
         log.info("📡 Fetching latest AMFI NAVs...");
 
         try {
+            log.info("📡 Fetching latest AMFI NAVs for all ~14,000 funds (Required for peer-relative Z-Scoring)...");
             String amfiData = restTemplate.getForObject(AMFI_TXT_URL, String.class);
             if (amfiData == null || amfiData.isBlank()) return;
 

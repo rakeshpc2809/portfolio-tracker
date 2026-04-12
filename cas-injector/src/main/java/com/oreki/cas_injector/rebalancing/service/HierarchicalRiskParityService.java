@@ -45,7 +45,7 @@ public class HierarchicalRiskParityService {
                 List<Double> navs = jdbcTemplate.queryForList(sql, Double.class, amfi);
                 if (navs.size() < 31) {
                     log.warn("HRP: AMFI {} has insufficient data ({} points). Falling back to equal weights.", amfi, navs.size());
-                    return new HrpResult(equalWeights(amfiCodes), new double[0][0], amfiCodes);
+                    return new HrpResult(equalWeights(amfiCodes), new double[0][0], Collections.emptyList());
                 }
                 double[] returns = new double[navs.size() - 1];
                 for (int i = 0; i < returns.length; i++) {
@@ -140,15 +140,24 @@ public class HierarchicalRiskParityService {
                 weights.put(amfiCodes.get(i), weightsIdx.get(i));
             }
             
+            // ─── REORDER MATRIX ───
+            // The frontend needs the matrix to match the labels (sortedAmfiCodes)
+            double[][] reorderedMatrix = new double[n][n];
+            for (int i = 0; i < n; i++) {
+                for (int j = 0; j < n; j++) {
+                    reorderedMatrix[i][j] = corrMatrix[sortedIndices.get(i)][sortedIndices.get(j)];
+                }
+            }
+
             List<String> sortedAmfi = sortedIndices.stream()
                 .map(amfiCodes::get)
                 .toList();
 
-            return new HrpResult(weights, corrMatrix, sortedAmfi);
+            return new HrpResult(weights, reorderedMatrix, sortedAmfi);
 
         } catch (Exception e) {
             log.error("HRP Weights computation failed: {}", e.getMessage(), e);
-            return new HrpResult(equalWeights(amfiCodes), new double[0][0], amfiCodes);
+            return new HrpResult(equalWeights(amfiCodes), new double[0][0], Collections.emptyList());
         }
     }
 

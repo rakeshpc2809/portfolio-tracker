@@ -174,7 +174,7 @@ export default function Dashboard({
           </Tabs.Content>
           
           <Tabs.Content value="portfolio" className="outline-none focus:ring-0">
-            <PortfolioView portfolioData={portfolioData} isPrivate={isPrivate} onFundClick={setSelectedFundName} />
+            <PortfolioView portfolioData={portfolioData} isPrivate={isPrivate} onFundClick={setSelectedFundName} pan={pan} />
           </Tabs.Content>
 
           <Tabs.Content value="performance" className="outline-none focus:ring-0">

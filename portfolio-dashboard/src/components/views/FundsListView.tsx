@@ -144,7 +144,7 @@ export default function FundsListView({
 }) {
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState('ALL');
-  const [sort, setSort] = useState<'conviction' | 'value' | 'xirr' | 'drift'>('conviction');
+  const [sort, setSort] = useState<'conviction' | 'value' | 'xirr' | 'drift' | 'risk-adj'>('conviction');
 
   // 1. FILTER OUT ZERO VALUE FUNDS
   const activeFunds = useMemo(() => 
@@ -165,6 +165,7 @@ export default function FundsListView({
       if (sort === 'value')      return (b.currentValue ?? 0) - (a.currentValue ?? 0);
       if (sort === 'xirr')       return parseFloat(b.xirr ?? '0') - parseFloat(a.xirr ?? '0');
       if (sort === 'drift')      return Math.abs(parseFloat(b.deviation ?? '0')) - Math.abs(parseFloat(a.deviation ?? '0'));
+      if (sort === 'risk-adj')   return (parseFloat(b.xirr ?? '0') / Math.abs(b.maxDrawdown || 1)) - (parseFloat(a.xirr ?? '0') / Math.abs(a.maxDrawdown || 1));
       return 0;
     }), [activeFunds, search, filter, sort]);
 
@@ -244,7 +245,7 @@ export default function FundsListView({
           </div>
 
           <div className="flex bg-surface/40 backdrop-blur-xl border border-white/5 p-1 rounded-xl shadow-lg">
-            {(['conviction', 'value', 'xirr', 'drift'] as const).map((s) => (
+            {(['conviction', 'value', 'xirr', 'drift', 'risk-adj'] as const).map((s) => (
               <button
                 key={s}
                 onClick={() => setSort(s)}
@@ -263,13 +264,12 @@ export default function FundsListView({
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
         <AnimatePresence mode="popLayout">
           {funds.map((fund: any, idx: number) => {
-            const drift = parseFloat(fund.deviation ?? '0');
             const xirr  = parseFloat(fund.xirr ?? '0');
             const mdd   = Math.abs(fund.maxDrawdown ?? 0);
             const sortino = fund.sortinoRatio ?? 0;
             const daysToLtcg = fund.daysToNextLtcg ?? 0;
+            const riskAdjReturn = mdd !== 0 ? (xirr / mdd).toFixed(2) : 'N/A';
 
-            const driftColor = drift > 2 ? 'text-exit' : drift < -2 ? 'text-buy' : 'text-muted';
             const xirrColor  = xirr >= 0 ? 'text-buy' : 'text-exit';
 
             const signalSentence = fund.reasoningMetadata?.noobHeadline || (
@@ -333,7 +333,7 @@ export default function FundsListView({
                 <div className="grid grid-cols-4 gap-2 py-2">
                   <MiniStat label="Value" value={isPrivate ? '••••' : `₹${((fund.currentValue ?? 0) / 1000).toFixed(0)}k`} />
                   <MiniStat label="XIRR" value={`${xirr >= 0 ? '+' : ''}${xirr.toFixed(1)}%`} color={xirrColor} term="XIRR" />
-                  <MiniStat label="Drift" value={`${drift >= 0 ? '+' : ''}${drift.toFixed(1)}%`} color={driftColor} term="Drift" />
+                  <MiniStat label="Risk-Adj" value={riskAdjReturn} term="SORTINO" />
                   <MiniStat label="Max DD" value={mdd > 0 ? `-${mdd.toFixed(1)}%` : '—'} color={mdd > 25 ? 'text-exit' : mdd > 10 ? 'text-warning' : 'text-secondary'} />
                 </div>
 

@@ -25,11 +25,14 @@ public class HistoricalDataController {
             @PathVariable String amfiCode,
             @RequestParam(defaultValue = "NIFTY 50") String benchmark) {
         
-        List<HistoricalNav> fundHistory = navRepo.findByAmfiCodeOrderByNavDateDesc(amfiCode);
-        if (fundHistory.size() > 252) fundHistory = fundHistory.subList(0, 252);
+        String cleanAmfiCode = amfiCode.trim().replaceFirst("^0+(?!$)", "");
+        List<HistoricalNav> fundHistory = navRepo.findByAmfiCodeOrderByNavDateDesc(cleanAmfiCode);
+        
+        String cleanBenchmark = benchmark.trim().toUpperCase();
+        List<IndexFundamentals> benchmarkHistory = indexRepo.findByIndexNameOrderByDateDesc(cleanBenchmark);
 
-        List<IndexFundamentals> benchmarkHistory = indexRepo.findByIndexNameOrderByDateDesc(benchmark);
-        if (benchmarkHistory.size() > 252) benchmarkHistory = benchmarkHistory.subList(0, 252);
+        if (fundHistory.size() > 756) fundHistory = fundHistory.subList(0, 756);
+        if (benchmarkHistory.size() > 756) benchmarkHistory = benchmarkHistory.subList(0, 756);
 
         Map<String, Object> response = new HashMap<>();
         response.put("fund", fundHistory);

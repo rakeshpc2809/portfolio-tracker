@@ -37,8 +37,9 @@ export default function FundDetailView({
 
   if (!fund) return null;
 
-  const normalizedHistory = useMemo(() => {
-    if (!history || !history.fund || history.fund.length < 2) return [];
+  const { normalizedHistory, needsBackfill } = useMemo(() => {
+    if (!history || !history.fund) return { normalizedHistory: [], needsBackfill: false };
+    if (history.fund.length < 2) return { normalizedHistory: [], needsBackfill: true };
     
     // Logic: If user bought recently, we still want to show at least 6 months of context
     const sixMonthsAgo = new Date();
@@ -47,7 +48,6 @@ export default function FundDetailView({
 
     // Anchor is either entry date OR context date (whichever is earlier)
     const entryDate = fund.lastBuyDate || history.fund[history.fund.length - 1].navDate;
-    // We actually want to show data SINCE anchor, but ensure anchor isn't too recent for the visual
     const filterDate = entryDate < contextDate ? entryDate : contextDate;
 
     // Filter and Reverse because they come from API in DESC order
@@ -59,10 +59,8 @@ export default function FundDetailView({
       ? [...history.benchmark].filter(d => d.date >= filterDate).reverse() 
       : [];
 
-    if (fData.length < 2) return [];
+    if (fData.length < 2) return { normalizedHistory: [], needsBackfill: false };
 
-    // Find the closest point to the ACTUAL entry date for marking on the chart if needed
-    // But for normalization, we use the first point in the filtered series
     const oldestFundNav = fData[0].nav;
     const oldestBenchPrice = bData.length > 0 ? bData[0].closingPrice : 1;
 
@@ -88,7 +86,7 @@ export default function FundDetailView({
       });
     }
 
-    return series;
+    return { normalizedHistory: series, needsBackfill: false };
   }, [history, fund.lastBuyDate]);
 
   // Design Improvement 5: Use real sub-scores if available, otherwise estimate
@@ -340,7 +338,22 @@ export default function FundDetailView({
                     <div className="h-full w-full flex items-center justify-center">
                       <div className="w-8 h-8 border-4 border-accent border-t-transparent rounded-full animate-spin" />
                     </div>
-                  ) : history && normalizedHistory.length > 0 ? (
+                  ) : needsBackfill ? (
+                    <div className="h-full flex flex-col items-center justify-center gap-3 p-8 text-center">
+                      <div className="w-10 h-10 bg-amber-500/10 border border-amber-500/20 rounded-2xl flex items-center justify-center">
+                        <Activity size={18} className="text-amber-400" />
+                      </div>
+                      <p className="text-amber-400 text-xs font-black uppercase tracking-widest">
+                        Historical data not yet loaded
+                      </p>
+                      <p className="text-muted text-[11px] max-w-xs leading-relaxed">
+                        This chart needs historical NAV data. Go to the{' '}
+                        <span className="text-accent">Data tab</span> and click{' '}
+                        <span className="text-accent">"Full History Refresh"</span> to load
+                        3 years of NAV data for all your funds. This takes 2-5 minutes.
+                      </p>
+                    </div>
+                  ) : normalizedHistory.length > 0 ? (
                     <ResponsiveLine
                       data={normalizedHistory}
                       margin={{ top: 20, right: 20, bottom: 20, left: 45 }}

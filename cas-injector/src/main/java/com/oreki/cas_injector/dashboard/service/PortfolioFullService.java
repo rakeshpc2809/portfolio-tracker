@@ -22,10 +22,12 @@ import com.oreki.cas_injector.dashboard.dto.PeriodReturns;
 import com.oreki.cas_injector.rebalancing.dto.SipLineItem;
 import com.oreki.cas_injector.rebalancing.dto.TacticalSignal;
 import com.oreki.cas_injector.rebalancing.service.PortfolioOrchestrator;
+import com.oreki.cas_injector.rebalancing.service.HierarchicalRiskParityService;
 import com.oreki.cas_injector.taxmanagement.dto.TlhOpportunity;
 import com.oreki.cas_injector.taxmanagement.service.TaxLossHarvestingService;
 import com.oreki.cas_injector.transactions.model.TaxLot;
 import com.oreki.cas_injector.transactions.repository.TaxLotRepository;
+import com.oreki.cas_injector.core.utils.CommonUtils;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -41,6 +43,7 @@ public class PortfolioFullService {
     private final TaxLossHarvestingService taxLossHarvestingService;
     private final TaxLotRepository taxLotRepository;
     private final BenchmarkService benchmarkService;
+    private final HierarchicalRiskParityService hrpService;
 
     public PortfolioPerformanceDTO getPerformanceHistory(String pan) {
         // 1. Fetch portfolio_snapshot rows ordered by date ASC
@@ -316,5 +319,33 @@ public class PortfolioFullService {
         String s = amfi.trim();
         // Remove leading zeros for consistent matching (MFAPI vs AMFI)
         return s.replaceFirst("^0+(?!$)", "");
+    }
+
+    public Map<String, Object> getCorrelationMatrix(String pan) {
+        DashboardSummaryDTO summary = getBasePortfolioCached(pan);
+        List<String> activeAmfiCodes = summary.getSchemeBreakdown().stream()
+            .filter(s -> s.getCurrentValue().compareTo(BigDecimal.ZERO) > 0)
+            .map(s -> sanitizeAmfi(s.getAmfiCode()))
+            .distinct()
+            .toList();
+
+        HierarchicalRiskParityService.HrpResult result = hrpService.computeHrpWeights(activeAmfiCodes);
+        
+        // Map AMFI to names for labels
+        Map<String, String> amfiToName = summary.getSchemeBreakdown().stream()
+            .collect(Collectors.toMap(
+                s -> sanitizeAmfi(s.getAmfiCode()),
+                s -> CommonUtils.NORMALIZE_NAME.apply(s.getSchemeName()),
+                (a, b) -> a
+            ));
+
+        List<String> labels = result.sortedAmfiCodes().stream()
+            .map(amfi -> amfiToName.getOrDefault(amfi, amfi))
+            .toList();
+
+        return Map.of(
+            "labels", labels,
+            "matrix", result.corrMatrix()
+        );
     }
 }

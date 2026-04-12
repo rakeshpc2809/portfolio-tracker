@@ -65,7 +65,7 @@ export const uploadCas = async (file: File, password: string) => {
   formData.append('file', file);
   formData.append('password', password);
 
-  const response = await fetch(`${PARSER_URL}/api/parse`, {
+  const response = await fetch(`${PARSER_URL}/parse`, {
     method: 'POST',
     body: formData,
     // Note: Don't set Content-Type header for FormData, browser will set it with boundary
@@ -117,6 +117,12 @@ export const checkInvestorExistence = async (pan: string) => {
   const response = await authenticatedFetch(`${BASE_URL}/investor/check/${pan}`);
   if (response.status === 404) return null;
   if (!response.ok) throw new Error("Verification failed");
+  return response.json();
+};
+
+export const fetchCorrelationMatrix = async (pan: string) => {
+  const response = await authenticatedFetch(`${BASE_URL}/dashboard/correlation/${pan}`);
+  if (!response.ok) throw new Error("Failed to fetch correlation matrix");
   return response.json();
 };
 

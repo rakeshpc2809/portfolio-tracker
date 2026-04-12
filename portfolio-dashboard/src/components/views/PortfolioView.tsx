@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import { 
   ResponsiveContainer, XAxis, YAxis, Tooltip as RechartsTooltip, 
   CartesianGrid, ScatterChart, Scatter, ZAxis, Cell, ReferenceLine
@@ -6,11 +6,13 @@ import {
 import { ResponsivePie } from '@nivo/pie';
 import { ResponsiveBar } from '@nivo/bar';
 import { ResponsiveTreeMap } from '@nivo/treemap';
-import { Shield, ChartPie, Info } from 'lucide-react';
+import { ResponsiveHeatMap } from '@nivo/heatmap';
+import { Shield, ChartPie, Info, Link } from 'lucide-react';
 import { motion } from 'framer-motion';
 import MetricWithTooltip from '../ui/MetricWithTooltip';
 import LearnTooltip from '../ui/LearnTooltip';
 import { formatCurrency } from '../../utils/formatters';
+import { fetchCorrelationMatrix } from '../../services/api';
 
 const ACTION_COLORS: Record<string, { bg: string; text: string; label: string }> = {
   BUY:     { bg: '#a6e3a1', text: '#fff', label: 'Buy' },
@@ -25,13 +27,22 @@ const ACTION_COLORS: Record<string, { bg: string; text: string; label: string }>
 export default function PortfolioView({ 
   portfolioData, 
   isPrivate,
-  onFundClick
+  onFundClick,
+  pan
 }: { 
   portfolioData: any; 
   isPrivate: boolean;
   onFundClick: (name: string) => void;
+  pan: string;
 }) {
   const mask = (val: number | string) => isPrivate ? "••••" : String(val);
+  const [corrData, setCorrData] = useState<any>(null);
+
+  useEffect(() => {
+    if (pan) {
+      fetchCorrelationMatrix(pan).then(setCorrData).catch(console.error);
+    }
+  }, [pan]);
 
   const activeBreakdown = useMemo(() => 
     (portfolioData.schemeBreakdown ?? []).filter((s: any) => (s.currentValue || 0) > 0),
@@ -85,6 +96,20 @@ export default function PortfolioView({
       }))
       .sort((a, b) => b.value - a.value);
   }, [activeBreakdown]);
+
+  // Transform matrix for Nivo Heatmap
+  const nivoCorrData = useMemo(() => {
+    if (!corrData || !corrData.labels || !corrData.matrix || corrData.matrix.length === 0) return [];
+    if (corrData.labels.length !== corrData.matrix.length) return []; // Size mismatch safety
+
+    return corrData.labels.map((label: string, i: number) => ({
+      id: label,
+      data: corrData.labels.map((otherLabel: string, j: number) => ({
+        x: otherLabel,
+        y: corrData.matrix[i] ? corrData.matrix[i][j] : 0
+      }))
+    }));
+  }, [corrData]);
 
   return (
     <div className="space-y-12 pb-32">
@@ -274,6 +299,72 @@ export default function PortfolioView({
         </div>
       </section>
       </div>
+
+      {/* Correlation Matrix Section */}
+      {nivoCorrData.length > 0 && (
+        <section className="bg-surface/40 backdrop-blur-xl border border-white/5 p-10 rounded-[2.5rem] shadow-2xl space-y-10">
+          <div className="flex items-center gap-4">
+            <div className="p-3 bg-secondary/10 rounded-2xl text-secondary border border-secondary/20 shadow-lg">
+              <Link size={20} />
+            </div>
+            <div>
+              <h3 className="text-primary text-[10px] font-black uppercase tracking-[0.3em]">HRP Correlation Matrix</h3>
+              <p className="text-sm font-bold text-secondary">Diversification intelligence from the Hierarchical Risk Parity engine</p>
+            </div>
+          </div>
+
+          <div className="h-[500px] w-full bg-black/20 rounded-3xl border border-white/5 p-6 shadow-inner relative overflow-hidden">
+            <ResponsiveHeatMap
+              data={nivoCorrData}
+              margin={{ top: 100, right: 60, bottom: 60, left: 100 }}
+              valueFormat=">-.2f"
+              axisTop={{
+                tickSize: 5,
+                tickPadding: 5,
+                tickRotation: -45,
+                legend: '',
+                legendOffset: 46
+              }}
+              axisLeft={{
+                tickSize: 5,
+                tickPadding: 5,
+                tickRotation: 0,
+                legend: '',
+                legendOffset: -46
+              }}
+              colors={{
+                type: 'sequential',
+                scheme: 'purples',
+                minValue: -1,
+                maxValue: 1,
+              }}
+              emptyColor="#555555"
+              theme={{
+                axis: {
+                  ticks: { text: { fill: "#6c7086", fontSize: 10, fontWeight: 700 } }
+                },
+                tooltip: { container: { background: "#181825", color: "#cdd6f4", fontSize: 12, borderRadius: 12 } }
+              }}
+              annotations={[]}
+            />
+            
+            {/* Heatmap Legend Overlay */}
+            <div className="absolute bottom-10 right-10 bg-surface-overlay/80 backdrop-blur-xl p-4 rounded-2xl border border-white/10 space-y-3 shadow-2xl">
+              <div className="flex items-center gap-2">
+                <div className="w-3 h-3 rounded bg-[#f2f0f7]" />
+                <span className="text-[10px] font-bold text-muted uppercase tracking-widest">High Correlation</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-3 h-3 rounded bg-[#6a51a3]" />
+                <span className="text-[10px] font-bold text-muted uppercase tracking-widest">Low Correlation</span>
+              </div>
+              <p className="text-[9px] text-accent font-black uppercase tracking-[0.1em] pt-2 border-t border-white/5 italic">
+                Target: GENUINE DIVERSIFICATION
+              </p>
+            </div>
+          </div>
+        </section>
+      )}
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
         {/* Vital Signs Pulse */}

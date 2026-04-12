@@ -9,6 +9,8 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.cache.CacheManager;
+import org.springframework.cache.Cache;
 
 import com.oreki.cas_injector.core.repository.FolioRepository;
 import com.oreki.cas_injector.core.repository.InvestorRepository;
@@ -21,27 +23,24 @@ import com.oreki.cas_injector.transactions.repository.CapitalGainAuditRepository
 import com.oreki.cas_injector.transactions.repository.TaxLotRepository;
 import com.oreki.cas_injector.transactions.repository.TransactionRepository;
 
-import org.springframework.cache.Cache;
-import org.springframework.cache.CacheManager;
+import java.util.Map;
 import lombok.extern.slf4j.Slf4j;
 
 @RestController
 @RequestMapping("/dashboard")
-@Slf4j
 @CrossOrigin(origins = "*")
+@Slf4j
 public class DashboardController {
 
     @Autowired private DashboardService dashboardService;
     @Autowired private PortfolioFullService fullService;
-    @Autowired private CacheManager cacheManager;
-    
-    // Repositories for the "Wipe" operation
+    @Autowired private InvestorRepository investorRepo;
+    @Autowired private FolioRepository folioRepo;
+    @Autowired private SchemeRepository schemeRepo;
     @Autowired private TransactionRepository txnRepo;
     @Autowired private TaxLotRepository taxLotRepo;
     @Autowired private CapitalGainAuditRepository auditRepo;
-    @Autowired private SchemeRepository schemeRepo;
-    @Autowired private FolioRepository folioRepo;
-    @Autowired private InvestorRepository investorRepo;
+    @Autowired private CacheManager cacheManager;
 
     @GetMapping("/summary/{pan}")
     public ResponseEntity<DashboardSummaryDTO> getSummary(@PathVariable String pan) {
@@ -68,6 +67,13 @@ public class DashboardController {
         return ResponseEntity.ok(fullService.getPerformanceHistory(cleanPan));
     }
 
+    @GetMapping("/correlation/{pan}")
+    public ResponseEntity<Map<String, Object>> getCorrelation(@PathVariable String pan) {
+        String cleanPan = pan.trim().toUpperCase();
+        log.info("🔗 Fetching HRP correlation matrix for PAN: {}", cleanPan);
+        return ResponseEntity.ok(fullService.getCorrelationMatrix(cleanPan));
+    }
+
     @DeleteMapping("/reset")
     public ResponseEntity<String> resetAllData() {
         log.warn("Wiping all financial data for a fresh start...");
@@ -80,7 +86,7 @@ public class DashboardController {
         folioRepo.deleteAll();
         investorRepo.deleteAll();
 
-        // Clear caches
+        // Evict caches
         Cache pCache = cacheManager.getCache("portfolioCache");
         if (pCache != null) pCache.clear();
         Cache dCache = cacheManager.getCache("dashboardSummaryV3");

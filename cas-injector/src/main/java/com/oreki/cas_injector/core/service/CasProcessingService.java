@@ -30,6 +30,10 @@ import jakarta.transaction.Transactional;
 import lombok.extern.slf4j.Slf4j;
 import com.fasterxml.jackson.databind.JsonNode;
 
+import com.oreki.cas_injector.convictionmetrics.service.ConvictionScoringService;
+import com.oreki.cas_injector.convictionmetrics.service.QuantitativeEngineService;
+import org.springframework.scheduling.annotation.Async;
+
 @Service
 @Slf4j
 public class CasProcessingService {
@@ -41,6 +45,8 @@ public class CasProcessingService {
     @Autowired private NavService navService;
     @Autowired private CacheManager cacheManager;
     @Autowired private FifoInventoryService fifoService;
+    @Autowired private QuantitativeEngineService quantitativeEngineService;
+    @Autowired private ConvictionScoringService convictionScoringService;
 
     @Transactional
     public void processJson(JsonNode root) {
@@ -73,6 +79,21 @@ public class CasProcessingService {
         }
         if (cacheManager.getCache("dashboardSummary") != null) {
             cacheManager.getCache("dashboardSummary").evict(pan);
+        }
+
+        // Trigger initial scoring for this investor
+        runInitialScoringAsync(pan);
+    }
+
+    @Async("mathEngineExecutor")
+    public void runInitialScoringAsync(String pan) {
+        try {
+            log.info("🆕 New investor data loaded for PAN {}. Triggering initial scoring...", pan);
+            quantitativeEngineService.runNightlyMathEngine();  // runs global metrics first
+            convictionScoringService.calculateAndSaveFinalScores(pan);
+            log.info("✅ Initial conviction scoring complete for PAN {}", pan);
+        } catch (Exception e) {
+            log.warn("⚠️ Initial scoring failed for PAN {} (non-fatal): {}", pan, e.getMessage());
         }
     }
 
