@@ -1,4 +1,4 @@
-import { useMemo, useState, useEffect } from 'react';
+import { useMemo } from 'react';
 import { 
   ResponsiveContainer, XAxis, YAxis, Tooltip as RechartsTooltip, 
   CartesianGrid, ScatterChart, Scatter, ZAxis, Cell, ReferenceLine
@@ -12,7 +12,7 @@ import { motion } from 'framer-motion';
 import MetricWithTooltip from '../ui/MetricWithTooltip';
 import LearnTooltip from '../ui/LearnTooltip';
 import { formatCurrency } from '../../utils/formatters';
-import { fetchCorrelationMatrix } from '../../services/api';
+import { useCorrelationMatrix } from '../../hooks/useCorrelation';
 
 const ACTION_COLORS: Record<string, { bg: string; text: string; label: string }> = {
   BUY:     { bg: '#a6e3a1', text: '#fff', label: 'Buy' },
@@ -36,13 +36,7 @@ export default function PortfolioView({
   pan: string;
 }) {
   const mask = (val: number | string) => isPrivate ? "••••" : String(val);
-  const [corrData, setCorrData] = useState<any>(null);
-
-  useEffect(() => {
-    if (pan) {
-      fetchCorrelationMatrix(pan).then(setCorrData).catch(console.error);
-    }
-  }, [pan]);
+  const { data: corrData } = useCorrelationMatrix(pan);
 
   const activeBreakdown = useMemo(() => 
     (portfolioData.schemeBreakdown ?? []).filter((s: any) => (s.currentValue || 0) > 0),

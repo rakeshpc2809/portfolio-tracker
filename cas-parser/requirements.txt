@@ -4,6 +4,8 @@ casparser[pdf]
 python-multipart
 httpx
 numpy
+pandas
+scipy
 hmmlearn>=0.3.0
 scikit-learn
 yfinance

@@ -22,7 +22,7 @@ public class ApiKeyInterceptor implements HandlerInterceptor {
 
         // Skip API key check for error path and health checks
         String path = request.getRequestURI();
-        if (path.equals("/error") || path.contains("/actuator") || path.contains("/health") || path.contains("/status")) {
+        if (path.endsWith("/error") || path.contains("/actuator") || path.contains("/health") || path.contains("/status") || path.contains("/ws")) {
             return true;
         }
 
@@ -31,8 +31,7 @@ public class ApiKeyInterceptor implements HandlerInterceptor {
             return true;
         }
 
-        response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
-        response.getWriter().write("Unauthorized: Invalid or missing API Key");
+        response.sendError(HttpServletResponse.SC_UNAUTHORIZED, "Unauthorized: Invalid or missing API Key");
         return false;
     }
 }

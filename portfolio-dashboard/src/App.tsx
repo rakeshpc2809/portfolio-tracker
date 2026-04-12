@@ -1,8 +1,8 @@
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { fetchMasterPortfolio } from "./services/api";
 import Dashboard from "./components/layout/Dashboard";
 import LoginScreen from "./components/ui/LoginScreen";
+import { usePortfolioSummary } from "./hooks/usePortfolio";
 
 function useDebounce<T>(value: T, delay: number): T {
   const [debounced, setDebounced] = useState(value);
@@ -15,16 +15,14 @@ function useDebounce<T>(value: T, delay: number): T {
 
 export default function App() {
   const [pan, setPan] = useState<string | null>(localStorage.getItem('portfolio_pan'));
-  const [portfolioData, setPortfolioData] = useState<any>(null);
-  const [tacticalPayload, setTacticalPayload] = useState<any>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [sipAmount, setSipAmount] = useState(75000);
   const [lumpsum, setLumpsum] = useState(0);
 
   // Debounce so slider drags don't fire API on every pixel
   const debouncedSip = useDebounce(sipAmount, 600);
   const debouncedLumpsum = useDebounce(lumpsum, 600);
+
+  const { data: portfolioData, isLoading, error, refetch } = usePortfolioSummary(pan, debouncedSip, debouncedLumpsum);
 
   const handleLogin = (newPan: string) => {
     localStorage.setItem('portfolio_pan', newPan);
@@ -38,38 +36,7 @@ export default function App() {
   const handleLogout = () => {
     localStorage.removeItem('portfolio_pan');
     setPan(null);
-    setPortfolioData(null);
   };
-
-  useEffect(() => {
-    if (!pan || pan === 'SETUP') return;
-
-    const loadData = async () => {
-      setLoading(true);
-      try {
-        const portfolio = await fetchMasterPortfolio(pan, debouncedSip, debouncedLumpsum);
-        
-        setPortfolioData(portfolio);
-        setTacticalPayload(portfolio.tacticalPayload || {
-          sipPlan: [],
-          opportunisticSignals: [],
-          activeSellSignals: [],
-          exitQueue: [],
-          harvestOpportunities: [],
-          totalExitValue: 0,
-          totalHarvestValue: 0,
-        });
-        setError(null);
-      } catch (err) {
-        console.error("Critical System Failure:", err);
-        setError("Unable to initialize dashboard. Please try again later.");
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    loadData();
-  }, [pan, debouncedSip, debouncedLumpsum]);
 
   if (!pan) {
     return (
@@ -114,7 +81,7 @@ export default function App() {
 
   return (
     <AnimatePresence mode="wait">
-      {loading && !portfolioData ? (
+      {isLoading && !portfolioData ? (
         <motion.div
           key="loader"
           initial={{ opacity: 0 }}
@@ -163,10 +130,10 @@ export default function App() {
         </motion.div>
       ) : error ? (
         <div className="fixed inset-0 bg-[#09090f] flex flex-col items-center justify-center gap-4 px-8 text-center">
-          <p className="text-red-400 font-medium text-xs uppercase tracking-widest">{error}</p>
+          <p className="text-red-400 font-medium text-xs uppercase tracking-widest">Unable to initialize dashboard. Please try again later.</p>
           <div className="flex gap-4">
             <button 
-              onClick={() => window.location.reload()}
+              onClick={() => refetch()}
               className="px-4 py-2 bg-white/5 border border-white/10 rounded text-[10px] font-bold uppercase tracking-widest text-muted hover:text-white transition-colors"
             >
               Retry Connection
@@ -187,7 +154,7 @@ export default function App() {
           transition={{ duration: 0.4 }}
         >
           <Dashboard 
-            portfolioData={{ ...portfolioData, tacticalPayload }} 
+            portfolioData={portfolioData} 
             sipAmount={sipAmount} 
             setSipAmount={setSipAmount}
             lumpsum={lumpsum}

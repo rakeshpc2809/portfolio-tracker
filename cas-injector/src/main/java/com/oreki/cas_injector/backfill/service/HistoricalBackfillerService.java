@@ -5,6 +5,7 @@ import java.sql.SQLException;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -15,6 +16,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.oreki.cas_injector.core.model.Scheme;
 import com.oreki.cas_injector.core.repository.SchemeRepository;
 
@@ -28,13 +30,13 @@ public class HistoricalBackfillerService {
     private final SchemeRepository schemeRepository;
     private final JdbcTemplate jdbcTemplate;
     private final RestTemplate restTemplate;
+    private final ObjectMapper objectMapper = new ObjectMapper();
 
     @Getter private final AtomicBoolean isRunning = new AtomicBoolean(false);
     @Getter private final AtomicInteger currentProgress = new AtomicInteger(0);
     @Getter private final AtomicInteger totalToProcess = new AtomicInteger(0);
     @Getter private String lastStatusMessage = "Idle";
 
-    // mfapi.in uses dd-MM-yyyy format
     private static final DateTimeFormatter DATE_FORMATTER = DateTimeFormatter.ofPattern("dd-MM-yyyy");
 
     public HistoricalBackfillerService(SchemeRepository schemeRepository, JdbcTemplate jdbcTemplate, RestTemplate restTemplate) {
@@ -43,9 +45,6 @@ public class HistoricalBackfillerService {
         this.restTemplate = restTemplate;
     }
 
-    /**
-     * DTOs for parsing the mfapi.in JSON response
-     */
     @JsonIgnoreProperties(ignoreUnknown = true)
     public record MfApiData(String date, String nav) {}
     
@@ -58,10 +57,9 @@ public class HistoricalBackfillerService {
         }
 
         try {
-            log.info("🚀 Starting One-Shot Historical Backfill...");
+            log.info("🚀 Starting One-Shot Historical Backfill with Smart JSON Healer...");
             lastStatusMessage = "Initializing...";
 
-            // 1. Get all unique active funds from your database
             List<Scheme> activeSchemes = schemeRepository.findAll(); 
             int totalFunds = activeSchemes.size();
             totalToProcess.set(totalFunds);
@@ -73,41 +71,42 @@ public class HistoricalBackfillerService {
                 Scheme scheme = activeSchemes.get(i);
                 String amfiCode = scheme.getAmfiCode();
 
-                if (amfiCode == null || amfiCode.isBlank()) {
-                    log.warn("⚠️ Skipping Scheme {}: No AMFI code found.", scheme.getName());
-                    continue;
-                }
+                if (amfiCode == null || amfiCode.isBlank()) continue;
 
                 lastStatusMessage = "Fetching " + scheme.getName() + " (" + amfiCode + ")";
                 log.info("📥 [{}/{}] Fetching history for {} (AMFI: {})", i + 1, totalFunds, scheme.getName(), amfiCode);
 
                 try {
-                    // 2. Fetch the ENTIRE history in one shot
                     String url = "https://api.mfapi.in/mf/" + amfiCode;
-                    MfApiResponse response = restTemplate.getForObject(url, MfApiResponse.class);
+                    
+                    // 1. Fetch raw string first to allow healing
+                    String rawJson = restTemplate.getForObject(url, String.class);
+                    
+                    if (rawJson != null && !rawJson.isBlank()) {
+                        MfApiResponse response = null;
+                        try {
+                            // Try normal parsing
+                            response = objectMapper.readValue(rawJson, MfApiResponse.class);
+                        } catch (Exception e) {
+                            log.warn("⚠️ JSON Malformed for AMFI {}. Attempting to heal...", amfiCode);
+                            String healedJson = healJson(rawJson);
+                            response = objectMapper.readValue(healedJson, MfApiResponse.class);
+                        }
 
-                    if (response != null && response.data() != null && !response.data().isEmpty()) {
-                        List<MfApiData> historyData = response.data();
-                        
-                        // 3. Blast into PostgreSQL using High-Speed JDBC Batching
-                        insertBatchIntoDatabase(amfiCode, historyData);
-                        successCount++;
-                        log.info("✅ Saved {} historical records for {}.", historyData.size(), amfiCode);
-                    } else {
-                        log.warn("⚠️ No historical data returned for AMFI: {}", amfiCode);
+                        if (response != null && response.data() != null && !response.data().isEmpty()) {
+                            insertBatchIntoDatabase(amfiCode, response.data());
+                            successCount++;
+                            log.info("✅ Saved {} records for {}.", response.data().size(), amfiCode);
+                        }
                     }
 
-                    // 4. THE EXPLOIT RULE: Sleep for 10 seconds to avoid 502 Bad Gateway DDoS blocks
                     if (i < totalFunds - 1) { 
                         lastStatusMessage = "Cooling down (10s)... Next: " + activeSchemes.get(i+1).getName();
-                        log.info("💤 Sleeping for 10 seconds to respect API limits...");
                         Thread.sleep(10000);
                     }
 
                 } catch (InterruptedException e) {
-                    log.error("🛑 Backfill interrupted!", e);
                     Thread.currentThread().interrupt();
-                    lastStatusMessage = "Interrupted";
                     return "Backfill Interrupted!";
                 } catch (Exception e) {
                     log.error("🚨 Failed to process AMFI {}: {}", amfiCode, e.getMessage());
@@ -115,17 +114,24 @@ public class HistoricalBackfillerService {
             }
 
             lastStatusMessage = "Complete! Processed " + successCount + " funds.";
-            String resultMessage = String.format("🎉 Backfill Complete! Successfully processed %d/%d funds.", successCount, totalFunds);
-            log.info(resultMessage);
-            return resultMessage;
+            return String.format("🎉 Backfill Complete! Successfully processed %d/%d funds.", successCount, totalFunds);
         } finally {
             isRunning.set(false);
         }
     }
 
     /**
-     * High-Performance JDBC Batch Insert
+     * Smart JSON Healer: Strips the trailing incomplete object and closes the JSON array/object.
      */
+    private String healJson(String raw) {
+        // Find the last complete data entry "}," or similar
+        int lastCompleteIndex = raw.lastIndexOf("},");
+        if (lastCompleteIndex == -1) return raw; // Give up
+        
+        // Truncate at the end of the last complete object and append "]}" 
+        return raw.substring(0, lastCompleteIndex + 1) + "]}";
+    }
+
     private void insertBatchIntoDatabase(String amfiCode, List<MfApiData> historyData) {
         String sql = "INSERT INTO fund_history (amfi_code, nav_date, nav) VALUES (?, ?, ?) " +
                      "ON CONFLICT (amfi_code, nav_date) DO NOTHING";
@@ -137,21 +143,17 @@ public class HistoricalBackfillerService {
                 try {
                     LocalDate navDate = LocalDate.parse(record.date(), DATE_FORMATTER);
                     double navValue = Double.parseDouble(record.nav());
-
                     ps.setString(1, amfiCode);
                     ps.setObject(2, navDate);
                     ps.setDouble(3, navValue);
-                } catch (DateTimeParseException | NumberFormatException e) {
+                } catch (Exception e) {
                     ps.setString(1, amfiCode);
                     ps.setObject(2, LocalDate.of(1970, 1, 1)); 
                     ps.setDouble(3, 0.0);
                 }
             }
-
             @Override
-            public int getBatchSize() {
-                return historyData.size();
-            }
+            public int getBatchSize() { return historyData.size(); }
         });
     }
 }

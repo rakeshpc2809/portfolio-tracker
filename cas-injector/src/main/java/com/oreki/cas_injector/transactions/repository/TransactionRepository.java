@@ -12,7 +12,9 @@ import com.oreki.cas_injector.transactions.model.Transaction;
 
 
 @Repository
-public interface TransactionRepository extends JpaRepository<Transaction, Long>, JpaSpecificationExecutor<Transaction> {    boolean existsByTxnHash(String txnHash);
+public interface TransactionRepository extends JpaRepository<Transaction, Long>, JpaSpecificationExecutor<Transaction> {
+    boolean existsByTxnHash(String txnHash);
+    java.util.Optional<Transaction> findByTxnHash(String txnHash);
 
     // Find all transactions of a specific type (e.g., "BUY")
     List<Transaction> findByTransactionType(String type);

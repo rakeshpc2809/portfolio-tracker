@@ -1,6 +1,7 @@
 package com.oreki.cas_injector.transactions.controller;
 
 
+import com.oreki.cas_injector.dashboard.model.PortfolioSummary;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -13,7 +14,6 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.oreki.cas_injector.transactions.dto.TransactionResponseDTO;
-import com.oreki.cas_injector.transactions.model.Transaction;
 import com.oreki.cas_injector.transactions.service.TransactionService;
 
 @RestController
@@ -33,11 +33,16 @@ public class TransactionController {
             @RequestParam(required = false) String type,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size,
-            @RequestParam(defaultValue = "date,desc") String sort
+            @RequestParam(defaultValue = "transactionDate,desc") String sort
     ) {
-        // 🛠️ Dynamic Sort Parsing: Handles "date,desc" or "amount,asc"
+        // 🛠️ Dynamic Sort Parsing: Handles "transactionDate,desc" or "amount,asc"
+        // Note: Field names now match PortfolioSummary (e.g. transactionDate instead of date)
         String[] sortParams = sort.split(",");
         String sortField = sortParams[0];
+        
+        // Map common sort fields to PortfolioSummary fields if needed
+        if ("date".equalsIgnoreCase(sortField)) sortField = "transactionDate";
+        
         // Default to DESC if the second param is missing or invalid
         Sort.Direction direction = (sortParams.length > 1 && sortParams[1].equalsIgnoreCase("asc")) 
                                     ? Sort.Direction.ASC 
@@ -45,20 +50,20 @@ public class TransactionController {
 
         Pageable pageable = PageRequest.of(page, size, Sort.by(direction, sortField));
 
-        // 🚀 Execute the Join-based Specification query        
-        Page<Transaction> pageTransaction = transactionService.getFilteredTransactions(pan, type, pageable);
+        // 🚀 Execute the lookup on the Materialized View
+        Page<PortfolioSummary> pageSummary = transactionService.getFilteredTransactions(pan, type, pageable);
     
-    // Map Entity to DTO
-    Page<TransactionResponseDTO> dtoPage = pageTransaction.map(t -> TransactionResponseDTO.builder()
-            .id(t.getId())
-            .txnHash(t.getTxnHash())
-            .date(t.getDate())
-            .description(t.getDescription())
-            .units(t.getUnits())
-            .amount(t.getAmount())
-            .transactionType(t.getTransactionType())
-            .schemeName(t.getScheme().getName())
-            .isin(t.getScheme().getIsin())
+    // Map Read Model to DTO
+    Page<TransactionResponseDTO> dtoPage = pageSummary.map(s -> TransactionResponseDTO.builder()
+            .id(s.getTxnId())
+            .txnHash(s.getTxnHash())
+            .date(s.getTransactionDate())
+            .description(s.getDescription())
+            .units(s.getUnits())
+            .amount(s.getAmount())
+            .transactionType(s.getTransactionType())
+            .schemeName(s.getSchemeName())
+            .isin(s.getIsin())
             .build());
 
     return ResponseEntity.ok(dtoPage);

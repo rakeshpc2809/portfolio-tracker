@@ -1,9 +1,10 @@
-import { useEffect, useState, useMemo } from 'react';
+import { useState, useMemo } from 'react';
 import { ResponsiveLine } from '@nivo/line';
 import { Activity, Target } from 'lucide-react';
 import { formatCurrency } from '../../utils/formatters';
 import { motion } from 'framer-motion';
 import { Slider } from '../ui/slider';
+import { usePerformanceHistory } from '../../hooks/usePerformance';
 
 export default function PerformanceView({ 
   pan, 
@@ -14,28 +15,11 @@ export default function PerformanceView({
   pan: string; 
   isPrivate: boolean;
 }) {
-  const [perf, setPerf] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
+  const { data: perf, isLoading } = usePerformanceHistory(pan);
 
   // Goal Projector State
   const [goalAmount, setGoalAmount] = useState(10000000); // ₹1Cr default
   const [monthlyAddition, setMonthlyAddition] = useState(0);
-
-  useEffect(() => {
-    setLoading(true);
-    fetch(`/api/dashboard/performance/${pan}`, {
-      headers: { 'X-API-KEY': 'dev-secret-key' }
-    })
-      .then(r => r.json())
-      .then(data => {
-        setPerf(data);
-        setLoading(false);
-      })
-      .catch(err => {
-        console.error(err);
-        setLoading(false);
-      });
-  }, [pan]);
 
   const lineData = useMemo(() => {
     if (!perf || !perf.history || perf.history.length === 0) return [];
@@ -79,7 +63,7 @@ export default function PerformanceView({
     return n < 600 ? n / 12 : null;
   }, [xirr, currentValue, goalAmount, monthlyAddition]);
 
-  if (loading) {
+  if (isLoading) {
     return (
       <div className="h-96 flex items-center justify-center">
         <div className="w-10 h-10 border-4 border-accent border-t-transparent rounded-full animate-spin" />

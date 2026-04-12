@@ -1,8 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { uploadCas, triggerBackfill, triggerForceSync, fetchAdminStatus } from "@/services/api";
 import { Upload, ShieldCheck, FileText, AlertCircle, CheckCircle2, Database, Zap, Loader2, Info, TrendingUp, Activity } from "lucide-react";
-import SockJS from 'sockjs-client';
-import { Client } from '@stomp/stompjs';
+import { useEngineWebsocket } from '@/hooks/useEngineWebsocket';
 
 const CasUploadView: React.FC<{ pan: string }> = ({ pan }) => {
   const [file, setFile] = useState<File | null>(null);
@@ -13,11 +12,12 @@ const CasUploadView: React.FC<{ pan: string }> = ({ pan }) => {
   const [adminStatus, setAdminStatus] = useState<any>(null);
   const [syncing, setSyncing] = useState(false);
   const [backfilling, setBackfilling] = useState(false);
-  const [engineProgress, setEngineProgress] = useState<any>(null);
   const [rescoring, setRescoring] = useState(false);
   const [rescoreStatus, setRescoreStatus] = useState('');
 
-  // Polling for backfill status (WebSocket only for engine for now)
+  const engineProgress = useEngineWebsocket();
+
+  // Polling for backfill status
   useEffect(() => {
     const interval = setInterval(async () => {
       try {
@@ -28,23 +28,6 @@ const CasUploadView: React.FC<{ pan: string }> = ({ pan }) => {
       }
     }, 3000);
     return () => clearInterval(interval);
-  }, []);
-
-  // WebSocket Connection for Engine Progress
-  useEffect(() => {
-    const client = new Client({
-      webSocketFactory: () => new SockJS('/api/ws'),
-      onConnect: () => {
-        client.subscribe('/topic/engine-progress', (msg) => {
-          const data = JSON.parse(msg.body);
-          setEngineProgress(data);
-        });
-      },
-      debug: (str) => console.log('STOMP: ' + str),
-    });
-
-    client.activate();
-    return () => { client.deactivate(); };
   }, []);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {

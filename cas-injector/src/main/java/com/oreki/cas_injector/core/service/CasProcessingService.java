@@ -4,12 +4,17 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.stream.Collectors;
+import java.sql.PreparedStatement;
+import java.sql.SQLException;
 
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.BatchPreparedStatementSetter;
 import org.springframework.stereotype.Service;
 import org.springframework.cache.CacheManager;
 
@@ -22,6 +27,7 @@ import com.oreki.cas_injector.core.repository.FolioRepository;
 import com.oreki.cas_injector.core.repository.InvestorRepository;
 import com.oreki.cas_injector.core.repository.SchemeRepository;
 import com.oreki.cas_injector.core.utils.CommonUtils;
+import com.oreki.cas_injector.dashboard.repository.PortfolioSummaryRepository;
 import com.oreki.cas_injector.taxmanagement.service.FifoInventoryService;
 import com.oreki.cas_injector.transactions.model.Transaction;
 import com.oreki.cas_injector.transactions.repository.TransactionRepository;
@@ -47,6 +53,8 @@ public class CasProcessingService {
     @Autowired private FifoInventoryService fifoService;
     @Autowired private QuantitativeEngineService quantitativeEngineService;
     @Autowired private ConvictionScoringService convictionScoringService;
+    @Autowired private JdbcTemplate jdbcTemplate;
+    @Autowired private PortfolioSummaryRepository summaryRepo;
 
     @Transactional
     public void processJson(JsonNode root) {
@@ -61,6 +69,8 @@ public class CasProcessingService {
                 .build())
         );
 
+        List<Transaction> pendingTransactions = new ArrayList<>();
+
         root.path("folios").forEach(folioNode -> {
             Folio folio = findOrCreateFolio(folioNode, investor); 
 
@@ -68,10 +78,33 @@ public class CasProcessingService {
                 Scheme scheme = findOrCreateScheme(schemeNode, folio);
                 
                 schemeNode.path("transactions").forEach(txNode -> {
-                    processTransaction(txNode, scheme);
+                    Transaction tx = prepareTransaction(txNode, scheme);
+                    if (tx != null) {
+                        pendingTransactions.add(tx);
+                    }
                 });
             });
         });
+
+        // Batch Insert Transactions
+        if (!pendingTransactions.isEmpty()) {
+            batchInsertTransactions(pendingTransactions);
+            
+            // Post-Batch: Apply FIFO logic. 
+            // We need to fetch transactions back to get IDs for FIFO linking.
+            pendingTransactions.forEach(tx -> {
+                txnRepo.findByTxnHash(tx.getTxnHash()).ifPresent(savedTx -> {
+                    String category = "UNKNOWN";
+                    if ("SELL".equalsIgnoreCase(savedTx.getTransactionType()) || "STAMP_DUTY".equalsIgnoreCase(savedTx.getTransactionType())) {
+                         category = navService.getLatestSchemeDetails(savedTx.getScheme().getAmfiCode()).getCategory();
+                    }
+                    fifoService.applyInventoryRules(savedTx, category);
+                });
+            });
+        }
+
+        // Refresh Materialized View
+        summaryRepo.refreshView();
 
         // 4. Evict caches for this PAN
         if (cacheManager.getCache("portfolioCache") != null) {
@@ -143,11 +176,11 @@ public class CasProcessingService {
         return schemeRepo.save(newScheme);
     }
 
-    private void processTransaction(JsonNode txNode, Scheme scheme) {
+    private Transaction prepareTransaction(JsonNode txNode, Scheme scheme) {
         String hash = CommonUtils.GENERATE_HASH.apply(txNode, scheme.getId());
-        if (txnRepo.existsByTxnHash(hash)) return;
+        if (txnRepo.existsByTxnHash(hash)) return null;
 
-        Transaction tx = Transaction.builder()
+        return Transaction.builder()
             .txnHash(hash)
             .date(LocalDate.parse(txNode.path("date").asText()))
             .description(CommonUtils.SANITIZE.apply(txNode.path("description").asText()))
@@ -156,14 +189,30 @@ public class CasProcessingService {
             .transactionType(txNode.path("transaction_type").asText())
             .scheme(scheme)
             .build();
+    }
+
+    private void batchInsertTransactions(List<Transaction> transactions) {
+        log.info("📦 Batch inserting {} transactions", transactions.size());
+        String sql = "INSERT INTO transaction (txn_hash, transaction_date, description, units, amount, transaction_type, scheme_id) VALUES (?, ?, ?, ?, ?, ?, ?)";
         
-        txnRepo.save(tx);
-        
-        String category = "UNKNOWN";
-        if ("SELL".equalsIgnoreCase(tx.getTransactionType()) || "STAMP_DUTY".equalsIgnoreCase(tx.getTransactionType())) {
-             category = navService.getLatestSchemeDetails(tx.getScheme().getAmfiCode()).getCategory();
-        }
-        fifoService.applyInventoryRules(tx, category);
+        jdbcTemplate.batchUpdate(sql, new BatchPreparedStatementSetter() {
+            @Override
+            public void setValues(PreparedStatement ps, int i) throws SQLException {
+                Transaction tx = transactions.get(i);
+                ps.setString(1, tx.getTxnHash());
+                ps.setObject(2, java.sql.Date.valueOf(tx.getDate()));
+                ps.setString(3, tx.getDescription());
+                ps.setBigDecimal(4, tx.getUnits());
+                ps.setBigDecimal(5, tx.getAmount());
+                ps.setString(6, tx.getTransactionType());
+                ps.setLong(7, tx.getScheme().getId());
+            }
+
+            @Override
+            public int getBatchSize() {
+                return transactions.size();
+            }
+        });
     }
 
     public void processPortfolioTaxation(List<Transaction> allSells) {

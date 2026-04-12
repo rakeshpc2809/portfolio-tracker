@@ -1,43 +1,32 @@
 package com.oreki.cas_injector.transactions.service;
 
-import java.util.ArrayList;
-import java.util.List;
-
+import com.oreki.cas_injector.dashboard.model.PortfolioSummary;
+import com.oreki.cas_injector.dashboard.repository.PortfolioSummaryReadRepository;
+import jakarta.persistence.criteria.Predicate;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 
-import com.oreki.cas_injector.core.model.Folio;
-import com.oreki.cas_injector.core.model.Investor;
-import com.oreki.cas_injector.core.model.Scheme;
-import com.oreki.cas_injector.transactions.model.Transaction;
-import com.oreki.cas_injector.transactions.repository.TransactionRepository;
-
-import jakarta.persistence.criteria.Join;
-import jakarta.persistence.criteria.JoinType;
-import jakarta.persistence.criteria.Predicate;
+import java.util.ArrayList;
+import java.util.List;
 
 @Service
 public class TransactionService {
 
-    private final TransactionRepository transactionRepository;
+    private final PortfolioSummaryReadRepository summaryRepository;
 
-    public TransactionService(TransactionRepository transactionRepository) {
-        this.transactionRepository = transactionRepository;
+    public TransactionService(PortfolioSummaryReadRepository summaryRepository) {
+        this.summaryRepository = summaryRepository;
     }
 
-    public Page<Transaction> getFilteredTransactions(String pan, String type, Pageable pageable) {
-        return transactionRepository.findAll((Specification<Transaction>) (root, query, cb) -> {
+    public Page<PortfolioSummary> getFilteredTransactions(String pan, String type, Pageable pageable) {
+        return summaryRepository.findAll((Specification<PortfolioSummary>) (root, query, cb) -> {
             List<Predicate> predicates = new ArrayList<>();
 
-            // 🧬 DEEP JOIN: Transaction -> Scheme -> Folio -> Investor
+            // 🧬 DIRECT LOOKUP on Materialized View (No joins needed!)
             if (pan != null && !pan.isEmpty()) {
-                Join<Transaction, Scheme> schemeJoin = root.join("scheme", JoinType.INNER);
-                Join<Scheme, Folio> folioJoin = schemeJoin.join("folio", JoinType.INNER);
-                Join<Folio, Investor> investorJoin = folioJoin.join("investor", JoinType.INNER);
-                
-                predicates.add(cb.equal(investorJoin.get("pan"), pan));
+                predicates.add(cb.equal(root.get("investorPan"), pan));
             }
 
             // 🏷️ FILTER: Transaction Type (BUY, SELL, etc.)

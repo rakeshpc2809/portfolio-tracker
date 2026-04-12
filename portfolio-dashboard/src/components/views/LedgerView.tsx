@@ -1,20 +1,8 @@
-import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
-import { CalendarDays, Box } from "lucide-react";
-import { fetchTransactions } from "../../services/api";
+import React, { useState, useRef, useCallback, useMemo } from "react";
+import { CalendarDays, Box, Search } from "lucide-react";
 import CurrencyValue from "../ui/CurrencyValue";
 import { normalizeName } from "../../utils/formatters";
-
-interface TransactionDTO {
-  id: number;
-  txnHash: string;
-  date: string;
-  description: string;
-  units: number;
-  amount: number;
-  transactionType: string;
-  schemeName: string;
-  isin: string;
-}
+import { useInfiniteTransactions } from "../../hooks/useTransactions";
 
 export default function LedgerView({ 
   investorPan,
@@ -23,11 +11,19 @@ export default function LedgerView({
   investorPan: string;
   isPrivate: boolean;
 }) {
-  const [transactions, setTransactions] = useState<TransactionDTO[]>([]);
-  const [page, setPage] = useState(0);
-  const [loading, setLoading] = useState(false);
-  const [hasMore, setHasMore] = useState(true);
   const [filterType, setFilterType] = useState("ALL");
+
+  const {
+    data,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+    isLoading,
+  } = useInfiniteTransactions(investorPan, filterType);
+
+  const transactions = useMemo(() => {
+    return data?.pages.flatMap(page => page.content) || [];
+  }, [data]);
 
   const observer = useRef<IntersectionObserver | null>(null);
 
@@ -49,37 +45,23 @@ export default function LedgerView({
   }, [transactions]);
 
   const lastElementRef = useCallback((node: HTMLDivElement) => {
-    if (loading) return;
+    if (isLoading || isFetchingNextPage) return;
     if (observer.current) observer.current.disconnect();
     observer.current = new IntersectionObserver(entries => {
-      if (entries[0].isIntersecting && hasMore) {
-        setPage(prev => prev + 1);
+      if (entries[0].isIntersecting && hasNextPage) {
+        fetchNextPage();
       }
     });
     if (node) observer.current.observe(node);
-  }, [loading, hasMore]);
+  }, [isLoading, isFetchingNextPage, hasNextPage, fetchNextPage]);
 
-  const fetchLedger = useCallback(async (pageNum: number, type: string) => {
-    setLoading(true);
-    try {
-      const data = await fetchTransactions(investorPan, pageNum, type);
-      setTransactions(prev => (pageNum === 0 ? data.content : [...prev, ...data.content]));
-      setHasMore(!data.last);
-    } catch (err) {
-      console.error("Ledger Sync Error:", err);
-    } finally {
-      setLoading(false);
-    }
-  }, [investorPan]);
-
-  useEffect(() => {
-    setPage(0);
-    fetchLedger(0, filterType);
-  }, [filterType, investorPan, fetchLedger]);
-
-  useEffect(() => {
-    if (page > 0) fetchLedger(page, filterType);
-  }, [page, filterType, fetchLedger]);
+  if (isLoading && transactions.length === 0) {
+    return (
+      <div className="h-96 flex items-center justify-center">
+        <div className="w-10 h-10 border-4 border-accent border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-8 pb-32">
@@ -104,89 +86,96 @@ export default function LedgerView({
         </div>
       </header>
 
-      <div className="space-y-4">
-        {transactions.map((tx, index) => {
-          const dateObj = new Date(tx.date);
-          const currentMonthYear = getMonthYear(tx.date);
-          const previousMonthYear = index > 0 ? getMonthYear(transactions[index - 1].date) : null;
-          const isNewMonth = currentMonthYear !== previousMonthYear;
-          const monthStats = monthlySummaries[currentMonthYear];
+      {transactions.length === 0 && !isLoading ? (
+        <div className="py-20 text-center bg-surface/20 backdrop-blur-xl border border-dashed border-white/10 rounded-[2.5rem] space-y-4">
+          <Search size={40} className="text-muted/10 mx-auto" />
+          <p className="text-muted text-[10px] font-black uppercase tracking-widest opacity-40">No transactions found for this filter</p>
+        </div>
+      ) : (
+        <div className="space-y-4">
+          {transactions.map((tx, index) => {
+            const dateObj = new Date(tx.date);
+            const currentMonthYear = getMonthYear(tx.date);
+            const previousMonthYear = index > 0 ? getMonthYear(transactions[index - 1].date) : null;
+            const isNewMonth = currentMonthYear !== previousMonthYear;
+            const monthStats = monthlySummaries[currentMonthYear];
 
-          return (
-            <React.Fragment key={`${tx.txnHash}-${index}`}>
-              {isNewMonth && (
-                <div className="flex items-center justify-between gap-4 pt-10 pb-4 px-2">
-                  <div className="flex items-center gap-3">
-                    <CalendarDays size={14} className="text-accent" />
-                    <span className="text-[11px] font-bold text-primary uppercase tracking-[0.2em]">{currentMonthYear}</span>
+            return (
+              <React.Fragment key={`${tx.txnHash}-${index}`}>
+                {isNewMonth && (
+                  <div className="flex items-center justify-between gap-4 pt-10 pb-4 px-2">
+                    <div className="flex items-center gap-3">
+                      <CalendarDays size={14} className="text-accent" />
+                      <span className="text-[11px] font-bold text-primary uppercase tracking-[0.2em]">{currentMonthYear}</span>
+                    </div>
+                    <div className="flex items-center gap-4 text-[10px] font-medium">
+                      <span className="text-muted uppercase tracking-widest">Net invested:</span>
+                      <CurrencyValue 
+                        isPrivate={isPrivate} 
+                        value={monthStats.net} 
+                        className={`tabular-nums font-bold ${monthStats.net >= 0 ? 'text-buy' : 'text-exit'}`} 
+                      />
+                      <span className="text-muted">/</span>
+                      <span className="text-muted uppercase tracking-widest">{monthStats.count} entries</span>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-4 text-[10px] font-medium">
-                    <span className="text-muted uppercase tracking-widest">Net invested:</span>
+                )}
+
+                <div 
+                  ref={index === transactions.length - 1 ? lastElementRef : null}
+                  className="group bg-surface border border-white/5 p-4 rounded-xl flex items-center hover:bg-white/[0.02] transition-all duration-150"
+                >
+                  <div className="w-12 text-center">
+                    <p className="text-[10px] font-bold text-muted uppercase mb-0.5">Day</p>
+                    <p className="text-sm font-medium text-primary tabular-nums">{dateObj.getDate().toString().padStart(2, '0')}</p>
+                  </div>
+
+                  <div className="h-8 w-px bg-white/5 mx-6" />
+
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[13px] font-black text-primary truncate mb-1 tracking-tight">
+                      {normalizeName(tx.schemeName)}
+                    </p>
+                    <div className="flex items-center gap-3">
+                      <span className={`px-2 py-0.5 rounded-lg text-[9px] font-black uppercase tracking-widest ${
+                        tx.transactionType === 'BUY' ? 'text-buy bg-buy/10 border border-buy/20' : 
+                        tx.transactionType === 'SELL' ? 'text-exit bg-exit/10 border border-exit/20' : 'text-hold bg-hold/10 border border-hold/20'
+                      }`}>
+                        {tx.transactionType}
+                      </span>
+                      <span className="text-[10px] text-muted font-black tabular-nums uppercase tracking-[0.15em] flex items-center gap-1 opacity-60">
+                        <Box size={10} /> {tx.isin}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="text-right ml-8">
+                    <p className="text-[10px] font-bold text-muted uppercase mb-0.5">Quantum Delta</p>
+                    <p className={`text-sm font-medium tabular-nums ${tx.transactionType === 'BUY' ? 'text-buy' : 'text-exit'}`}>
+                      {tx.transactionType === 'BUY' ? '▲' : '▼'} {tx.units.toFixed(3)}
+                    </p>
+                  </div>
+
+                  <div className="text-right ml-12 min-w-[120px]">
+                    <p className="text-[10px] font-bold text-muted uppercase mb-0.5">Settlement</p>
                     <CurrencyValue 
                       isPrivate={isPrivate} 
-                      value={monthStats.net} 
-                      className={`tabular-nums font-bold ${monthStats.net >= 0 ? 'text-buy' : 'text-exit'}`} 
+                      value={tx.amount} 
+                      className="text-sm font-medium text-primary tabular-nums block" 
                     />
-                    <span className="text-muted">/</span>
-                    <span className="text-muted uppercase tracking-widest">{monthStats.count} entries</span>
                   </div>
                 </div>
-              )}
+              </React.Fragment>
+            );
+          })}
 
-              <div 
-                ref={index === transactions.length - 1 ? lastElementRef : null}
-                className="group bg-surface border border-white/5 p-4 rounded-xl flex items-center hover:bg-white/[0.02] transition-all duration-150"
-              >
-                <div className="w-12 text-center">
-                  <p className="text-[10px] font-bold text-muted uppercase mb-0.5">Day</p>
-                  <p className="text-sm font-medium text-primary tabular-nums">{dateObj.getDate().toString().padStart(2, '0')}</p>
-                </div>
-
-                <div className="h-8 w-px bg-white/5 mx-6" />
-
-                <div className="flex-1 min-w-0">
-                  <p className="text-[13px] font-black text-primary truncate mb-1 tracking-tight">
-                    {normalizeName(tx.schemeName)}
-                  </p>
-                  <div className="flex items-center gap-3">
-                    <span className={`px-2 py-0.5 rounded-lg text-[9px] font-black uppercase tracking-widest ${
-                      tx.transactionType === 'BUY' ? 'text-buy bg-buy/10 border border-buy/20' : 
-                      tx.transactionType === 'SELL' ? 'text-exit bg-exit/10 border border-exit/20' : 'text-hold bg-hold/10 border border-hold/20'
-                    }`}>
-                      {tx.transactionType}
-                    </span>
-                    <span className="text-[10px] text-muted font-black tabular-nums uppercase tracking-[0.15em] flex items-center gap-1 opacity-60">
-                      <Box size={10} /> {tx.isin}
-                    </span>
-                  </div>
-                </div>
-
-                <div className="text-right ml-8">
-                  <p className="text-[10px] font-bold text-muted uppercase mb-0.5">Quantum Delta</p>
-                  <p className={`text-sm font-medium tabular-nums ${tx.transactionType === 'BUY' ? 'text-buy' : 'text-exit'}`}>
-                    {tx.transactionType === 'BUY' ? '▲' : '▼'} {tx.units.toFixed(3)}
-                  </p>
-                </div>
-
-                <div className="text-right ml-12 min-w-[120px]">
-                  <p className="text-[10px] font-bold text-muted uppercase mb-0.5">Settlement</p>
-                  <CurrencyValue 
-                    isPrivate={isPrivate} 
-                    value={tx.amount} 
-                    className="text-sm font-medium text-primary tabular-nums block" 
-                  />
-                </div>
-              </div>
-            </React.Fragment>
-          );
-        })}
-
-        {loading && (
-          <div className="py-12 flex justify-center">
-            <div className="w-5 h-5 border-2 border-accent/30 border-t-accent rounded-full animate-spin" />
-          </div>
-        )}
-      </div>
+          {(isFetchingNextPage) && (
+            <div className="py-12 flex justify-center">
+              <div className="w-5 h-5 border-2 border-accent/30 border-t-accent rounded-full animate-spin" />
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
