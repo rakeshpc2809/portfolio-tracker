@@ -153,8 +153,13 @@ public class DashboardService {
                     .map(t -> {
                         BigDecimal preciseAmount = Optional.ofNullable(schemeNavHistory.get(t.getDate()))
                             .map(nav -> nav.multiply(t.getUnits().abs()))
-                            .orElse(t.getAmount());
-                        return new TransactionDTO(preciseAmount.negate(), t.getDate());
+                            .orElse(t.getAmount().abs());
+                        
+                        // Outflows (Buy/Tax) are negative, Inflows (Sell/Div) are positive
+                        boolean isOutflow = "BUY".equalsIgnoreCase(t.getTransactionType()) || "STAMP_DUTY".equalsIgnoreCase(t.getTransactionType());
+                        BigDecimal flow = isOutflow ? preciseAmount.negate() : preciseAmount;
+                        
+                        return new TransactionDTO(flow, t.getDate());
                     })
                     .collect(Collectors.toList());
                                 
