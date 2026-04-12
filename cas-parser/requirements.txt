@@ -6,3 +6,4 @@ httpx
 numpy
 hmmlearn>=0.3.0
 scikit-learn
+yfinance

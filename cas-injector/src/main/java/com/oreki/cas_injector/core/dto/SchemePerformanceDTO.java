@@ -47,6 +47,8 @@ public class SchemePerformanceDTO {
 
     private String bucket;
 
+    private String amc;
+
     private String benchmarkIndex;
 
     // Conviction & Risk Metrics (Updated for NAV Signals)
@@ -74,6 +76,20 @@ public class SchemePerformanceDTO {
     private double painScore;
     private double frictionScore;
     
+    private String simpleName;
+
+    // Advanced Quantitative Metrics (Task 2B/3C)
+    private double rollingZScore252;
+    private double hurstExponent;
+    private double volatilityTax;
+    private String hurstRegime;
+    private double historicalRarityPct;
+    private double ouHalfLife;
+    private boolean ouValid;
+    private String hmmState;
+    private double hmmBullProb;
+    private double hmmBearProb;
+
     // Tactical Signal Details
     private String signalType;
     private String action;

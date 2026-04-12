@@ -11,6 +11,7 @@ from fastapi import FastAPI, UploadFile, Form, HTTPException
 from pydantic import BaseModel
 import casparser
 import numpy as np
+import yfinance as yf
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -19,6 +20,7 @@ logger = logging.getLogger(__name__)
 app = FastAPI(title="Mutual Fund CAS Parser Service")
 
 JAVA_BACKEND_URL = os.getenv("JAVA_BACKEND_URL", "http://java-backend:8080/api/cas/inject")
+JAVA_MARKET_URL = os.getenv("JAVA_MARKET_URL", "http://java-backend:8080/api/market/index-history")
 API_KEY = os.getenv("PORTFOLIO_API_KEY", "dev-secret-key")
 
 try:
@@ -135,6 +137,55 @@ async def push_to_java_backend(parsed_data: dict):
         logger.info("✅ Data successfully injected into Java Backend")
 
 # --- 5. ROUTES ---
+@app.post("/api/scraper/sync-market")
+async def sync_market_data():
+    """Scrapes historical benchmark data from Yahoo Finance and pushes to Java Backend."""
+    benchmarks = {
+        "NIFTY 50": "^NSEI",
+        "NIFTY MIDCAP 150": "^NSMIDCP150", 
+        "NIFTY SMALLCAP 250": "^NIFTY_SMALL_250", # Some indices don't have direct tickers, using best available
+        "NIFTY 500": "^NSE500",
+        "GOLD_PRICE_INDEX": "GC=F"
+    }
+
+    results = []
+    async with httpx.AsyncClient() as client:
+        for index_name, ticker_symbol in benchmarks.items():
+            try:
+                logger.info(f"Scraping data for {index_name} ({ticker_symbol})")
+                ticker = yf.Ticker(ticker_symbol)
+                # Fetch last 2 years to ensure we have enough data points even with gaps
+                hist = ticker.history(period="2y")
+                
+                if hist.empty:
+                    logger.warning(f"No data returned for {ticker_symbol}")
+                    continue
+
+                for timestamp, row in hist.iterrows():
+                    results.append({
+                        "indexName": index_name,
+                        "date": timestamp.strftime("%Y-%m-%d"),
+                        "closingPrice": float(row['Close'])
+                    })
+            except Exception as e:
+                logger.error(f"Failed to scrape {index_name}: {e}")
+
+        if results:
+            try:
+                # Push in batches if too large, but for 1y and few indices it should be okay
+                response = await client.post(
+                    JAVA_MARKET_URL,
+                    json=results,
+                    headers={"X-API-KEY": API_KEY},
+                    timeout=60.0
+                )
+                return {"status": "success", "synced": len(results), "java_response": response.text}
+            except Exception as e:
+                logger.error(f"Failed to push to Java: {e}")
+                raise HTTPException(status_code=500, detail=f"Failed to push: {str(e)}")
+    
+    return {"status": "no_data"}
+
 @app.post("/hmm/fit", response_model=HmmFitResponse)
 async def fit_hmm(req: HmmFitRequest):
     if not HMM_AVAILABLE:

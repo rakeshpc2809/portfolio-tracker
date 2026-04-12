@@ -106,3 +106,11 @@ export const fetchAdminStatus = async () => {
   if (!response.ok) throw new Error("Failed to fetch admin status");
   return response.json();
 };
+
+export const fetchFundHistory = async (amfiCode: string, benchmark: string = "NIFTY 50") => {
+  const response = await authenticatedFetch(
+    `${BASE_URL}/history/fund/${amfiCode}?benchmark=${encodeURIComponent(benchmark)}`
+  );
+  if (!response.ok) throw new Error("Failed to fetch fund history");
+  return response.json();
+};

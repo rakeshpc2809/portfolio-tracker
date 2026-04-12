@@ -24,9 +24,9 @@ export default function RebalanceView({
       const drift = (s.allocationPercentage || 0) - (s.plannedPercentage || 0);
       return {
         ...s,
-        name: s.schemeName.substring(0, 20),
+        name: s.simpleName || s.schemeName.substring(0, 22),
         drift: parseFloat(drift.toFixed(2)),
-        color: drift > 1 ? "#f87171" : drift < -1 ? "#34d399" : "#94a3b8"
+        color: drift > 1 ? "#f38ba8" : drift < -1 ? "#a6e3a1" : "#6c7086"
       };
     })
     .sort((a: any, b: any) => b.drift - a.drift), [portfolioData.schemeBreakdown]);
@@ -46,10 +46,10 @@ export default function RebalanceView({
       const gapValue = (drift / 100) * portfolioValue;
       const months = Math.ceil(gapValue / s.amount);
       return {
-        name: s.schemeName.substring(0, 15) + '…',
+        name: s.simpleName || s.schemeName.substring(0, 22),
         months: months > 36 ? 36 : months, // Cap at 3 years for visual
         actualMonths: months,
-        color: months <= 6 ? '#4ade80' : months <= 12 ? '#fbbf24' : '#f87171'
+        color: months <= 6 ? '#a6e3a1' : months <= 12 ? '#f9e2af' : '#f38ba8'
       };
     })
     .sort((a: any, b: any) => a.months - b.months), [sipPlan, data, portfolioValue]);
@@ -178,7 +178,7 @@ export default function RebalanceView({
             {sipPlan.filter((s: any) => s.amount > 0).map((s: any) => (
               <div key={s.isin} className="bg-black/20 border border-white/5 p-4 rounded-2xl flex items-center justify-between group hover:border-white/10 transition-all shadow-lg">
                 <div className="min-w-0">
-                  <p className="text-[11px] font-bold text-secondary truncate">{s.schemeName}</p>
+                  <p className="text-[11px] font-black text-secondary truncate tracking-tight">{s.simpleName || s.schemeName}</p>
                   <p className="text-[9px] font-black text-muted uppercase tracking-widest mt-0.5">{s.sipPct}% Load</p>
                 </div>
                 <div className="text-right pl-4">

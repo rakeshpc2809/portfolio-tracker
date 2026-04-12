@@ -1,11 +1,12 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { formatCurrency } from '../../utils/formatters';
-import { ShieldAlert, ShieldCheck, TrendingDown, ArrowRight } from 'lucide-react';
+import { ShieldAlert, ShieldCheck, TrendingDown, ArrowRight, ChartBarStacked } from 'lucide-react';
 import MetricWithTooltip from '../ui/MetricWithTooltip';
 import CurrencyValue from '../ui/CurrencyValue';
 import { fetchTlhOpportunities } from '../../services/api';
 import { motion } from 'framer-motion';
 import * as Tooltip from '@radix-ui/react-tooltip';
+import { ResponsiveBar } from '@nivo/bar';
 
 export default function TaxView({ 
   portfolioData,
@@ -48,6 +49,19 @@ export default function TaxView({
   const totalUnrealizedLTCG = (portfolioData.schemeBreakdown || []).reduce((a: number, s: any) => a + (s.ltcgUnrealizedGain || 0), 0);
   const totalUnrealizedSTCG = (portfolioData.schemeBreakdown || []).reduce((a: number, s: any) => a + (s.stcgUnrealizedGain || 0), 0);
 
+  const taxBarData = useMemo(() => [
+    {
+      category: 'LTCG',
+      'Realized': realizedLTCG,
+      'Unrealized': totalUnrealizedLTCG,
+    },
+    {
+      category: 'STCG',
+      'Realized': realizedSTCG,
+      'Unrealized': totalUnrealizedSTCG,
+    }
+  ], [realizedLTCG, totalUnrealizedLTCG, realizedSTCG, totalUnrealizedSTCG]);
+
   const projectedLtcgTax = Math.max(0, totalUnrealizedLTCG - (ltcgLimit - realizedLTCG)) * 0.125;
   const projectedStcgTax = totalUnrealizedSTCG * 0.20;
   const totalProjectedTax = projectedLtcgTax + projectedStcgTax;
@@ -58,6 +72,83 @@ export default function TaxView({
         <h2 className="text-muted text-[10px] font-medium uppercase tracking-[0.2em] mb-1">Fiscal optimization</h2>
         <p className="text-xl font-medium text-primary tracking-tight">Tax position · FY 2025-26</p>
       </header>
+
+      {/* Gain Distribution Chart */}
+      <section className="bg-surface/40 backdrop-blur-xl border border-white/5 p-8 rounded-3xl shadow-2xl h-[300px] flex flex-col group hover:border-violet-500/30 transition-all">
+        <div className="flex items-center gap-2 mb-6">
+          <ChartBarStacked size={16} className="text-violet-400" />
+          <h3 className="text-primary text-sm font-black uppercase tracking-widest">Gain Distribution (Realized vs Unrealized)</h3>
+        </div>
+        <div className="flex-1 min-h-0">
+          <ResponsiveBar
+            data={taxBarData}
+            keys={['Realized', 'Unrealized']}
+            indexBy="category"
+            margin={{ top: 20, right: 130, bottom: 50, left: 60 }}
+            padding={0.3}
+            valueScale={{ type: 'linear' }}
+            indexScale={{ type: 'band', round: true }}
+            colors={{ scheme: 'set2' }}
+            borderColor={{ from: 'color', modifiers: [['darker', 1.6]] }}
+            axisTop={null}
+            axisRight={null}
+            axisBottom={{
+              tickSize: 5,
+              tickPadding: 5,
+              tickRotation: 0,
+              legend: 'Tax Category',
+              legendPosition: 'middle',
+              legendOffset: 32
+            }}
+            axisLeft={{
+              tickSize: 5,
+              tickPadding: 5,
+              tickRotation: 0,
+              legend: 'Gain Amount',
+              legendPosition: 'middle',
+              legendOffset: -40,
+              format: v => `₹${(v/1000).toFixed(0)}k`
+            }}
+            labelSkipWidth={12}
+            labelSkipHeight={12}
+            labelTextColor="#ffffff"
+            legends={[
+              {
+                dataFrom: 'keys',
+                anchor: 'bottom-right',
+                direction: 'column',
+                justify: false,
+                translateX: 120,
+                translateY: 0,
+                itemsSpacing: 2,
+                itemWidth: 100,
+                itemHeight: 20,
+                itemDirection: 'left-to-right',
+                itemOpacity: 0.85,
+                symbolSize: 20,
+                effects: [
+                  {
+                    on: 'hover',
+                    style: {
+                      itemOpacity: 1
+                    }
+                  }
+                ],
+                itemTextColor: '#94a3b8'
+              }
+            ]}
+            theme={{
+              axis: {
+                ticks: { text: { fill: "#94a3b8", fontSize: 10, fontWeight: 700 } },
+                legend: { text: { fill: "#94a3b8", fontSize: 10, fontWeight: 900, textTransform: 'uppercase' } }
+              },
+              grid: { line: { stroke: "rgba(255,255,255,0.05)", strokeWidth: 1 } },
+              tooltip: { container: { background: "#0f172a", color: "#f1f5f9", fontSize: 12, borderRadius: 12 } }
+            }}
+            valueFormat={v => formatCurrency(v)}
+          />
+        </div>
+      </section>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* LTCG Circular Gauge Card */}

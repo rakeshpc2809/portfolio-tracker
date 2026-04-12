@@ -1,6 +1,6 @@
 package com.oreki.cas_injector.core.model;
 
-import java.util.List;
+import java.util.Set;
 
 import jakarta.persistence.CascadeType;
 import jakarta.persistence.Entity;
@@ -9,6 +9,7 @@ import jakarta.persistence.OneToMany;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
+import lombok.EqualsAndHashCode;
 import lombok.NoArgsConstructor;
 import lombok.ToString;
 
@@ -27,5 +28,6 @@ public class Investor {
     // Mapping to multiple Folios
     @OneToMany(mappedBy = "investor", cascade = CascadeType.ALL, orphanRemoval = true)
     @ToString.Exclude // Prevents circular dependency in logs
-    private List<Folio> folios;
+    @EqualsAndHashCode.Exclude // Prevents circular dependency
+    private Set<Folio> folios;
 }

@@ -32,6 +32,7 @@ export interface ReasoningMetadata {
 
 export interface TacticalSignal {
   schemeName:          string;
+  simpleName?:         string;
   amfiCode:            string;
   action:              'BUY' | 'SELL' | 'HOLD' | 'WATCH' | 'EXIT';
   amount:              string;

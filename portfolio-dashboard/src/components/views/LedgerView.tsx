@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from "react"
 import { CalendarDays, Box } from "lucide-react";
 import { fetchTransactions } from "../../services/api";
 import CurrencyValue from "../ui/CurrencyValue";
+import { normalizeName } from "../../utils/formatters";
 
 interface TransactionDTO {
   id: number;
@@ -144,15 +145,17 @@ export default function LedgerView({
                 <div className="h-8 w-px bg-white/5 mx-6" />
 
                 <div className="flex-1 min-w-0">
-                  <p className="text-[13px] font-medium text-primary truncate mb-1">{tx.schemeName}</p>
+                  <p className="text-[13px] font-black text-primary truncate mb-1 tracking-tight">
+                    {normalizeName(tx.schemeName)}
+                  </p>
                   <div className="flex items-center gap-3">
-                    <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-tighter ${
-                      tx.transactionType === 'BUY' ? 'text-buy bg-buy/10' : 
-                      tx.transactionType === 'SELL' ? 'text-exit bg-exit/10' : 'text-hold bg-hold/10'
+                    <span className={`px-2 py-0.5 rounded-lg text-[9px] font-black uppercase tracking-widest ${
+                      tx.transactionType === 'BUY' ? 'text-buy bg-buy/10 border border-buy/20' : 
+                      tx.transactionType === 'SELL' ? 'text-exit bg-exit/10 border border-exit/20' : 'text-hold bg-hold/10 border border-hold/20'
                     }`}>
                       {tx.transactionType}
                     </span>
-                    <span className="text-[10px] text-muted font-medium tabular-nums uppercase tracking-widest flex items-center gap-1">
+                    <span className="text-[10px] text-muted font-black tabular-nums uppercase tracking-[0.15em] flex items-center gap-1 opacity-60">
                       <Box size={10} /> {tx.isin}
                     </span>
                   </div>

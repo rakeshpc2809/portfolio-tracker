@@ -4,174 +4,120 @@
 @import "@fontsource-variable/geist";
 
 @theme {
-  /* ── Depth layers (Material 3 elevation model) ──────────── */
-  --color-background:        #07070e;
-  --color-surface:           #0d0d1a;
-  --color-surface-elevated:  #121224;
-  --color-surface-overlay:   #181830;
-  --color-border:            rgba(255,255,255,0.055);
-  --color-border-strong:     rgba(255,255,255,0.12);
+  /* ── Catppuccin Mocha Palette ──────────── */
+  --color-background:        #1e1e2e; /* Base */
+  --color-surface:           #181825; /* Mantle */
+  --color-surface-elevated:  #313244; /* Surface0 */
+  --color-surface-overlay:   #45475a; /* Surface1 */
+  --color-border:            #313244; /* Surface0 as border */
+  --color-border-strong:     #45475a; /* Surface1 as strong border */
 
-  /* ── Typography ─────────────────────────────────────────── */
-  --color-primary:           #f0f2ff;
-  --color-secondary:         rgba(240,242,255,0.60);
-  --color-muted:             rgba(240,242,255,0.30);
-  --color-hint:              rgba(240,242,255,0.16);
+  /* ── Typography (Catppuccin) ─────────────────────────── */
+  --color-primary:           #cdd6f4; /* Text */
+  --color-secondary:         #a6adc8; /* Subtext0 */
+  --color-muted:             #6c7086; /* Overlay0 */
+  --color-hint:              #585b70; /* Surface2 */
 
-  /* ── Semantic colors (vivid, Material 3 tonal) ───────────── */
-  --color-buy:               #4ade80;    /* vivid green */
-  --color-buy-dim:           rgba(74,222,128,0.12);
-  --color-buy-glow:          rgba(74,222,128,0.25);
+  /* ── Semantic colors (Catppuccin Mocha) ───────────── */
+  --color-buy:               #a6e3a1; /* Green */
+  --color-buy-dim:           rgba(166, 227, 161, 0.12);
+  --color-buy-glow:          rgba(166, 227, 161, 0.25);
   
-  --color-exit:              #f87171;
-  --color-exit-dim:          rgba(248,113,113,0.12);
-  --color-exit-glow:         rgba(248,113,113,0.25);
+  --color-exit:              #f38ba8; /* Red */
+  --color-exit-dim:          rgba(243, 139, 168, 0.12);
+  --color-exit-glow:         rgba(243, 139, 168, 0.25);
   
-  --color-watch:             #fbbf24;
-  --color-watch-dim:         rgba(251,191,36,0.12);
+  --color-watch:             #f9e2af; /* Yellow */
+  --color-watch-dim:         rgba(249, 226, 175, 0.12);
   
-  --color-hold:              #818cf8;
-  --color-hold-dim:          rgba(129,140,248,0.12);
+  --color-hold:              #89b4fa; /* Blue */
+  --color-hold-dim:          rgba(137, 180, 250, 0.12);
   
-  --color-harvest:           #c084fc;
-  --color-harvest-dim:       rgba(192,132,252,0.12);
+  --color-harvest:           #b4befe; /* Lavender */
+  --color-harvest-dim:       rgba(180, 190, 254, 0.12);
   
-  --color-accent:            #818cf8;
-  --color-accent-bright:     #a5b4fc;
+  --color-accent:            #cba6f7; /* Mauve */
+  --color-accent-bright:     #f5c2e7; /* Pink */
 
   /* ── Semantic status ─────────────────────────────────────── */
-  --color-warning:           #fb923c;
-  --color-info:              #38bdf8;
-  --color-success:           #4ade80;
-  --color-danger:            #f87171;
+  --color-warning:           #fab387; /* Peach */
+  --color-info:              #89dceb; /* Sky */
+  --color-success:           #a6e3a1; /* Green */
+  --color-danger:            #f38ba8; /* Red */
 
   /* ── Typography scale ────────────────────────────────────── */
   --text-2xs:  0.625rem;    /* 10px — badge text */
   --text-xs:   0.6875rem;   /* 11px — caption */
   --text-sm:   0.8125rem;   /* 13px — body small */
   --text-base: 0.9375rem;   /* 15px — body */
-  
-  /* ── Radii (M3 style) ────────────────────────────────────── */
-  --radius-sm:   6px;
-  --radius-md:   12px;
-  --radius-lg:   16px;
-  --radius-xl:   24px;
-  --radius-pill: 999px;
-  
-  /* ── Motion ──────────────────────────────────────────────── */
-  --ease-spring:   cubic-bezier(0.34, 1.56, 0.64, 1);
-  --ease-out:      cubic-bezier(0.16, 1, 0.3, 1);
-  --duration-fast: 150ms;
-  --duration-base: 250ms;
-  --duration-slow: 400ms;
+  --text-lg:   1.125rem;    /* 18px — heading small */
+  --text-xl:   1.375rem;    /* 22px — heading medium */
+  --text-2xl:  1.75rem;     /* 28px — heading large */
+  --text-3xl:  2.25rem;     /* 36px — display */
+
+  /* ── Spacing system ────────────────────────────────────── */
+  --spacing-safe: 2rem;     /* 32px standard page padding */
 }
 
-:root {
-  font-family: 'Geist Variable', system-ui, sans-serif;
-  line-height: 1.5;
-  font-weight: 400;
-  color-scheme: dark;
-  color: var(--color-primary);
-  background-color: var(--color-background);
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
+/* ── Custom Scrollbar (Catppuccin Style) ─────────────── */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
 }
 
-body { margin: 0; min-width: 320px; min-height: 100vh; }
-
-/* ── Elevation system (Material 3) ─────────────────────────── */
-.surface-0 { background: var(--color-background); }
-.surface-1 { background: var(--color-surface); }
-.surface-2 { background: var(--color-surface-elevated); }
-.surface-3 { background: var(--color-surface-overlay); }
-
-/* Tonal surface with color bleed */
-.surface-tonal-buy     { background: linear-gradient(135deg, var(--color-buy-dim), transparent 70%); border-color: rgba(74,222,128,0.15); }
-.surface-tonal-exit    { background: linear-gradient(135deg, var(--color-exit-dim), transparent 70%); border-color: rgba(248,113,113,0.15); }
-.surface-tonal-accent  { background: linear-gradient(135deg, var(--color-hold-dim), transparent 70%); border-color: rgba(129,140,248,0.15); }
-.surface-tonal-harvest { background: linear-gradient(135deg, var(--color-harvest-dim), transparent 70%); border-color: rgba(192,132,252,0.15); }
-
-/* ── Glow utilities ─────────────────────────────────────────── */
-.glow-buy     { text-shadow: 0 0 24px var(--color-buy-glow); }
-.glow-exit    { text-shadow: 0 0 24px var(--color-exit-glow); }
-.glow-accent  { text-shadow: 0 0 24px rgba(129,140,248,0.4); }
-.glow-harvest { text-shadow: 0 0 24px rgba(192,132,252,0.4); }
-
-/* Box glow for cards */
-.shadow-buy     { box-shadow: 0 0 0 1px rgba(74,222,128,0.15), 0 4px 24px rgba(74,222,128,0.08); }
-.shadow-exit    { box-shadow: 0 0 0 1px rgba(248,113,113,0.15), 0 4px 24px rgba(248,113,113,0.08); }
-.shadow-accent  { box-shadow: 0 0 0 1px rgba(129,140,248,0.15), 0 4px 24px rgba(129,140,248,0.08); }
-.shadow-harvest { box-shadow: 0 0 0 1px rgba(192,132,252,0.15), 0 4px 24px rgba(192,132,252,0.08); }
-.shadow-card    { box-shadow: 0 1px 3px rgba(0,0,0,0.4), 0 4px 12px rgba(0,0,0,0.3); }
-
-/* ── Number style (expressive, large data display) ────────────── */
-.num-display {
-  font-family: 'Geist Variable', monospace;
-  font-variant-numeric: tabular-nums;
-  font-feature-settings: "tnum";
-  letter-spacing: -0.02em;
+::-webkit-scrollbar-track {
+  background: #181825; /* Mantle */
 }
 
-/* ── Badge system (M3 tonal chips) ─────────────────────────── */
-.chip { 
-  display: inline-flex; align-items: center; gap: 4px;
-  padding: 3px 10px; border-radius: var(--radius-pill);
-  font-size: 10px; font-weight: 700;
-  text-transform: uppercase; letter-spacing: 0.06em;
-  border: 1px solid transparent;
-}
-.chip-buy     { background: rgba(74,222,128,0.12);  color: #4ade80; border-color: rgba(74,222,128,0.25); }
-.chip-exit    { background: rgba(248,113,113,0.12); color: #f87171; border-color: rgba(248,113,113,0.25); }
-.chip-watch   { background: rgba(251,191,36,0.12);  color: #fbbf24; border-color: rgba(251,191,36,0.25); }
-.chip-hold    { background: rgba(129,140,248,0.12); color: #818cf8; border-color: rgba(129,140,248,0.25); }
-.chip-harvest { background: rgba(192,132,252,0.12); color: #c084fc; border-color: rgba(192,132,252,0.25); }
-
-/* ── Scrollbar ──────────────────────────────────────────────── */
-::-webkit-scrollbar { width: 4px; height: 4px; }
-::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.07); border-radius: 99px; }
-::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.13); }
-
-/* ── Range slider ───────────────────────────────────────────── */
-input[type="range"] {
-  -webkit-appearance: none; appearance: none;
-  height: 4px; background: rgba(255,255,255,0.08);
-  border-radius: 2px; outline: none;
-}
-input[type="range"]::-webkit-slider-thumb {
-  -webkit-appearance: none;
-  width: 16px; height: 16px;
-  background: radial-gradient(circle at 40% 35%, #a5b4fc, #6366f1);
-  border-radius: 50%; cursor: pointer;
-  border: 2px solid var(--color-background);
-  box-shadow: 0 0 0 3px rgba(129,140,248,0.2), 0 2px 8px rgba(0,0,0,0.5);
-  transition: box-shadow var(--duration-fast);
-}
-input[type="range"]::-webkit-slider-thumb:hover {
-  box-shadow: 0 0 0 5px rgba(129,140,248,0.3), 0 2px 12px rgba(0,0,0,0.5);
+::-webkit-scrollbar-thumb {
+  background: #313244; /* Surface0 */
+  border-radius: 10px;
+  border: 2px solid #181825;
 }
 
-/* ── Animations ─────────────────────────────────────────────── */
-@keyframes pulse-dot {
-  0%, 100% { opacity: 1; transform: scale(1); }
-  50% { opacity: 0.5; transform: scale(0.85); }
-}
-@keyframes shimmer {
-  from { background-position: -200% 0; }
-  to   { background-position:  200% 0; }
-}
-.animate-pulse-dot { animation: pulse-dot 2s ease-in-out infinite; }
-.skeleton {
-  background: linear-gradient(90deg, 
-    rgba(255,255,255,0.03) 25%, 
-    rgba(255,255,255,0.07) 50%, 
-    rgba(255,255,255,0.03) 75%);
-  background-size: 200% 100%;
-  animation: shimmer 1.5s ease-in-out infinite;
-  border-radius: var(--radius-md);
+::-webkit-scrollbar-thumb:hover {
+  background: #45475a; /* Surface1 */
 }
 
 .scrollbar-none::-webkit-scrollbar { display: none; }
 .scrollbar-none { -ms-overflow-style: none; scrollbar-width: none; }
+
 .tabular-nums { font-variant-numeric: tabular-nums; }
+
+.glow-accent { text-shadow: 0 0 15px rgba(203, 166, 247, 0.3); }
+.glow-buy { text-shadow: 0 0 15px rgba(166, 227, 161, 0.3); }
+.glow-exit { text-shadow: 0 0 15px rgba(243, 139, 168, 0.3); }
+
+/* ── Component Primitives ────────────────────────────── */
+@layer components {
+  .card-mocha {
+    @apply bg-surface/40 backdrop-blur-2xl border border-white/[0.04] rounded-[2.5rem] p-8 shadow-2xl transition-all duration-500 hover:border-white/[0.08] hover:bg-white/[0.02];
+  }
+  
+  .glass-header {
+    @apply bg-background/80 backdrop-blur-md border-b border-border sticky top-0 z-[90];
+  }
+  
+  .num-display {
+    @apply font-black tracking-tighter tabular-nums;
+  }
+}
+
+body {
+  @apply bg-background text-primary antialiased;
+}
+
+.chip {
+  @apply inline-flex items-center justify-center rounded-full text-[9px] font-black uppercase tracking-widest transition-all duration-300;
+}
+
+.chip-buy { @apply bg-buy/10 text-buy border border-buy/20; }
+.chip-exit { @apply bg-exit/10 text-exit border border-exit/20; }
+.chip-hold { @apply bg-hold/10 text-hold border border-hold/20; }
+.chip-watch { @apply bg-watch/10 text-watch border border-watch/20; }
+.chip-harvest { @apply bg-harvest/10 text-harvest border border-harvest/20; }
+
+.glow-buy { @apply shadow-[0_0_15px_rgba(166,227,161,0.2)]; }
+.glow-exit { @apply shadow-[0_0_15px_rgba(243,139,168,0.2)]; }
+.glow-harvest { @apply shadow-[0_0_15px_rgba(180,190,254,0.2)]; }
+.glow-accent { @apply shadow-[0_0_15px_rgba(203,166,247,0.2)]; }

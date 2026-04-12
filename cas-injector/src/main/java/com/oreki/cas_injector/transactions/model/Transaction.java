@@ -21,6 +21,7 @@ import jakarta.persistence.Table;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
+import lombok.EqualsAndHashCode;
 import lombok.NoArgsConstructor;
 import lombok.ToString;
 
@@ -57,13 +58,18 @@ public class Transaction {
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "scheme_id")
     @JsonIgnoreProperties({"transactions", "folio"}) // Stop the loop here
+    @ToString.Exclude
+    @EqualsAndHashCode.Exclude
     private Scheme scheme;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "parent_id")
+    @ToString.Exclude
+    @EqualsAndHashCode.Exclude
     private Transaction parent; // Link for STAMP_DUTY -> BUY
 
     @OneToMany(mappedBy = "parent", cascade = CascadeType.ALL)
     @ToString.Exclude // Prevent circular reference in Lombok toString
+    @EqualsAndHashCode.Exclude
     private List<Transaction> children;
 }

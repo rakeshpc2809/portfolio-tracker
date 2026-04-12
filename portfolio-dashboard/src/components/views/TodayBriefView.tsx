@@ -108,21 +108,20 @@ export default function TodayBriefView({
         </div>
       </header>
 
-      {/* SECTION 1: MONTHLY SIP PLAN */}
       <section className="space-y-8">
         <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 px-2">
           <div className="space-y-1">
-            <h3 className="text-muted text-[10px] font-black uppercase tracking-[0.2em] flex items-center gap-2">
+            <h3 className="text-muted text-[10px] font-black uppercase tracking-[0.3em] flex items-center gap-2">
               <Target size={12} className="text-accent" /> Structural Deployment Plan
             </h3>
-            <p className="text-xs text-secondary font-medium opacity-60 uppercase tracking-widest">Phased entry strategy based on current market pulse.</p>
+            <p className="text-sm font-bold text-secondary">Phased entry strategy based on current market pulse.</p>
           </div>
           
-          <div className="flex flex-wrap items-center gap-10 bg-white/[0.02] backdrop-blur-md p-4 rounded-[2rem] border border-white/5 shadow-xl">
+          <div className="flex flex-wrap items-center gap-10 bg-surface/40 backdrop-blur-md p-5 rounded-[2rem] border border-white/5 shadow-xl">
             <div className="flex items-center gap-6">
-              <div className="space-y-1">
+              <div className="space-y-1.5">
                 <div className="flex justify-between text-[9px] font-black uppercase tracking-widest text-muted">
-                  <span>SIP Budget</span>
+                  <span>Monthly Budget</span>
                   <span className="text-accent"><CurrencyValue isPrivate={isPrivate} value={sipAmount} /></span>
                 </div>
                 <input 
@@ -133,14 +132,14 @@ export default function TodayBriefView({
                 />
               </div>
             </div>
-            <div className="flex flex-col gap-1.5">
+            <div className="flex flex-col gap-1.5 border-l border-white/5 pl-8">
               <label className="text-[9px] font-black uppercase tracking-widest text-muted">Tactical Lumpsum</label>
               <input 
                 type="number" 
                 value={lumpsum || ''} 
                 onChange={(e) => setLumpsum(parseInt(e.target.value) || 0)}
                 placeholder="₹0"
-                className="bg-black/40 border border-white/10 rounded-xl px-4 py-2 text-xs text-primary tabular-nums font-bold focus:outline-none focus:border-accent/50 focus:ring-1 focus:ring-accent/20 transition-all w-32 shadow-inner"
+                className="bg-black/40 border border-white/10 rounded-xl px-4 py-2 text-xs text-primary tabular-nums font-black focus:outline-none focus:border-accent/50 focus:ring-1 focus:ring-accent/20 transition-all w-32 shadow-inner"
               />
             </div>
           </div>
@@ -150,12 +149,12 @@ export default function TodayBriefView({
           variants={container}
           initial="hidden"
           animate="show"
-          className="grid grid-cols-1 md:grid-cols-2 gap-3"
+          className="grid grid-cols-1 md:grid-cols-2 gap-4"
         >
           {activeSipPlan.length === 0 ? (
-            <div className="col-span-full py-16 text-center bg-surface/20 backdrop-blur-xl border border-dashed border-white/10 rounded-[2.5rem] space-y-4">
+            <div className="col-span-full py-20 text-center bg-surface/20 backdrop-blur-xl border border-dashed border-white/10 rounded-[2.5rem] space-y-4">
               <Target size={40} className="text-muted/10 mx-auto" />
-              <p className="text-muted text-xs font-black uppercase tracking-widest opacity-40">No active SIP deployment targets</p>
+              <p className="text-muted text-[10px] font-black uppercase tracking-widest opacity-40">No active SIP deployment targets</p>
             </div>
           ) : (
             activeSipPlan.map((s: any) => (
@@ -163,21 +162,21 @@ export default function TodayBriefView({
                 key={s.isin}
                 variants={item}
                 onClick={() => onFundClick(s.schemeName)}
-                className="flex items-center gap-5 px-6 py-4 bg-surface/40 backdrop-blur-xl border border-white/5 rounded-3xl hover:border-white/20 hover:bg-white/[0.03] cursor-pointer transition-all group shadow-lg"
+                className="flex items-center gap-5 px-8 py-6 bg-surface/40 backdrop-blur-xl border border-white/5 rounded-[2rem] hover:border-accent/20 hover:bg-white/[0.03] cursor-pointer transition-all group shadow-lg"
               >
-                <div className={`w-2 h-2 rounded-full shrink-0 shadow-lg ${s.deployFlag === 'DEPLOY' ? 'bg-buy animate-pulse' : 'bg-warning'}`} />
+                <div className={`w-2.5 h-2.5 rounded-full shrink-0 shadow-lg ${s.deployFlag === 'DEPLOY' ? 'bg-buy animate-pulse glow-buy' : 'bg-warning'}`} />
                 <div className="flex-1 min-w-0">
-                  <p className="text-[13px] text-primary group-hover:text-white transition-colors truncate font-black tracking-tight">
-                    {s.schemeName}
+                  <p className="text-[15px] text-primary group-hover:text-white transition-colors truncate font-black tracking-tight">
+                    {s.simpleName || s.schemeName}
                   </p>
-                  <p className="text-[10px] text-muted font-bold uppercase tracking-widest opacity-60 mt-0.5">Target: {s.sipPct}% Allocation</p>
+                  <p className="text-[10px] text-muted font-bold uppercase tracking-widest opacity-60 mt-1">Target: {s.sipPct}% Allocation</p>
                 </div>
-                <div className="text-right space-y-0.5">
-                  <p className={`text-sm font-black tabular-nums ${s.deployFlag === 'DEPLOY' ? 'text-buy' : 'text-warning'}`}>
+                <div className="text-right space-y-1">
+                  <p className={`text-lg font-black tabular-nums tracking-tighter ${s.deployFlag === 'DEPLOY' ? 'text-buy' : 'text-warning'}`}>
                     {isPrivate ? '••••' : `₹${(s.amount / 1000).toFixed(1)}k`}
                   </p>
-                  <div className={`text-[8px] font-black uppercase tracking-[0.2em] px-2 py-0.5 rounded-full inline-block ${
-                    s.deployFlag === 'DEPLOY' ? 'bg-buy/10 text-buy border border-buy/20' : 'bg-warning/10 text-warning border border-warning/20'
+                  <div className={`text-[9px] font-black uppercase tracking-[0.2em] px-3 py-1 rounded-full inline-block border ${
+                    s.deployFlag === 'DEPLOY' ? 'bg-buy/10 text-buy border-buy/20' : 'bg-warning/10 text-warning border-warning/20'
                   }`}>
                     {s.deployFlag === 'DEPLOY' ? 'Execute' : 'Await Pulse'}
                   </div>

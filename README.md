@@ -23,9 +23,17 @@ A high-performance, intelligent portfolio tracking and rebalancing system design
 
 The system is a distributed microservices architecture:
 
-1. **cas-injector (Java 21/Spring Boot)**: The primary engine. Features extreme performance through batch pre-fetching, shared NAV series caching, and complex native SQL window functions.
-2. **cas-parser (Python FastAPI)**: Specialized sidecar for Hidden Markov Model (HMM) fitting and regime classification.
-3. **portfolio-dashboard (React/Vite/TS)**: A "Material 3 Expressive" aesthetic UI utilizing Radix UI and Framer Motion. Visualizes Alpha Generation vs Benchmarks, Correction Timelines (Gantt), and a Capital Efficiency Matrix.
+1. **cas-injector (Java 21/Spring Boot)**: The primary engine. Features high-performance data processing through batch pre-fetching, shared NAV series caching, and optimized repository queries (`JOIN FETCH`).
+2. **cas-parser (Python FastAPI)**: Specialized sidecar for Hidden Markov Model (HMM) fitting and high-density benchmark data scraping via Yahoo Finance.
+3. **portfolio-dashboard (React/Vite/TS)**: A modern "Catppuccin Mocha" aesthetic UI utilizing Nivo charts and Framer Motion. Visualizes Alpha Generation vs Benchmarks, Allocation Heatmaps, and real-time Mean Reversion Pulse.
+
+## Key Upgrades
+
+- **Visual Overhaul**: Switched to the high-readability Catppuccin Mocha palette with expressive typography and consistent spatial design.
+- **Benchmark Accuracy**: Replaced P/E-based proxies with true historical benchmark price series fetched via `yfinance`.
+- **Quant Logic Hardening**: Ornstein-Uhlenbeck calibration now fits against log-price series for superior mean-reversion detection in mutual funds.
+- **System Stability**: Resolved critical recursion issues (`StackOverflowError`) and JPA fetch collisions (`MultipleBagFetchException`) for large portfolio graphs.
+- **Performance**: Centralized metric fetching and batch database operations ensure sub-200ms dashboard responsiveness.
 
 ## Running the Application
 

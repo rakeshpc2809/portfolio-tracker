@@ -62,7 +62,7 @@ export default function App() {
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          className="fixed inset-0 bg-[#07070e] flex flex-col z-[200] overflow-hidden"
+          className="fixed inset-0 bg-[#1e1e2e] flex flex-col z-[200] overflow-hidden"
         >
           {/* Header skeleton */}
           <div className="h-14 border-b border-white/5 flex items-center px-6 gap-6">

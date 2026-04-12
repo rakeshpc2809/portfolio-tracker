@@ -297,7 +297,7 @@ export default function FundsListView({
                       {fund.cleanCategory ?? fund.category ?? '—'}
                     </p>
                     <p className="text-[15px] font-black text-primary leading-tight line-clamp-2 group-hover:text-white transition-colors tracking-tight">
-                      {fund.schemeName}
+                      {fund.simpleName || fund.schemeName}
                     </p>
                   </div>
                   <div className="flex flex-col items-end gap-2.5 shrink-0">

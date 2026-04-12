@@ -36,10 +36,6 @@ public class CommonUtils {
             ? BigDecimal.ZERO 
             : amt.abs().divide(units.abs(), 4, RoundingMode.HALF_UP);
 
-    // Determines Indian Income Tax category
-    public static final BiFunction<LocalDate, LocalDate, String> GET_TAX_CAT = (buy, sell) -> 
-        ChronoUnit.DAYS.between(buy, sell) > 365 ? "LTCG" : "STCG";
-
     // Generates the Idempotency Hash
     public static final BiFunction<JsonNode, Long, String> GENERATE_HASH = (node, schemeId) -> {
         try {
@@ -104,6 +100,25 @@ public static final Function<List<TransactionDTO>, BigDecimal> SOLVE_XIRR = txs 
     (units != null && units.compareTo(new BigDecimal("0.001")) > 0) 
         ? FundStatus.ACTIVE 
         : FundStatus.REDEEMED;
+
+    public static final Function<String, String> NORMALIZE_NAME = name -> {
+        if (name == null) return "UNKNOWN FUND";
+        String s = name.toUpperCase()
+            .replaceAll("MUTUAL FUND", "")
+            .replaceAll("DIRECT PLAN", "")
+            .replaceAll("GROWTH", "")
+            .replaceAll("DIRECT", "")
+            .replaceAll(" FUND", "")
+            .replaceAll("-", " ")
+            .replaceAll("\\s+", " ")
+            .trim();
+        
+        // Truncate to first 25 chars if still too long, but try to keep it readable
+        if (s.length() > 28) {
+            return s.substring(0, 25) + "...";
+        }
+        return s;
+    };
 
     public static LocalDate getCurrentFyStart() {
         LocalDate today = LocalDate.now();

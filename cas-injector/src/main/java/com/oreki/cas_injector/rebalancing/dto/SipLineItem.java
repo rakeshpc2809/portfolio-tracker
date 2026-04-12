@@ -2,6 +2,7 @@ package com.oreki.cas_injector.rebalancing.dto;
 
 public record SipLineItem(
     String schemeName,
+    String simpleName,
     String isin,
     String amfiCode,
     double amount,

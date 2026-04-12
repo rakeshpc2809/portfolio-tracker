@@ -17,11 +17,12 @@ import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.OneToMany;
-import jakarta.persistence.PrePersist;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
+import lombok.EqualsAndHashCode;
 import lombok.NoArgsConstructor;
+import lombok.ToString;
 
 @Entity
 @Data
@@ -46,29 +47,21 @@ public class Scheme {
     @ManyToOne 
     @JoinColumn(name = "folio_id")
     @JsonIgnoreProperties({"schemes", "investor"}) // Stop the loop here
+    @ToString.Exclude
+    @EqualsAndHashCode.Exclude
     private Folio folio;
 
     @OneToMany(mappedBy = "scheme", cascade = CascadeType.ALL)
+    @ToString.Exclude
+    @EqualsAndHashCode.Exclude
     private List<Transaction> transactions;
 
     @OneToMany(mappedBy = "scheme", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
     @Builder.Default
+    @ToString.Exclude
+    @EqualsAndHashCode.Exclude
     private List<TaxLot> taxLots = new ArrayList<>();
 
     @Column(name = "benchmark_index")
     private String benchmarkIndex;
-
-    @PrePersist
-public void rightBeforeSaving() {
-    System.out.println("\n🚨 [SECURITY CAMERA] HIBERNATE IS SAVING SCHEME: " + this.name);
-    System.out.println("🚨 CATEGORY IS CURRENTLY: " + this.assetCategory);
-    
-    // THIS IS THE MAGIC LINE: It prints the exact trail of code that triggered this save
-    System.out.println("🚨 WHO TOLD HIBERNATE TO DO THIS? 👇");
-    StackTraceElement[] stackTrace = Thread.currentThread().getStackTrace();
-    for (int i = 2; i < Math.min(stackTrace.length, 8); i++) {
-        System.out.println("   -> " + stackTrace[i].toString());
-    }
-    System.out.println("=========================================\n");
-}
 }

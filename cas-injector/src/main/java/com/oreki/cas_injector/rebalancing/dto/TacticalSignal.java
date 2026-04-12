@@ -6,6 +6,7 @@ import com.oreki.cas_injector.core.utils.SignalType;
 
 public record TacticalSignal(
     String schemeName,
+    String simpleName,
     String amfiCode,
     SignalType action,
     String amount,

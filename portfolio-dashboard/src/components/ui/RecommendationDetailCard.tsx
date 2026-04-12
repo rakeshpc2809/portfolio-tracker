@@ -352,9 +352,9 @@ export const RecommendationDetailCard: React.FC<Props> = ({
         </div>
       </div>
 
-      <p className="text-[14px] font-medium text-primary truncate mb-1">{signal.schemeName}</p>
+      <p className="text-[14px] font-black text-primary truncate mb-1 tracking-tight">{signal.simpleName || signal.schemeName}</p>
 
-      <div className="text-xl font-medium tabular-nums mb-3">
+      <div className="text-xl font-black tabular-nums mb-3 tracking-tighter">
         {['BUY', 'SELL', 'EXIT'].includes(signal.action) ? (
           <CurrencyValue isPrivate={isPrivate} value={parseFloat(signal.amount)} />
         ) : (

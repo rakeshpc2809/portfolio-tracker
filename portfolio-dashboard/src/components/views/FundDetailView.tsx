@@ -1,9 +1,12 @@
+import { useEffect, useState, useMemo } from 'react';
 import { motion, type Variants } from 'framer-motion';
 import { X, Zap, Info, ShieldCheck, Activity } from 'lucide-react';
 import { convictionColor, buildPlainEnglishReason } from '../../utils/formatters';
 import * as Dialog from '@radix-ui/react-dialog';
 import * as Tooltip from '@radix-ui/react-tooltip';
 import CurrencyValue from '../ui/CurrencyValue';
+import { fetchFundHistory } from '../../services/api';
+import { ResponsiveLine } from '@nivo/line';
 import { 
   Radar, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, ResponsiveContainer 
 } from 'recharts';
@@ -19,7 +22,57 @@ export default function FundDetailView({
   onClose: () => void; 
   isPrivate: boolean;
 }) {
+  const [history, setHistory] = useState<any>(null);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (isOpen && fund?.amfiCode) {
+      setLoading(true);
+      fetchFundHistory(fund.amfiCode, fund.benchmarkIndex || "NIFTY 50")
+        .then(setHistory)
+        .catch(console.error)
+        .finally(() => setLoading(false));
+    }
+  }, [isOpen, fund]);
+
   if (!fund) return null;
+
+  const normalizedHistory = useMemo(() => {
+    if (!history || !history.fund || history.fund.length < 2) return [];
+    
+    // Reverse because they come from API in DESC order
+    const fData = [...history.fund].reverse();
+    const bData = (history.benchmark && history.benchmark.length > 0) 
+      ? [...history.benchmark].reverse() 
+      : [];
+
+    const oldestFundNav = fData[0].nav;
+    const oldestBenchPrice = bData.length > 0 ? bData[0].closingPrice : 1;
+
+    const series = [
+      {
+        id: "Fund",
+        color: "#cba6f7", // Mauve
+        data: fData.map((d: any) => ({
+          x: d.navDate,
+          y: parseFloat(((d.nav / oldestFundNav) * 100).toFixed(2))
+        }))
+      }
+    ];
+
+    if (bData.length >= 2) {
+      series.push({
+        id: "Benchmark",
+        color: "rgba(166, 227, 161, 0.3)", // Green-ish dim
+        data: bData.map((d: any) => ({
+          x: d.date,
+          y: parseFloat(((d.closingPrice / oldestBenchPrice) * 100).toFixed(2))
+        }))
+      });
+    }
+
+    return series;
+  }, [history]);
 
   // Design Improvement 5: Use real sub-scores if available, otherwise estimate
   const hasRealScores = fund.yieldScore != null && fund.riskScore != null && fund.valueScore != null;
@@ -119,7 +172,7 @@ export default function FundDetailView({
                   </div>
                   <Dialog.Title asChild>
                     <h2 className="text-3xl font-black text-primary tracking-tighter leading-[1.1] max-w-md group hover:text-white transition-colors cursor-default">
-                      {fund.schemeName}
+                      {fund.simpleName || fund.schemeName}
                     </h2>
                   </Dialog.Title>
                 </div>
@@ -136,6 +189,34 @@ export default function FundDetailView({
                   </Dialog.Close>
                 </div>
               </header>
+
+              {/* Advanced Quant Metadata */}
+              <div className="flex gap-4 overflow-x-auto pb-2 scrollbar-none">
+                <div className="flex-none px-4 py-2 rounded-2xl bg-white/[0.03] border border-white/5 space-y-1">
+                  <p className="text-[8px] font-black uppercase tracking-widest text-muted opacity-60">Regime Climate</p>
+                  <p className="text-xs font-black text-accent uppercase tracking-tighter">{fund.hmmState || 'STRESSED_NEUTRAL'}</p>
+                </div>
+                <div className="flex-none px-4 py-2 rounded-2xl bg-white/[0.03] border border-white/5 space-y-1">
+                  <p className="text-[8px] font-black uppercase tracking-widest text-muted opacity-60">Mean Inversion Pulse</p>
+                  <p className="text-xs font-black text-buy uppercase tracking-tighter">{fund.ouHalfLife > 0 ? `${fund.ouHalfLife.toFixed(1)} Days` : 'INACTIVE'}</p>
+                </div>
+                <div className="flex-none px-4 py-2 rounded-2xl bg-white/[0.03] border border-white/5 space-y-1">
+                  <p className="text-[8px] font-black uppercase tracking-widest text-muted opacity-60">Fractal Force</p>
+                  <p className="text-xs font-black text-secondary uppercase tracking-tighter">H = {fund.hurstExponent?.toFixed(2) || '0.50'}</p>
+                </div>
+                <div className="flex-none px-4 py-2 rounded-2xl bg-white/[0.03] border border-white/5 space-y-1">
+                  <p className="text-[8px] font-black uppercase tracking-widest text-muted opacity-60">Vol Drag</p>
+                  <p className="text-xs font-black text-exit uppercase tracking-tighter">{fund.volatilityTax?.toFixed(2) || '0.00'}% Annual</p>
+                </div>
+                <div className="flex-none px-4 py-2 rounded-2xl bg-white/[0.03] border border-white/5 space-y-1">
+                  <p className="text-[8px] font-black uppercase tracking-widest text-muted opacity-60">Range Index</p>
+                  <p className="text-xs font-black text-primary uppercase tracking-tighter">{(fund.navPercentile3yr * 100).toFixed(0)}%</p>
+                </div>
+                <div className="flex-none px-4 py-2 rounded-2xl bg-white/[0.03] border border-white/5 space-y-1">
+                  <p className="text-[8px] font-black uppercase tracking-widest text-muted opacity-60">Correction</p>
+                  <p className="text-xs font-black text-exit uppercase tracking-tighter">{(fund.drawdownFromAth * 100).toFixed(1)}%</p>
+                </div>
+              </div>
 
               {/* Sticky financial strip */}
               <div className="grid grid-cols-3 gap-1 -mx-10 px-10 py-8 bg-black/20 border-y border-white/5 shadow-inner">
@@ -236,6 +317,45 @@ export default function FundDetailView({
                   <span className="text-muted text-[9px] font-black uppercase tracking-widest opacity-40">1-Year Velocity</span>
                 </div>
                 
+                {/* Historical Performance Line Chart */}
+                <div className="h-64 w-full bg-black/20 rounded-2xl overflow-hidden border border-white/5 p-4 shadow-inner">
+                  {loading ? (
+                    <div className="h-full w-full flex items-center justify-center">
+                      <div className="w-8 h-8 border-4 border-accent border-t-transparent rounded-full animate-spin" />
+                    </div>
+                  ) : history && normalizedHistory.length > 0 ? (
+                    <ResponsiveLine
+                      data={normalizedHistory}
+                      margin={{ top: 20, right: 20, bottom: 20, left: 40 }}
+                      xScale={{ type: 'point' }}
+                      yScale={{ type: 'linear', min: 'auto', max: 'auto' }}
+                      axisTop={null}
+                      axisRight={null}
+                      axisBottom={null}
+                      axisLeft={{
+                        tickSize: 0,
+                        tickPadding: 10,
+                        tickRotation: 0,
+                      }}
+                      enableGridX={false}
+                      enableGridY={true}
+                      colors={d => (d as any).color as string}
+                      lineWidth={2}
+                      enablePoints={false}
+                      useMesh={true}
+                      theme={{
+                        axis: { ticks: { text: { fill: "rgba(255,255,255,0.3)", fontSize: 10 } } },
+                        grid: { line: { stroke: "rgba(255,255,255,0.05)" } },
+                        tooltip: { container: { background: "#0f172a", color: "#f1f5f9", fontSize: 12, borderRadius: 12 } }
+                      }}
+                    />
+                  ) : (
+                    <div className="h-full w-full flex items-center justify-center text-muted text-[10px] uppercase font-black opacity-30">
+                      No historical data available
+                    </div>
+                  )}
+                </div>
+
                 <div className="space-y-10 px-2">
                   <div className="relative h-1.5 w-full bg-black/40 rounded-full">
                     <div className="absolute top-0 left-0 h-4 w-px bg-white/20 -translate-y-1.5" />

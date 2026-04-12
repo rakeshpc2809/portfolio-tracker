@@ -60,4 +60,12 @@ public class CommonUtilsTest {
 
         assertEquals("SLAB_RATE_TAX", CommonUtils.DETERMINE_TAX_CATEGORY.apply(buy, sell, "DEBT"));
     }
+
+    @Test
+    public void testNormalizeName() {
+        assertEquals("PARAG PARIKH FLEXI CAP", CommonUtils.NORMALIZE_NAME.apply("PARAG PARIKH FLEXI CAP FUND DIRECT PLAN GROWTH"));
+        assertEquals("SBI SMALL CAP", CommonUtils.NORMALIZE_NAME.apply("SBI SMALL CAP MUTUAL FUND DIRECT-GROWTH"));
+        assertEquals("HDFC MID CAP OPPORTUNITIES", CommonUtils.NORMALIZE_NAME.apply("HDFC MID CAP OPPORTUNITIES FUND - DIRECT PLAN - GROWTH"));
+        assertEquals("UNKNOWN FUND", CommonUtils.NORMALIZE_NAME.apply(null));
+    }
 }

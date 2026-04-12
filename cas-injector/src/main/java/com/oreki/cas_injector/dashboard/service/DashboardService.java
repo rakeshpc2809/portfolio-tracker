@@ -13,11 +13,15 @@ import java.util.stream.Collectors;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 
+import com.oreki.cas_injector.backfill.model.HistoricalNav;
 import com.oreki.cas_injector.backfill.repository.HistoricalNavRepository;
 import com.oreki.cas_injector.backfill.service.NavService;
+import com.oreki.cas_injector.convictionmetrics.dto.MarketMetrics;
+import com.oreki.cas_injector.convictionmetrics.repository.ConvictionMetricsRepository;
 import com.oreki.cas_injector.core.dto.SchemeDetailsDTO;
 import com.oreki.cas_injector.core.dto.SchemePerformanceDTO;
 import com.oreki.cas_injector.core.model.Investor;
+import com.oreki.cas_injector.core.model.Scheme;
 import com.oreki.cas_injector.core.repository.InvestorRepository;
 import com.oreki.cas_injector.core.utils.CommonUtils;
 import com.oreki.cas_injector.core.utils.FundStatus;
@@ -45,6 +49,7 @@ public class DashboardService {
     private final NavService navService;
     private final HistoricalNavRepository historicalNavRepo;
     private final BenchmarkService benchmarkService;
+    private final ConvictionMetricsRepository metricsRepo;
 
     private String sanitizeAmfi(String amfi) {
         if (amfi == null) return "";
@@ -52,9 +57,9 @@ public class DashboardService {
         return s.replaceFirst("^0+(?!$)", "");
     }
 
-    @Cacheable(value = "dashboardSummary", key = "#pan")
+    @Cacheable(value = "dashboardSummaryV3", key = "#pan")
     public DashboardSummaryDTO getInvestorSummary(String pan) {
-        Optional<Investor> investorOpt = investorRepo.findById(pan);
+        Optional<Investor> investorOpt = investorRepo.findByPanWithDetails(pan);
         if (investorOpt.isEmpty()) {
             return DashboardSummaryDTO.builder()
                 .investorName("New Investor")
@@ -72,17 +77,39 @@ public class DashboardService {
         }
         Investor investor = investorOpt.get();
 
-        List<TransactionDTO> totalCashFlow=new ArrayList<>();
-        
+        Map<String, MarketMetrics> metricsMap = metricsRepo.fetchLiveMetricsMap(pan);
+
         List<CapitalGainAudit> allInvestorAudits = auditRepo.findAllBySellTransactionSchemeFolioInvestorPan(pan);
         Map<Long, List<CapitalGainAudit>> auditsBySchemeId = allInvestorAudits.stream()
             .collect(Collectors.groupingBy(a -> a.getSellTransaction().getScheme().getId()));
 
-        List<SchemePerformanceDTO> breakdown = investor.getFolios().stream()
+        List<Scheme> allSchemes = investor.getFolios().stream()
             .flatMap(f -> f.getSchemes().stream())
+            .toList();
+
+        List<String> amfiCodes = allSchemes.stream()
+            .map(s -> sanitizeAmfi(s.getAmfiCode()))
+            .distinct()
+            .toList();
+
+        List<LocalDate> allTxDates = allSchemes.stream()
+            .flatMap(s -> s.getTransactions().stream())
+            .map(Transaction::getDate)
+            .distinct()
+            .toList();
+
+        Map<String, Map<LocalDate, BigDecimal>> navHistoryMap = historicalNavRepo.findByAmfiCodeInAndNavDateIn(amfiCodes, allTxDates).stream()
+            .collect(Collectors.groupingBy(HistoricalNav::getAmfiCode, 
+                Collectors.toMap(HistoricalNav::getNavDate, HistoricalNav::getNav, (a, b) -> a)));
+
+        List<TransactionDTO> totalCashFlow = new ArrayList<>();
+        
+        List<SchemePerformanceDTO> breakdown = allSchemes.stream()
             .map(scheme -> {
                 List<TaxLot> allLots = scheme.getTaxLots();
                 List<CapitalGainAudit> schemeAudits = auditsBySchemeId.getOrDefault(scheme.getId(), List.of());
+                String code = sanitizeAmfi(scheme.getAmfiCode());
+                Map<LocalDate, BigDecimal> schemeNavHistory = navHistoryMap.getOrDefault(code, Map.of());
 
                 BigDecimal totalInvested = scheme.getTransactions().stream()
                     .filter(t -> "BUY".equalsIgnoreCase(t.getTransactionType()) || 
@@ -171,8 +198,8 @@ public class DashboardService {
 
                 List<TransactionDTO> cashFlows = scheme.getTransactions().stream()
                     .map(t -> {
-                        BigDecimal preciseAmount = historicalNavRepo.findByAmfiCodeAndNavDate(sanitizeAmfi(scheme.getAmfiCode()), t.getDate())
-                            .map(h -> h.getNav().multiply(t.getUnits().abs()))
+                        BigDecimal preciseAmount = Optional.ofNullable(schemeNavHistory.get(t.getDate()))
+                            .map(nav -> nav.multiply(t.getUnits().abs()))
                             .orElse(t.getAmount());
                             
                         return new TransactionDTO(preciseAmount.negate(), t.getDate());
@@ -190,10 +217,13 @@ public class DashboardService {
                 BigDecimal xirrValue = CommonUtils.SOLVE_XIRR.apply(cashFlows);
                 String displayXirr = CommonUtils.SCALE_MONEY.apply(xirrValue).toString() + "%";
 
-                double benchXirr = benchmarkService.getBenchmarkReturn(bucket, amfiCategory);
+                double benchXirr = benchmarkService.getBenchmarkReturn(bucket, amfiCategory, scheme.getBenchmarkIndex());
+
+                MarketMetrics m = metricsMap.getOrDefault(code, MarketMetrics.fromLegacy(50, 0, 0, 0, 0, 0.5, 0, 0, LocalDate.of(1970, 1, 1)));
 
                 return SchemePerformanceDTO.builder()
                     .schemeName(scheme.getName())
+                    .simpleName(CommonUtils.NORMALIZE_NAME.apply(scheme.getName()))
                     .isin(scheme.getIsin())
                     .amfiCode(scheme.getAmfiCode())
                     .totalInvested(totalInvested)
@@ -210,7 +240,26 @@ public class DashboardService {
                     .status(status)
                     .category(amfiCategory)
                     .bucket(bucket)
+                    .amc(scheme.getFolio().getAmc())
                     .benchmarkIndex(scheme.getBenchmarkIndex())
+                    .convictionScore(m.convictionScore())
+                    .sortinoRatio(m.sortinoRatio())
+                    .maxDrawdown(m.maxDrawdown())
+                    .cvar5(m.cvar5())
+                    .navPercentile3yr(m.navPercentile3yr())
+                    .drawdownFromAth(m.drawdownFromAth())
+                    .returnZScore(m.returnZScore())
+                    .lastBuyDate(m.lastBuyDate())
+                    .rollingZScore252(m.rollingZScore252())
+                    .hurstExponent(m.hurstExponent())
+                    .volatilityTax(m.volatilityTax())
+                    .hurstRegime(m.hurstRegime())
+                    .historicalRarityPct(m.historicalRarityPct())
+                    .ouHalfLife(m.ouHalfLife())
+                    .ouValid(m.ouValid())
+                    .hmmState(m.hmmState())
+                    .hmmBullProb(m.hmmBullProb())
+                    .hmmBearProb(m.hmmBearProb())
                     .build();
             })
             .collect(Collectors.toList());

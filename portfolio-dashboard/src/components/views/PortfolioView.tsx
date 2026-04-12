@@ -1,10 +1,13 @@
-import { useState, useMemo } from 'react';
+import { useMemo } from 'react';
 import { 
   ResponsiveContainer, XAxis, YAxis, Tooltip as RechartsTooltip, 
-  BarChart, Bar, CartesianGrid, Treemap, ScatterChart, Scatter, ZAxis, Cell
+  BarChart, Bar, CartesianGrid, ScatterChart, Scatter, ZAxis, Cell
 } from "recharts";
-import { HeartPulse, Shield, Activity, ListChecks, Database } from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { ResponsivePie } from '@nivo/pie';
+import { ResponsiveBar } from '@nivo/bar';
+import { ResponsiveTreeMap } from '@nivo/treemap';
+import { HeartPulse, Shield, Activity, ListChecks, Database, ChartPie } from 'lucide-react';
+import { motion } from 'framer-motion';
 import MetricWithTooltip from '../ui/MetricWithTooltip';
 import LearnTooltip from '../ui/LearnTooltip';
 
@@ -16,63 +19,6 @@ const ACTION_COLORS: Record<string, { bg: string; text: string; label: string }>
   HOLD:    { bg: '#6366f1', text: '#fff', label: 'Hold' },
   HARVEST: { bg: '#a78bfa', text: '#fff', label: 'Harvest' },
   DEFAULT: { bg: '#475569', text: '#fff', label: '' },
-};
-
-const CustomTreemapContent = (props: any) => {
-  const { x, y, width, height, name, action, shortName } = props;
-  const cfg = ACTION_COLORS[action as string] || ACTION_COLORS.DEFAULT;
-  const showLabel = width > 72 && height > 28;
-  const showBadge = width > 52 && height > 42;
-
-  return (
-    <motion.g
-      initial={{ opacity: 0, scale: 0.9 }}
-      animate={{ opacity: 1, scale: 1 }}
-      transition={{ type: "spring", damping: 20, stiffness: 300 }}
-    >
-      <rect
-        x={x + 1} y={y + 1}
-        width={Math.max(0, width - 2)}
-        height={Math.max(0, height - 2)}
-        rx={8}
-        style={{ fill: cfg.bg, opacity: 0.85, backdropFilter: 'blur(10px)' }}
-        className="transition-all duration-300 hover:opacity-100"
-      />
-      {showLabel && (
-        <text
-          x={x + 8} y={y + 18}
-          fill={cfg.text}
-          fontSize={10}
-          fontWeight="700"
-          className="pointer-events-none"
-          style={{ textShadow: '0 2px 4px rgba(0,0,0,0.3)' }}
-        >
-          {shortName || (name || '').substring(0, 22)}
-        </text>
-      )}
-      {showBadge && (
-        <>
-          <rect
-            x={x + width - 42} y={y + height - 22}
-            width={36} height={16}
-            rx={8}
-            fill="rgba(0,0,0,0.3)"
-            className="backdrop-blur-md border border-white/10"
-          />
-          <text
-            x={x + width - 24} y={y + height - 10}
-            textAnchor="middle"
-            fill={cfg.text}
-            fontSize={8}
-            fontWeight="800"
-            className="pointer-events-none"
-          >
-            {action}
-          </text>
-        </>
-      )}
-    </motion.g>
-  );
 };
 
 export default function PortfolioView({ 
@@ -101,29 +47,22 @@ export default function PortfolioView({
 
   // FLAT Treemap Data (Already filtered)
   const treemapData = useMemo(() => activeBreakdown.map((s: any) => ({
-    name: s.schemeName,
+    name: s.simpleName || s.schemeName,
     size: s.currentValue || 0,
     action: s.action || 'HOLD',
-    shortName: s.schemeName.length > 22
-      ? s.schemeName.substring(0, 22) + '…'
-      : s.schemeName,
+    shortName: (s.simpleName || s.schemeName).length > 22
+      ? (s.simpleName || s.schemeName).substring(0, 22) + '…'
+      : (s.simpleName || s.schemeName),
   })), [activeBreakdown]);
 
   // Scatter Data: Risk (MaxDrawdown) vs Conviction
   const scatterData = useMemo(() => activeBreakdown.map((s: any) => ({
-    name: s.schemeName,
+    name: s.simpleName || s.schemeName,
     x: s.convictionScore,
     y: Math.abs(s.maxDrawdown || 0),
     z: s.currentValue,
     action: s.action
   })), [activeBreakdown]);
-
-  const [hoveredFund, setHoveredFund] = useState<any>(null);
-  const [hoverPos, setHoverPos] = useState({ x: 0, y: 0 });
-
-  const handleMouseMove = (e: React.MouseEvent) => {
-    setHoverPos({ x: e.clientX, y: e.clientY });
-  };
 
   // Bucket Allocation Data
   const bucketData = useMemo(() => {
@@ -137,9 +76,26 @@ export default function PortfolioView({
       .sort((a, b) => b.value - a.value);
   }, [activeBreakdown]);
 
+  // AMC Allocation Data
+  const amcData = useMemo(() => {
+    const amcs: Record<string, number> = {};
+    activeBreakdown.forEach((s: any) => {
+      const amc = s.amc || 'OTHER AMC';
+      amcs[amc] = (amcs[amc] || 0) + (s.currentValue || 0);
+    });
+    return Object.entries(amcs)
+      .map(([name, value]) => ({ 
+        id: name, 
+        label: name, 
+        value,
+        color: `hsl(${Math.random() * 360}, 70%, 50%)`
+      }))
+      .sort((a, b) => b.value - a.value);
+  }, [activeBreakdown]);
+
   const xirrData = useMemo(() => activeBreakdown
     .map((s: any) => ({
-      name: s.schemeName.substring(0, 20),
+      name: (s.simpleName || s.schemeName).substring(0, 22),
       Personal: parseFloat(s.xirr || '0'),
       Benchmark: s.category?.includes("MIDCAP") ? 18 : 14
     }))
@@ -191,9 +147,68 @@ export default function PortfolioView({
         ))}
       </div>
 
+      {/* Allocation Donuts Row */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <section className="bg-surface/40 backdrop-blur-xl border border-white/5 p-8 rounded-3xl shadow-2xl h-[400px] flex flex-col group hover:border-accent/30 transition-all">
+          <div className="flex items-center gap-2 mb-4">
+            <ChartPie size={16} className="text-accent" />
+            <h3 className="text-primary text-sm font-black uppercase tracking-widest">AMC Allocation</h3>
+          </div>
+          <div className="flex-1 min-h-0">
+            <ResponsivePie
+              data={amcData}
+              margin={{ top: 20, right: 60, bottom: 40, left: 60 }}
+              innerRadius={0.65}
+              padAngle={2}
+              cornerRadius={12}
+              activeOuterRadiusOffset={8}
+              borderWidth={1}
+              borderColor={{ from: 'color', modifiers: [['darker', 0.2]] }}
+              enableArcLinkLabels={false}
+              arcLabelsSkipAngle={10}
+              arcLabelsTextColor="#ffffff"
+              colors={{ scheme: 'category10' }}
+              theme={{
+                tooltip: { container: { background: '#0f172a', border: '1px solid rgba(255,255,255,0.1)', color: '#f1f5f9', fontSize: 11, borderRadius: 12, boxShadow: '0 10px 15px -3px rgba(0,0,0,0.5)' } },
+                labels: { text: { fontSize: 10, fontWeight: 700 } }
+              }}
+              valueFormat={(value) => formatCurrency(value)}
+            />
+          </div>
+        </section>
+
+        <section className="bg-surface/40 backdrop-blur-xl border border-white/5 p-8 rounded-3xl shadow-2xl h-[400px] flex flex-col group hover:border-buy/30 transition-all">
+          <div className="flex items-center gap-2 mb-4">
+            <Shield size={16} className="text-buy" />
+            <h3 className="text-primary text-sm font-black uppercase tracking-widest">Category Diversification</h3>
+          </div>
+          <div className="flex-1 min-h-0">
+            <ResponsivePie
+              data={bucketData.map(b => ({ id: b.name, label: b.name, value: b.value }))}
+              margin={{ top: 20, right: 60, bottom: 40, left: 60 }}
+              innerRadius={0.65}
+              padAngle={2}
+              cornerRadius={12}
+              activeOuterRadiusOffset={8}
+              borderWidth={1}
+              borderColor={{ from: 'color', modifiers: [['darker', 0.2]] }}
+              colors={{ scheme: 'set3' }}
+              enableArcLinkLabels={false}
+              arcLabelsSkipAngle={10}
+              arcLabelsTextColor="#ffffff"
+              theme={{
+                tooltip: { container: { background: '#0f172a', border: '1px solid rgba(255,255,255,0.1)', color: '#f1f5f9', fontSize: 11, borderRadius: 12, boxShadow: '0 10px 15px -3px rgba(0,0,0,0.5)' } },
+                labels: { text: { fontSize: 10, fontWeight: 700 } }
+              }}
+              valueFormat={(value) => formatCurrency(value)}
+            />
+          </div>
+        </section>
+      </div>
+
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
         {/* Treemap Section */}
-        <section className="bg-surface/40 backdrop-blur-xl border border-white/5 p-8 rounded-3xl relative overflow-hidden shadow-2xl">
+        <section className="bg-surface/40 backdrop-blur-xl border border-white/5 p-8 rounded-3xl relative overflow-hidden shadow-2xl group hover:border-white/10 transition-all">
           <div className="flex items-center justify-between mb-2">
             <h3 className="text-primary text-sm font-black tracking-tight uppercase tracking-[0.15em]">Allocation Heatmap</h3>
             <span className="text-muted text-[10px] uppercase tracking-widest font-black opacity-50 underline decoration-accent/30">Value Weighted</span>
@@ -201,18 +216,28 @@ export default function PortfolioView({
           
           <div 
             className="h-[400px] w-full mt-6 bg-black/20 rounded-2xl overflow-hidden border border-white/5 shadow-inner"
-            onMouseMove={handleMouseMove}
           >
-            <ResponsiveContainer width="100%" height="100%">
-              <Treemap
-                data={treemapData}
-                dataKey="size"
-                aspectRatio={4 / 3}
-                content={<CustomTreemapContent />}
-                onMouseEnter={(data) => setHoveredFund(data)}
-                onMouseLeave={() => setHoveredFund(null)}
-              />
-            </ResponsiveContainer>
+            <ResponsiveTreeMap
+              data={{
+                name: 'portfolio',
+                children: treemapData
+              }}
+              identity="name"
+              value="size"
+              valueFormat=".02s"
+              margin={{ top: 10, right: 10, bottom: 10, left: 10 }}
+              labelSkipSize={12}
+              label={node => node.id.toString()}
+              labelTextColor="#ffffff"
+              parentLabelPosition="top"
+              parentLabelSize={14}
+              parentLabelTextColor="#ffffff"
+              borderColor={{ from: 'color', modifiers: [['darker', 0.1]] }}
+              colors={(node: any) => ACTION_COLORS[node.data.action as string]?.bg || '#475569'}
+              theme={{
+                tooltip: { container: { background: '#0f172a', border: '1px solid rgba(255,255,255,0.1)', color: '#f1f5f9', fontSize: 11, borderRadius: 12 } }
+              }}
+            />
           </div>
 
           <div className="flex gap-4 flex-wrap mt-6">
@@ -340,7 +365,7 @@ export default function PortfolioView({
                 return (
                   <tr key={s.schemeName} className="group hover:bg-white/[0.02] transition-colors">
                     <td className="py-5 pl-4">
-                      <p className="text-xs font-bold text-primary group-hover:text-white transition-colors">{s.schemeName.substring(0, 30)}</p>
+                      <p className="text-xs font-black text-primary group-hover:text-white transition-colors tracking-tight">{s.simpleName || s.schemeName}</p>
                       <p className="text-[9px] text-muted font-bold uppercase tracking-widest mt-0.5">{s.category}</p>
                     </td>
                     <td className="text-center tabular-nums text-xs font-medium text-secondary">{s.allocationPercentage.toFixed(1)}%</td>
@@ -381,68 +406,63 @@ export default function PortfolioView({
           </div>
         </div>
 
-        <div className="h-80 w-full">
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart 
-              data={activeBreakdown
-                .filter((s: any) => (s.currentValue || 0) > 5000)
-                .map((s: any) => {
-                  const personal = parseFloat(s.xirr || '0');
-                  const bench = s.benchmarkXirr || 14.8;
-                  return {
-                    name: s.schemeName.substring(0, 18) + '…',
-                    personal: parseFloat(personal.toFixed(1)),
-                    benchmark: parseFloat(bench.toFixed(1)),
-                    alpha: parseFloat((personal - bench).toFixed(1)),
-                    isWinning: personal >= bench
-                  };
-                })
-                .sort((a: any, b: any) => b.alpha - a.alpha)
-              } 
-              layout="vertical" 
-              margin={{ left: 100, right: 40 }}
-            >
-              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.02)" horizontal={true} vertical={false} />
-              <XAxis type="number" hide />
-              <YAxis 
-                dataKey="name" 
-                type="category" 
-                axisLine={false} 
-                tickLine={false} 
-                width={100}
-                tick={{ fill: 'rgba(241,245,249,0.5)', fontSize: 9, fontWeight: 800 }}
-              />
-              <RechartsTooltip 
-                cursor={{ fill: 'rgba(255,255,255,0.03)' }}
-                content={({ active, payload }) => {
-                  if (!active || !payload?.length) return null;
-                  const d = payload[0].payload;
-                  return (
-                    <div className="bg-surface-overlay/95 backdrop-blur-2xl border border-white/10 p-4 rounded-2xl shadow-2xl">
-                      <p className="text-[10px] font-black text-primary uppercase tracking-widest mb-2">{d.name}</p>
-                      <div className="space-y-1">
-                        <div className="flex justify-between gap-10"><span className="text-[9px] text-muted uppercase">Your XIRR</span><span className={`text-[10px] font-black ${d.isWinning ? 'text-buy' : 'text-exit'}`}>{d.personal}%</span></div>
-                        <div className="flex justify-between gap-10"><span className="text-[9px] text-muted uppercase">Benchmark</span><span className="text-[10px] font-black text-secondary">{d.benchmark}%</span></div>
-                        <div className="flex justify-between gap-10 pt-1 border-t border-white/5 mt-1">
-                          <span className="text-[9px] text-muted uppercase">Alpha</span>
-                          <span className={`text-[10px] font-black ${d.isWinning ? 'text-buy' : 'text-exit'}`}>{d.alpha > 0 ? '+' : ''}{d.alpha}%</span>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                }}
-              />
-              <Bar dataKey="personal" radius={[0, 4, 4, 0]} barSize={8}>
-                {(activeBreakdown
-                  .filter((s: any) => (s.currentValue || 0) > 5000)
-                  .map((s: any) => parseFloat(s.xirr || '0') >= (s.benchmarkXirr || 14.8))
-                ).map((isWinning: boolean, i: number) => (
-                  <Cell key={i} fill={isWinning ? '#4ade80' : '#f87171'} fillOpacity={0.8} />
-                ))}
-              </Bar>
-              <Bar dataKey="benchmark" fill="rgba(255,255,255,0.1)" radius={[0, 4, 4, 0]} barSize={8} />
-            </BarChart>
-          </ResponsiveContainer>
+        <div className="h-80 w-full mt-4">
+          <ResponsiveBar
+            data={activeBreakdown
+              .filter((s: any) => (s.currentValue || 0) > 5000)
+              .map((s: any) => {
+                const personal = parseFloat(s.xirr || '0');
+                const bench = s.benchmarkXirr || 14.8;
+                const name = s.simpleName || s.schemeName;
+                return {
+                  fund: name.length > 12 ? name.substring(0, 12) + '…' : name,
+                  "Personal XIRR": parseFloat(personal.toFixed(1)),
+                  "Benchmark": parseFloat(bench.toFixed(1)),
+                  isWinning: personal >= bench
+                };
+              })
+              .sort((a: any, b: any) => a["Personal XIRR"] - b["Personal XIRR"])
+            }
+            keys={["Personal XIRR", "Benchmark"]}
+            indexBy="fund"
+            margin={{ top: 0, right: 40, bottom: 40, left: 160 }}
+            padding={0.4}
+            layout="horizontal"
+            groupMode="grouped"
+            colors={({ id, data }: any) => {
+              if (id === "Benchmark") return "rgba(255,255,255,0.1)";
+              return data.isWinning ? "#4ade80" : "#f87171";
+            }}
+            borderRadius={4}
+            axisLeft={{
+              tickSize: 0,
+              tickPadding: 10,
+              tickRotation: 0,
+            }}
+            axisBottom={{
+              tickSize: 0,
+              tickPadding: 10,
+              format: (v) => `${v}%`,
+            }}
+            enableGridX={true}
+            enableGridY={false}
+            labelSkipWidth={12}
+            labelSkipHeight={12}
+            labelTextColor="#ffffff"
+            theme={{
+              axis: {
+                ticks: { text: { fill: "rgba(255,255,255,0.5)", fontSize: 10, fontWeight: 700 } },
+              },
+              grid: { line: { stroke: "rgba(255,255,255,0.05)", strokeWidth: 1 } },
+              tooltip: { container: { background: "#0f172a", color: "#f1f5f9", fontSize: 12, borderRadius: 12 } }
+            }}
+            tooltip={({ id, value, color }) => (
+              <div className="bg-surface-overlay/95 backdrop-blur-2xl border border-white/10 p-3 rounded-xl shadow-2xl">
+                <span className="text-[10px] font-black uppercase tracking-widest block mb-1" style={{ color }}>{id}</span>
+                <span className="text-sm font-black">{value}%</span>
+              </div>
+            )}
+          />
         </div>
       </section>
 
@@ -498,6 +518,7 @@ export default function PortfolioView({
               const bull = activeBreakdown.filter((s: any) => s.hmmState === 'CALM_BULL').length;
               const bear = activeBreakdown.filter((s: any) => s.hmmState === 'VOLATILE_BEAR').length;
               const total = activeBreakdown.length || 1;
+              const neutral = total - bull - bear;
 
               return (
                 <div className="bg-surface/40 backdrop-blur-xl border border-white/5 p-6 rounded-3xl space-y-4 shadow-lg group hover:border-indigo-400/20 transition-all">
@@ -508,7 +529,7 @@ export default function PortfolioView({
                   />
                   <div className="h-2 w-full bg-white/5 rounded-full overflow-hidden flex border border-white/5 shadow-inner">
                     <div style={{ width: `${(bull/total)*100}%` }} className="h-full bg-buy shadow-[0_0_8px_rgba(74,222,128,0.4)]" />
-                    <div style={{ width: `${((total-bull-bear)/total)*100}%` }} className="h-full bg-white/10" />
+                    <div style={{ width: `${(neutral/total)*100}%` }} className="h-full bg-accent/20" />
                     <div style={{ width: `${(bear/total)*100}%` }} className="h-full bg-exit shadow-[0_0_8px_rgba(248,113,113,0.4)]" />
                   </div>
                   <div className="flex justify-between text-[9px] font-black text-muted uppercase tracking-widest">
@@ -521,7 +542,7 @@ export default function PortfolioView({
 
             {/* Half-life Clock (OU) */}
             {(() => {
-              const validFunds = activeBreakdown.filter((s: any) => s.ouValid);
+              const validFunds = activeBreakdown.filter((s: any) => (s.ouHalfLife > 0.01));
               const avgHalfLife = validFunds.length > 0 
                 ? validFunds.reduce((acc: number, s: any) => acc + s.ouHalfLife, 0) / validFunds.length 
                 : 0;
@@ -530,13 +551,13 @@ export default function PortfolioView({
                 <div className="bg-surface/40 backdrop-blur-xl border border-white/5 p-6 rounded-3xl space-y-4 shadow-lg group hover:border-orange-400/20 transition-all">
                   <MetricWithTooltip 
                     label="Mean Reversion Pulse" 
-                    value={avgHalfLife > 0 ? `${avgHalfLife.toFixed(0)}d Half-life` : 'N/A'}
+                    value={avgHalfLife > 0.01 ? `${avgHalfLife.toFixed(1)}d Half-life` : 'STABLE'}
                     tooltip="Average time for discount to halve (OU Process)."
                   />
                   <div className="h-2 w-full bg-white/5 rounded-full overflow-hidden border border-white/5 shadow-inner">
                     <motion.div 
                       initial={{ width: 0 }}
-                      animate={{ width: `${Math.min(100, avgHalfLife)}%` }}
+                      animate={{ width: `${Math.min(100, avgHalfLife * 2)}%` }}
                       className="h-full bg-gradient-to-r from-orange-400 to-amber-300 opacity-80 shadow-[0_0_8px_rgba(251,146,60,0.4)]" 
                     />
                   </div>
@@ -630,28 +651,6 @@ export default function PortfolioView({
           </ResponsiveContainer>
         </div>
       </section>
-
-      {/* Hover Tooltip for Treemap */}
-      <AnimatePresence>
-        {hoveredFund && (
-          <motion.div 
-            initial={{ opacity: 0, scale: 0.95, y: 10 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.95, y: 10 }}
-            className="fixed z-[100] bg-surface-overlay/95 backdrop-blur-3xl border border-white/10 p-5 rounded-[1.5rem] shadow-[0_30px_60px_rgba(0,0,0,0.6)] pointer-events-none"
-            style={{ left: hoverPos.x + 25, top: hoverPos.y + 25 }}
-          >
-            <p className="text-[10px] text-muted uppercase tracking-[0.2em] mb-1.5 font-black opacity-60">{hoveredFund.name}</p>
-            <p className="text-xl font-black text-primary mb-3 tabular-nums tracking-tighter">
-              {isPrivate ? '••••' : `₹${(hoveredFund.size / 1000).toFixed(1)}k`}
-            </p>
-            <div className="flex items-center gap-2.5 px-3 py-2 rounded-xl bg-black/40 border border-white/5">
-              <div className="w-2.5 h-2.5 rounded-full animate-pulse-dot" style={{ background: ACTION_COLORS[hoveredFund.action as string]?.bg }} />
-              <p className="text-[10px] font-black uppercase tracking-[0.15em] text-secondary">{hoveredFund.action} Signal</p>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
     </div>
   );
 }

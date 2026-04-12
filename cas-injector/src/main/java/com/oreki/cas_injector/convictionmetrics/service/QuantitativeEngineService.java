@@ -74,16 +74,17 @@ public class QuantitativeEngineService {
 
             // ─── OPTIMISATION: Load NAV series once for all Java services ───
             Map<String, double[]> returnsCache = loadAllReturns(252);
+            Map<String, double[]> navsCache = loadAllNavs(252);
 
             // 5. Run new Hurst Exponent (Java R/S Analysis)
-            currentStep.set(5);
+            currentStep.set(1);
             lastStatusMessage = "Running Hurst Exponent R/S Analysis...";
             hurstExponentService.computeAndPersistHurstMetrics(returnsCache);
 
             // 6. Run new OU Process Calibration
             currentStep.set(6);
             lastStatusMessage = "Calibrating Ornstein-Uhlenbeck Mean Reversion...";
-            ouService.computeAndPersistOUMetrics(returnsCache);
+            ouService.computeAndPersistOUMetrics(navsCache);
 
             // 7. Run HMM Regime Filter
             currentStep.set(7);
@@ -100,6 +101,42 @@ public class QuantitativeEngineService {
         } finally {
             isRunning.set(false);
         }
+    }
+
+    private Map<String, double[]> loadAllNavs(int days) {
+        log.info("🗂️ Pre-loading NAV series for all funds ({} days)...", days);
+        String sql = """
+            SELECT amfi_code, nav, nav_date
+            FROM fund_history
+            WHERE amfi_code IN (
+                SELECT amfi_code FROM fund_history 
+                GROUP BY amfi_code HAVING COUNT(*) >= ?
+            )
+            AND nav_date >= CURRENT_DATE - INTERVAL '400 days'
+            ORDER BY amfi_code, nav_date DESC
+        """;
+
+        List<Map<String, Object>> rows = convictionMetricsRepository.getJdbcTemplate().queryForList(sql, days + 1);
+        Map<String, List<Double>> navMap = new HashMap<>();
+
+        for (Map<String, Object> r : rows) {
+            String amfi = (String) r.get("amfi_code");
+            double nav = ((Number) r.get("nav")).doubleValue();
+            navMap.computeIfAbsent(amfi, k -> new ArrayList<>()).add(nav);
+        }
+
+        Map<String, double[]> result = new HashMap<>();
+        for (var entry : navMap.entrySet()) {
+            List<Double> navsDesc = entry.getValue();
+            if (navsDesc.size() < days) continue;
+
+            double[] navs = new double[days];
+            for (int i = 0; i < days; i++) {
+                navs[days - 1 - i] = navsDesc.get(i);
+            }
+            result.put(entry.getKey(), navs);
+        }
+        return result;
     }
 
     private Map<String, double[]> loadAllReturns(int days) {
@@ -144,5 +181,5 @@ public class QuantitativeEngineService {
         }
         log.info("🗂️ Cache primed with returns for {} funds.", returnsMap.size());
         return returnsMap;
-        }
-        }
+    }
+}

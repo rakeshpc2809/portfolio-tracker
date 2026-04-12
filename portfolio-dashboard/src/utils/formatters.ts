@@ -1,5 +1,23 @@
 import type { ReasoningMetadata, TacticalSignal, UIMetaphor, ZScoreLabel } from '../types/signals';
 
+export const normalizeName = (name: string): string => {
+  if (!name) return "Unknown Fund";
+  let s = name.toUpperCase()
+    .replaceAll("MUTUAL FUND", "")
+    .replaceAll("DIRECT PLAN", "")
+    .replaceAll("GROWTH", "")
+    .replaceAll("DIRECT", "")
+    .replaceAll(" FUND", "")
+    .replaceAll("-", " ")
+    .replaceAll(/\s+/g, " ")
+    .trim();
+  
+  if (s.length > 28) {
+    return s.substring(0, 25) + "...";
+  }
+  return s;
+};
+
 export const formatCurrency = (amount: number | string): string => {
   const value = typeof amount === 'string' ? parseFloat(amount) : amount;
   return new Intl.NumberFormat('en-IN', {

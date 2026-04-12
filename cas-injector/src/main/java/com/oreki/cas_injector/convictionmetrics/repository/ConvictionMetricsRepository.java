@@ -3,6 +3,7 @@ package com.oreki.cas_injector.convictionmetrics.repository;
 import java.util.List;
 import java.util.Map;
 
+import com.oreki.cas_injector.convictionmetrics.dto.MarketMetrics;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
@@ -115,16 +116,96 @@ public class ConvictionMetricsRepository {
                OR yield_score IS NULL OR yield_score = 0
         """);
 
-        // Index for fast lookups in the nightly engine
         String createIndexSql = """
             CREATE INDEX IF NOT EXISTS idx_fcm_amfi_calcdate
             ON fund_conviction_metrics (amfi_code, calculation_date DESC);
         """;
         jdbcTemplate.execute(createIndexSql);
+
+        // Track portfolio value time-series (manual table, no Entity to avoid validate failure)
+        String createSnapshotTableSql = """
+            CREATE TABLE IF NOT EXISTS portfolio_snapshot (
+                pan VARCHAR(20) NOT NULL,
+                snapshot_date DATE NOT NULL,
+                total_value DOUBLE PRECISION NOT NULL,
+                PRIMARY KEY (pan, snapshot_date)
+            );
+        """;
+        jdbcTemplate.execute(createSnapshotTableSql);
     }
 
     public long getHistoryCount() {
         return jdbcTemplate.queryForObject("SELECT COUNT(*) FROM fund_history", Long.class);
+    }
+
+    public Map<String, MarketMetrics> fetchLiveMetricsMap(String pan) {
+        String sql = """
+            SELECT m.*, 
+                   (SELECT MAX(t.transaction_date) 
+                    FROM "transaction" t 
+                    JOIN scheme s2 ON t.scheme_id = s2.id 
+                    JOIN folio f2 ON s2.folio_id = f2.id
+                    WHERE s2.amfi_code = m.amfi_code 
+                    AND f2.investor_pan = ? 
+                    AND t.transaction_type = 'BUY') as last_buy
+            FROM fund_conviction_metrics m
+            WHERE m.calculation_date = (SELECT MAX(calculation_date) FROM fund_conviction_metrics)
+            AND m.amfi_code IN (
+                SELECT s.amfi_code 
+                FROM scheme s 
+                JOIN folio f ON s.folio_id = f.id 
+                WHERE f.investor_pan = ?
+            )
+            """;
+        
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList(sql, pan, pan);
+        Map<String, MarketMetrics> map = new java.util.HashMap<>();
+        for (Map<String, Object> r : rows) {
+            String amfi = (String) r.get("amfi_code");
+            java.sql.Date lastBuySql = (java.sql.Date) r.get("last_buy");
+            java.time.LocalDate lastBuy = lastBuySql != null ? lastBuySql.toLocalDate() : java.time.LocalDate.of(1970, 1, 1);
+
+            map.put(amfi, new com.oreki.cas_injector.convictionmetrics.dto.MarketMetrics(
+                getSafeInt(r.get("conviction_score")),
+                getSafeDouble(r.get("sortino_ratio")),
+                getSafeDouble(r.get("cvar_5")),
+                getSafeDouble(r.get("win_rate")),
+                getSafeDouble(r.get("max_drawdown")),
+                getSafeDouble(r.get("nav_percentile_3yr")),
+                getSafeDouble(r.get("drawdown_from_ath")),
+                getSafeDouble(r.get("return_z_score")),
+                lastBuy,
+                getSafeDouble(r.get("rolling_z_score_252")),
+                getSafeDouble(r.get("hurst_exponent")),
+                getSafeDouble(r.get("volatility_tax")),
+                String.valueOf(r.getOrDefault("hurst_regime", "RANDOM_WALK")),
+                getSafeDouble(r.get("historical_rarity_pct")),
+                getSafeDouble(r.get("hurst_20d")),
+                getSafeDouble(r.get("hurst_60d")),
+                String.valueOf(r.getOrDefault("multi_scale_regime", "RANDOM_WALK")),
+                getSafeDouble(r.get("ou_theta")),
+                getSafeDouble(r.get("ou_mu")),
+                getSafeDouble(r.get("ou_sigma")),
+                getSafeDouble(r.get("ou_half_life")),
+                getSafeBoolean(r.get("ou_valid")),
+                getSafeDouble(r.get("ou_buy_threshold")),
+                getSafeDouble(r.get("ou_sell_threshold")),
+                String.valueOf(r.getOrDefault("hmm_state", "STRESSED_NEUTRAL")),
+                getSafeDouble(r.get("hmm_bull_prob")),
+                getSafeDouble(r.get("hmm_bear_prob")),
+                getSafeDouble(r.get("hmm_transition_bear"))
+            ));
+        }
+        return map;
+    }
+
+    private double getSafeDouble(Object obj) { return obj == null ? 0.0 : ((Number) obj).doubleValue(); }
+    private int getSafeInt(Object obj) { return obj == null ? 0 : ((Number) obj).intValue(); }
+    private boolean getSafeBoolean(Object obj) {
+        if (obj == null) return false;
+        if (obj instanceof Boolean) return (Boolean) obj;
+        if (obj instanceof Number) return ((Number) obj).intValue() != 0;
+        return false;
     }
 
     /**
