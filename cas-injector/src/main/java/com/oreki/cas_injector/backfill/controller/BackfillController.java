@@ -31,6 +31,7 @@ public class BackfillController {
     private final ConvictionScoringService convictionScoringService;
     private final CacheManager cacheManager;
     private final InvestorRepository investorRepository;
+    private final com.oreki.cas_injector.core.service.MetricsSchedulerService metricsSchedulerService;
 
     @PostMapping("/trigger-historical-backfill")
     public ResponseEntity<String> triggerBackfill() {
@@ -39,6 +40,13 @@ public class BackfillController {
         }
         new Thread(() -> backfillerService.executeOneShotBackfill()).start();
         return ResponseEntity.ok("Historical backfill started.");
+    }
+
+    @PostMapping("/trigger-snapshot-backfill")
+    public ResponseEntity<String> triggerSnapshotBackfill(@RequestParam String pan) {
+        String cleanPan = pan.trim().toUpperCase();
+        new Thread(() -> metricsSchedulerService.backfillSnapshots(cleanPan)).start();
+        return ResponseEntity.ok("Retrospective snapshot backfill started for " + cleanPan);
     }
 
     @PostMapping("/force-sync")

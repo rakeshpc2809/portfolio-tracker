@@ -505,6 +505,11 @@ public class ConvictionMetricsRepository {
         }
     }
 
+    public List<Map<String, Object>> findAllMap() {
+        String sql = "SELECT * FROM fund_conviction_metrics WHERE calculation_date = (SELECT MAX(calculation_date) FROM fund_conviction_metrics)";
+        return jdbcTemplate.queryForList(sql);
+    }
+
     /**
      * Fetches latest metrics for display.
      */

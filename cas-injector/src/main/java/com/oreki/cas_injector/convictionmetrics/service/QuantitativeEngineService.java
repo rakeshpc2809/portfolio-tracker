@@ -18,6 +18,7 @@ import org.springframework.stereotype.Service;
 
 import com.oreki.cas_injector.convictionmetrics.repository.ConvictionMetricsRepository;
 import com.oreki.cas_injector.convictionmetrics.service.PythonQuantClient.QuantAnalyzeResponse;
+import com.oreki.cas_injector.core.utils.CommonUtils;
 
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
@@ -148,8 +149,8 @@ public class QuantitativeEngineService {
                 hmm_bull_prob = ?,
                 hmm_bear_prob = ?,
                 hmm_transition_bear = ?
-            WHERE amfi_code = ?
-            AND calculation_date = (SELECT MAX(calculation_date) FROM fund_conviction_metrics WHERE amfi_code = ?)
+            WHERE LTRIM(amfi_code, '0') = LTRIM(?, '0')
+            AND calculation_date = (SELECT MAX(calculation_date) FROM fund_conviction_metrics)
             """, res.hurst(), hRegime, res.ou_half_life(), res.ou_valid(), hmmStateStr, 
                  res.bull_prob(), res.bear_prob(), res.transition_to_bear(), amfi, amfi);
     }
@@ -171,7 +172,7 @@ public class QuantitativeEngineService {
         Map<String, List<Double>> navMap = new HashMap<>();
 
         for (Map<String, Object> r : rows) {
-            String amfi = (String) r.get("amfi_code");
+            String amfi = CommonUtils.SANITIZE_AMFI.apply((String) r.get("amfi_code"));
             double nav = ((Number) r.get("nav")).doubleValue();
             navMap.computeIfAbsent(amfi, k -> new ArrayList<>()).add(nav);
         }

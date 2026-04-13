@@ -262,7 +262,7 @@ public class PortfolioFullService {
             .sum();
 
         summary.getSchemeBreakdown().forEach(scheme -> {
-            String code = sanitizeAmfi(scheme.getAmfiCode());
+            String code = CommonUtils.SANITIZE_AMFI.apply(scheme.getAmfiCode());
             Map<String, Object> fundMetrics = metrics.get(code);
 
             if (fundMetrics != null) {
@@ -314,18 +314,11 @@ public class PortfolioFullService {
         return ((Number) obj).intValue();
     }
 
-    private String sanitizeAmfi(String amfi) {
-        if (amfi == null) return "";
-        String s = amfi.trim();
-        // Remove leading zeros for consistent matching (MFAPI vs AMFI)
-        return s.replaceFirst("^0+(?!$)", "");
-    }
-
     public Map<String, Object> getCorrelationMatrix(String pan) {
         DashboardSummaryDTO summary = getBasePortfolioCached(pan);
         List<String> activeAmfiCodes = summary.getSchemeBreakdown().stream()
             .filter(s -> s.getCurrentValue().compareTo(BigDecimal.ZERO) > 0)
-            .map(s -> sanitizeAmfi(s.getAmfiCode()))
+            .map(s -> CommonUtils.SANITIZE_AMFI.apply(s.getAmfiCode()))
             .distinct()
             .toList();
 
@@ -334,7 +327,7 @@ public class PortfolioFullService {
         // Map AMFI to names for labels
         Map<String, String> amfiToName = summary.getSchemeBreakdown().stream()
             .collect(Collectors.toMap(
-                s -> sanitizeAmfi(s.getAmfiCode()),
+                s -> CommonUtils.SANITIZE_AMFI.apply(s.getAmfiCode()),
                 s -> CommonUtils.NORMALIZE_NAME.apply(s.getSchemeName()),
                 (a, b) -> a
             ));

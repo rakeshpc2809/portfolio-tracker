@@ -26,6 +26,7 @@ import com.oreki.cas_injector.transactions.model.TaxLot;
 import com.oreki.cas_injector.transactions.repository.CapitalGainAuditRepository;
 import com.oreki.cas_injector.transactions.repository.TaxLotRepository;
 import com.oreki.cas_injector.transactions.repository.TransactionRepository;
+import com.oreki.cas_injector.core.utils.FundStatus;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -80,7 +81,7 @@ public class DashboardService {
             .collect(Collectors.groupingBy(l -> l.getScheme().getId()));
 
         List<String> amfiCodes = allSchemes.stream()
-            .map(s -> sanitizeAmfi(s.getAmfiCode()))
+            .map(s -> CommonUtils.SANITIZE_AMFI.apply(s.getAmfiCode()))
             .distinct()
             .toList();
 
@@ -100,7 +101,7 @@ public class DashboardService {
 
         List<SchemePerformanceDTO> breakdown = allSchemes.stream()
             .map(scheme -> {
-                String code = sanitizeAmfi(scheme.getAmfiCode());
+                String code = CommonUtils.SANITIZE_AMFI.apply(scheme.getAmfiCode());
                 List<TaxLot> openLots = openLotsBySchemeId.getOrDefault(scheme.getId(), Collections.emptyList());
                 List<CapitalGainAudit> audits = auditMapBySchemeId.getOrDefault(scheme.getId(), Collections.emptyList());
                 Map<LocalDate, BigDecimal> schemeNavHistory = navHistoryMap.getOrDefault(code, Collections.emptyMap());
@@ -262,14 +263,5 @@ public class DashboardService {
             .totalSTCG(realizedStcg)
             .schemeBreakdown(breakdown)
             .build();
-    }
-
-    private String sanitizeAmfi(String code) {
-        if (code == null) return "0";
-        String s = code.trim();
-        while (s.startsWith("0") && s.length() > 1) {
-            s = s.substring(1);
-        }
-        return s;
     }
 }

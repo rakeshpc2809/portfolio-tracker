@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { uploadCas, triggerBackfill, triggerForceSync, fetchAdminStatus } from "@/services/api";
+import { uploadCas, triggerBackfill, triggerForceSync, fetchAdminStatus, triggerSnapshotBackfill } from "@/services/api";
 import { Upload, ShieldCheck, FileText, AlertCircle, CheckCircle2, Database, Zap, Loader2, Info, TrendingUp, Activity } from "lucide-react";
 import { useEngineWebsocket } from '@/hooks/useEngineWebsocket';
 
@@ -12,6 +12,7 @@ const CasUploadView: React.FC<{ pan: string }> = ({ pan }) => {
   const [adminStatus, setAdminStatus] = useState<any>(null);
   const [syncing, setSyncing] = useState(false);
   const [backfilling, setBackfilling] = useState(false);
+  const [snapshotBackfilling, setSnapshotBackfilling] = useState(false);
   const [rescoring, setRescoring] = useState(false);
   const [rescoreStatus, setRescoreStatus] = useState('');
 
@@ -72,6 +73,18 @@ const CasUploadView: React.FC<{ pan: string }> = ({ pan }) => {
       alert(err.message);
     } finally {
       setBackfilling(false);
+    }
+  };
+
+  const handleSnapshotBackfill = async () => {
+    setSnapshotBackfilling(true);
+    try {
+      await triggerSnapshotBackfill(pan);
+      alert("Performance history backfill started. This will rebuild your trajectory chart.");
+    } catch (err: any) {
+      alert(err.message);
+    } finally {
+      setSnapshotBackfilling(false);
     }
   };
 
@@ -185,7 +198,7 @@ const CasUploadView: React.FC<{ pan: string }> = ({ pan }) => {
           </div>
         </div>
 
-        {/* Right Column: Admin Actions */}
+        {/* Right Column: Maintenance */}
         <div className="space-y-6">
           <div className="bg-surface border border-border rounded-xl shadow-2xl overflow-hidden hover:border-white/10 transition-colors duration-300">
             <div className="px-6 pt-6 pb-4 border-b border-border bg-white/[0.01]">
@@ -241,6 +254,32 @@ const CasUploadView: React.FC<{ pan: string }> = ({ pan }) => {
 
               <div className="h-px bg-border mx-2" />
 
+              {/* Snapshot Backfill Section */}
+              <div className="space-y-4">
+                <div className="flex justify-between items-center">
+                  <span className="text-[10px] font-black uppercase tracking-[0.2em] text-primary">Performance Reconstruction</span>
+                  {snapshotBackfilling && (
+                    <span className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-buy/10 text-buy text-[9px] font-black uppercase border border-buy/20">
+                      <Loader2 className="h-2.5 w-2.5 animate-spin" />
+                      Processing
+                    </span>
+                  )}
+                </div>
+                <p className="text-[11px] text-secondary leading-relaxed font-medium">
+                  Rebuilds your portfolio trajectory by calculating daily values from your first transaction. Use this to fix gaps in your performance charts.
+                </p>
+                <button 
+                  onClick={handleSnapshotBackfill}
+                  disabled={snapshotBackfilling}
+                  className="w-full h-10 px-4 py-2 bg-white/5 border border-border rounded-xl text-[10px] font-black uppercase tracking-[0.2em] text-secondary hover:text-primary hover:bg-white/[0.08] transition-all disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center gap-2 group"
+                >
+                  <Activity size={14} className="group-hover:scale-110 transition-transform" />
+                  Backfill Performance History
+                </button>
+              </div>
+
+              <div className="h-px bg-border mx-2" />
+
               {/* Engine Sync Section */}
               <div className="space-y-4">
                 <div className="flex justify-between items-center">
@@ -253,7 +292,7 @@ const CasUploadView: React.FC<{ pan: string }> = ({ pan }) => {
                   )}
                 </div>
                 <p className="text-[11px] text-secondary leading-relaxed font-medium">
-                  Triggers 7-phase calculation: Risk indexing, NAV signals, Peer-relative Z-Scoring, Conviction, Hurst, OU Reversion, and HMM Regimes.
+                  Triggers 7-phase calculation: Peer-relative Z-Scoring, Conviction, Hurst, OU Reversion, and HMM Regimes.
                 </p>
                 {(adminStatus?.engine?.isRunning || (engineProgress && engineProgress.step < 7 && engineProgress.step > 0)) && (
                   <div className="space-y-2.5 bg-white/[0.02] p-4 rounded-xl border border-border">
@@ -270,12 +309,6 @@ const CasUploadView: React.FC<{ pan: string }> = ({ pan }) => {
                     <p className="text-[9px] text-buy/80 font-bold uppercase tracking-tighter italic">
                       {engineProgress?.message || adminStatus?.engine?.message}
                     </p>
-                  </div>
-                )}
-                {engineProgress?.step === 7 && (
-                  <div className="flex items-center gap-2 text-buy bg-buy/10 p-3 rounded-xl border border-buy/20 animate-in fade-in zoom-in duration-500">
-                    <CheckCircle2 size={14} />
-                    <span className="text-[9px] font-black uppercase tracking-widest">Engine Cycle Complete ✓</span>
                   </div>
                 )}
                 <button 
@@ -299,7 +332,7 @@ const CasUploadView: React.FC<{ pan: string }> = ({ pan }) => {
                   </h3>
                 </div>
                 <p className="text-[11px] text-secondary leading-relaxed font-medium">
-                  Recalculates your personal conviction scores using your tax lots and performance data. Run this after a new CAS upload.
+                  Recalculates your personal conviction scores using your tax lots and performance data.
                 </p>
                 <button
                   onClick={handleRescore}
@@ -328,7 +361,7 @@ const CasUploadView: React.FC<{ pan: string }> = ({ pan }) => {
           <div className="space-y-2">
             <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-white">First-Time Setup</h3>
             <p className="text-[11px] leading-relaxed text-muted font-medium">
-              After uploading CAS, run <b>History Refresh</b> followed by <b>Metrics Engine</b> to generate your risk index.
+              After uploading CAS, run <b>History Refresh</b> followed by <b>Performance Reconstruction</b> to see your charts.
             </p>
           </div>
         </div>
@@ -337,9 +370,9 @@ const CasUploadView: React.FC<{ pan: string }> = ({ pan }) => {
             <Zap className="h-5 w-5 text-buy group-hover:scale-110 transition-transform fill-current" />
           </div>
           <div className="space-y-2">
-            <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-white">Nightly Sync</h3>
+            <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-white">Automated Engine</h3>
             <p className="text-[11px] leading-relaxed text-muted font-medium">
-              Automated AMFI updates and re-scoring happens every weekday at 11:30 PM IST.
+              Automated updates and re-scoring happens every weekday at 7:30 PM IST.
             </p>
           </div>
         </div>
@@ -350,7 +383,7 @@ const CasUploadView: React.FC<{ pan: string }> = ({ pan }) => {
           <div className="space-y-2">
             <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-white">Data Privacy</h3>
             <p className="text-[11px] leading-relaxed text-muted font-medium">
-              Processing is local. We never store or transmit your sensitive financial files outside your environment.
+              Processing is local. We never store your sensitive financial files outside your environment.
             </p>
           </div>
         </div>

@@ -6,125 +6,58 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
-import org.springframework.cache.annotation.Cacheable;
-import org.springframework.http.HttpEntity;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.HttpMethod;
-import org.springframework.http.ResponseEntity;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
-import org.springframework.web.client.HttpStatusCodeException;
-import org.springframework.web.client.RestTemplate;
 
-import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
-import com.fasterxml.jackson.annotation.JsonProperty;
 import com.oreki.cas_injector.core.dto.SchemeDetailsDTO;
+import com.oreki.cas_injector.core.utils.CommonUtils;
 
 import jakarta.annotation.PostConstruct;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import com.fasterxml.jackson.databind.JsonNode;
-
-
-@JsonIgnoreProperties(ignoreUnknown = true)
-record NavData(
-    @JsonProperty("date") String date,
-    @JsonProperty("nav") String nav // MFAPI returns NAV as a string
-) {
-    public double getNavAsDouble() {
-        try {
-            return nav != null ? Double.parseDouble(nav) : 0.0;
-        } catch (NumberFormatException e) {
-            return 0.0; // Fallback to avoid crashing the batch job
-        }
-    }
-}
-
-@JsonIgnoreProperties(ignoreUnknown = true)
-record MfApiResponse(
-    @JsonProperty("data") List<NavData> data,
-    @JsonProperty("meta") Map<String, String> meta
-) {}
-
 
 @Service
+@RequiredArgsConstructor
 @Slf4j
 public class NavService {
-    private final RestTemplate restTemplate = new RestTemplate();
-    private final Map<String, SchemeDetailsDTO> masterFundMap = new ConcurrentHashMap<>();
 
-    /**
-     * This runs automatically exactly ONE time when you start your Spring Boot app.
-     * It downloads the file, parses the categories, and fills the map.
-     */
+    private final JdbcTemplate jdbcTemplate;
+    private final Map<String, SchemeDetailsDTO> navCache = new ConcurrentHashMap<>();
+
     @PostConstruct
-    public void downloadAndParseAmfiData() {
-        System.out.println("🚀 Downloading AMFI Master File...");
-        RestTemplate restTemplate = new RestTemplate();
-        String amfiUrl = "https://portal.amfiindia.com/spages/NAVAll.txt";
-
-        try {
-            String rawText = restTemplate.getForObject(amfiUrl, String.class);
-            if (rawText == null) return;
-
-            String[] lines = rawText.split("\n");
-            String currentCategory = "UNKNOWN";
-
-            for (String line : lines) {
-                line = line.trim();
-                if (line.isEmpty()) continue;
-
-                // 1. Detect Category Headers (They don't have semicolons)
-                // Example: "Open Ended Schemes(Equity Scheme - Small Cap Fund)"
-                if (!line.contains(";")) {
-                    if (line.contains("Open Ended") || line.contains("Close Ended")) {
-                        // Clean up the text to look like "Equity Scheme - Small Cap Fund"
-                        currentCategory = line.replaceAll(".*\\((.*)\\).*", "$1");
-                    }
-                    continue; 
-                }
-
-                // 2. Parse the actual fund data lines
-                String[] columns = line.split(";");
-                
-                // columns[0] = AMFI Code, columns[3] = Name, columns[4] = NAV
-                if (columns.length >= 5 && columns[0].trim().matches("\\d+")) {
-                    String amfiCode = sanitizeAmfi(columns[0]);
-                    String name = columns[3];
-                    String navString = columns[4];
-
-                    try {
-                        BigDecimal nav = new BigDecimal(navString);
-                        // Save it to our ultra-fast memory map!
-                        masterFundMap.put(amfiCode, new SchemeDetailsDTO(nav, currentCategory, name));
-                    } catch (NumberFormatException ignored) {
-                        // Sometimes NAV is "N.A.", we just skip it
-                    }
-                }
-            }
-            System.out.println("✅ AMFI File Loaded! Total Funds tracking: " + masterFundMap.size());
-
-        } catch (Exception e) {
-            System.err.println("🚨 Failed to download AMFI file: " + e.getMessage());
-        }
+    public void init() {
+        log.info("🚀 Warm-booting NAV Cache from database...");
+        refreshCache();
     }
 
-    /**
-     * Your CAS Injector calls this. It no longer hits the internet!
-     * It just instantly pulls the answer from memory.
-     */
+    public void refreshCache() {
+        String sql = """
+            WITH latest_navs AS (
+                SELECT DISTINCT ON (amfi_code) amfi_code, nav, nav_date
+                FROM fund_history
+                ORDER BY amfi_code, nav_date DESC
+            )
+            SELECT l.amfi_code, l.nav, s.asset_category, s.name
+            FROM latest_navs l
+            LEFT JOIN scheme s ON LTRIM(l.amfi_code, '0') = LTRIM(s.amfi_code, '0')
+        """;
+
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList(sql);
+        int count = 0;
+        for (Map<String, Object> row : rows) {
+            String amfi = CommonUtils.SANITIZE_AMFI.apply((String) row.get("amfi_code"));
+            BigDecimal nav = (row.get("nav") != null) ? new BigDecimal(row.get("nav").toString()) : BigDecimal.ZERO;
+            String category = (String) row.get("asset_category");
+            String name = (String) row.get("name");
+
+            navCache.put(amfi, new SchemeDetailsDTO(nav, category != null ? category : "UNKNOWN", name != null ? name : "N/A"));
+            count++;
+        }
+        log.info("✅ NAV Cache refreshed. {} funds loaded.", count);
+    }
+
     public SchemeDetailsDTO getLatestSchemeDetails(String amfiCode) {
-        String code = sanitizeAmfi(amfiCode);
-        if (code.isEmpty()) {
-            return new SchemeDetailsDTO(BigDecimal.ZERO, "UNKNOWN", "N/A");
-        }
-        
-        // 0ms lookup! No Cloudflare, no 502 Bad Gateway.
-        return masterFundMap.getOrDefault(code, new SchemeDetailsDTO(BigDecimal.ZERO, "UNKNOWN", "N/A"));
+        String clean = CommonUtils.SANITIZE_AMFI.apply(amfiCode);
+        return navCache.getOrDefault(clean, new SchemeDetailsDTO(BigDecimal.ZERO, "UNKNOWN", "N/A"));
     }
-
-    private String sanitizeAmfi(String amfi) {
-        if (amfi == null) return "";
-        String s = amfi.trim();
-        return s.replaceFirst("^0+(?!$)", "");
-    }
-
 }

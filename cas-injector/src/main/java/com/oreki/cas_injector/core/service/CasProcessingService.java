@@ -146,7 +146,7 @@ public class CasProcessingService {
         String name = CommonUtils.SANITIZE.apply(rawName);
         
         String rawAmfi = node.has("amfiCode") ? node.path("amfiCode").asText() : node.path("amfi").asText();
-        String amfiCode = sanitizeAmfi(rawAmfi); 
+        String amfiCode = CommonUtils.SANITIZE_AMFI.apply(rawAmfi); 
 
         Scheme existingScheme = schemeRepo.findByIsin(isin).orElse(null);
 
@@ -230,11 +230,5 @@ public class CasProcessingService {
             String category = amfiToCategoryMap.get(sell.getScheme().getAmfiCode());
             fifoService.consumeLotsFIFO(sell, category);
         }
-    }
-
-    private String sanitizeAmfi(String amfi) {
-        if (amfi == null) return "";
-        String s = amfi.trim();
-        return s.replaceFirst("^0+(?!$)", "");
     }
 }

@@ -10,6 +10,7 @@ import org.springframework.stereotype.Service;
 
 import com.oreki.cas_injector.taxmanagement.dto.OpenTaxLot;
 import com.oreki.cas_injector.taxmanagement.dto.TaxSimulationResult;
+import com.oreki.cas_injector.transactions.model.TaxLot;
 
 import lombok.extern.slf4j.Slf4j;
 
@@ -109,5 +110,45 @@ public class TaxSimulatorService {
         boolean isTaxLocked = taxDragPercentage > MAX_ACCEPTABLE_TAX_DRAG;
 
         return new TaxSimulationResult(targetSellAmount, stcgProfit, ltcgProfit, estimatedTax, taxDragPercentage, isTaxLocked, !isEquity);
+    }
+
+    public TaxSimulationResult simulateHifoExit(List<TaxLot> lots, String category) {
+        if (lots == null || lots.isEmpty()) {
+            return new TaxSimulationResult(0, 0, 0, 0, 0, false, false);
+        }
+
+        // We assume current NAV is roughly 10% higher than cost for scoring simulation
+        double estimatedCurrentNav = lots.get(0).getCostBasisPerUnit().doubleValue() * 1.10;
+        double totalValue = 0;
+        double stcgProfit = 0;
+        double ltcgProfit = 0;
+        boolean isEquity = category != null && category.toUpperCase().contains("EQUITY");
+
+        for (TaxLot lot : lots) {
+            double units = lot.getRemainingUnits().doubleValue();
+            double cost = lot.getCostBasisPerUnit().doubleValue();
+            double value = units * estimatedCurrentNav;
+            double profit = value - (units * cost);
+            
+            long daysHeld = ChronoUnit.DAYS.between(lot.getBuyDate(), LocalDate.now());
+            if (isEquity) {
+                if (daysHeld < 365) stcgProfit += profit;
+                else ltcgProfit += profit;
+            } else {
+                stcgProfit += profit;
+            }
+            totalValue += value;
+        }
+
+        double estimatedTax = 0;
+        if (isEquity) {
+            estimatedTax += Math.max(0, stcgProfit) * EQUITY_STCG_RATE;
+            estimatedTax += Math.max(0, ltcgProfit) * EQUITY_LTCG_RATE;
+        } else {
+            estimatedTax += Math.max(0, stcgProfit) * 0.30;
+        }
+
+        double taxDrag = totalValue > 0 ? estimatedTax / totalValue : 0;
+        return new TaxSimulationResult(totalValue, stcgProfit, ltcgProfit, estimatedTax, taxDrag, taxDrag > MAX_ACCEPTABLE_TAX_DRAG, !isEquity);
     }
 }

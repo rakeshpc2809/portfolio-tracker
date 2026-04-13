@@ -11,6 +11,9 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import com.oreki.cas_injector.core.repository.InvestorRepository;
 import com.oreki.cas_injector.dashboard.service.DashboardService;
 import java.time.LocalDate;
+import java.util.List;
+import java.util.Map;
+
 import org.springframework.cache.Cache;
 import org.springframework.cache.CacheManager;
 
@@ -46,7 +49,81 @@ public class MetricsSchedulerService {
         logger.info("Market & MF Metrics Pipeline trigger finished.");
     }
 
-    private void snapshotAllPortfolios() {
+    /**
+     * Retrospective backfill of snapshots based on transaction history and fund_history.
+     * Use this if snapshots were missed or if fresh historical data is imported.
+     */
+    public void backfillSnapshots(String pan) {
+        logger.info("🚀 Starting retrospective snapshot backfill for PAN: {}", pan);
+        
+        // 1. Get the earliest transaction date
+        LocalDate startDate = jdbcTemplate.queryForObject(
+            "SELECT MIN(transaction_date) FROM transaction t JOIN scheme s ON t.scheme_id = s.id JOIN folio f ON s.folio_id = f.id WHERE f.investor_pan = ?",
+            LocalDate.class, pan);
+            
+        if (startDate == null) {
+            logger.warn("No transactions found for PAN: {}. Aborting backfill.", pan);
+            return;
+        }
+
+        LocalDate today = LocalDate.now();
+        
+        // Loop through every day from startDate to today
+        for (LocalDate date = startDate; !date.isAfter(today); date = date.plusDays(1)) {
+            // Compute cumulative units and total cost for all schemes as of this date
+            // Logic: Total Units = SUM(units) before or on 'date'
+            // Total Invested = SUM(amount) for all BUYs before or on 'date' (Simplified)
+            
+            String snapshotSql = """
+                WITH holdings_at_date AS (
+                    SELECT 
+                        s.amfi_code,
+                        SUM(t.units) as total_units,
+                        SUM(CASE WHEN t.units > 0 THEN t.amount ELSE 0 END) as total_invested_at_cost
+                    FROM transaction t
+                    JOIN scheme s ON t.scheme_id = s.id
+                    JOIN folio f ON s.folio_id = f.id
+                    WHERE f.investor_pan = ?
+                    AND t.transaction_date <= ?
+                    GROUP BY s.amfi_code
+                    HAVING SUM(t.units) > 0.001
+                ),
+                latest_nav_at_date AS (
+                    SELECT DISTINCT ON (amfi_code) amfi_code, nav
+                    FROM fund_history
+                    WHERE nav_date <= ?
+                    ORDER BY amfi_code, nav_date DESC
+                )
+                SELECT 
+                    SUM(h.total_units * n.nav) as total_value,
+                    SUM(h.total_invested_at_cost) as total_invested
+                FROM holdings_at_date h
+                JOIN latest_nav_at_date n ON h.amfi_code = n.amfi_code
+                """;
+
+            Map<String, Object> result = jdbcTemplate.queryForMap(snapshotSql, pan, date, date);
+            Double value = (result.get("total_value") != null) ? ((Number) result.get("total_value")).doubleValue() : null;
+            Double invested = (result.get("total_invested") != null) ? ((Number) result.get("total_invested")).doubleValue() : null;
+
+            if (value != null && invested != null) {
+                jdbcTemplate.update("""
+                    INSERT INTO portfolio_snapshot (pan, snapshot_date, total_value, total_invested)
+                    VALUES (?, ?, ?, ?)
+                    ON CONFLICT (pan, snapshot_date) DO UPDATE 
+                    SET total_value = EXCLUDED.total_value,
+                        total_invested = EXCLUDED.total_invested
+                    """, pan, date, value, invested);
+            }
+        }
+        
+        logger.info("✅ Retrospective backfill complete for PAN: {}", pan);
+        
+        // Evict caches
+        Cache pCache = cacheManager.getCache("portfolioCache");
+        if (pCache != null) pCache.clear();
+    }
+
+    public void snapshotAllPortfolios() {
         logger.info("📸 Starting nightly portfolio value snapshot...");
         investorRepository.findAll().forEach(investor -> {
             try {
@@ -97,18 +174,11 @@ public class MetricsSchedulerService {
             }
         });
 
-        // Evict caches (Step 3.3)
+        // Evict caches
         Cache pCache = cacheManager.getCache("portfolioCache");
-        if (pCache != null) {
-            pCache.clear();
-            logger.info("🗑️ Portfolio cache cleared.");
-        }
-        
+        if (pCache != null) pCache.clear();
         Cache dCache = cacheManager.getCache("dashboardSummaryV3");
-        if (dCache != null) {
-            dCache.clear();
-            logger.info("🗑️ Dashboard cache cleared.");
-        }
+        if (dCache != null) dCache.clear();
     }
 
     private void triggerScraper(String endpoint, String taskName) {

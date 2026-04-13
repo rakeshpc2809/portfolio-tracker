@@ -195,4 +195,13 @@ public static final Function<List<TransactionDTO>, BigDecimal> SOLVE_XIRR = txs 
             .map(Map.Entry::getValue)
             .findFirst().orElse("NIFTY 50");
     };
+
+    /**
+     * Sanitizes AMFI code by trimming and removing leading zeros.
+     */
+    public static final Function<String, String> SANITIZE_AMFI = amfi -> {
+        if (amfi == null) return "";
+        String s = amfi.trim();
+        return s.replaceFirst("^0+(?!$)", "");
+    };
 }

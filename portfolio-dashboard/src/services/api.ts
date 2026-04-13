@@ -90,6 +90,17 @@ export const triggerBackfill = async () => {
   return response.text();
 };
 
+export const triggerSnapshotBackfill = async (pan: string) => {
+  const response = await authenticatedFetch(`${BASE_URL}/admin/trigger-snapshot-backfill?pan=${pan}`, {
+    method: 'POST'
+  });
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(text || "Failed to trigger snapshot backfill");
+  }
+  return response.text();
+};
+
 export const triggerForceSync = async (pan: string) => {
   const response = await authenticatedFetch(`${BASE_URL}/admin/force-sync?pan=${pan}`, {
     method: 'POST'

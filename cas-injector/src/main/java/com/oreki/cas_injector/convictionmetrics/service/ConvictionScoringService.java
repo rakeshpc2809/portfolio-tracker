@@ -12,6 +12,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.oreki.cas_injector.backfill.service.NavService;
 import com.oreki.cas_injector.convictionmetrics.repository.ConvictionMetricsRepository;
+import com.oreki.cas_injector.core.utils.CommonUtils;
 import com.oreki.cas_injector.taxmanagement.dto.TaxSimulationResult;
 import com.oreki.cas_injector.taxmanagement.service.TaxSimulatorService;
 import com.oreki.cas_injector.transactions.model.TaxLot;
@@ -45,169 +46,105 @@ public class ConvictionScoringService {
         log.info("📦 Found {} total open lots for PAN: {}", allLots.size(), investorPan);
         
         Map<String, List<TaxLot>> lotsByAmfi = allLots.stream()
-                .collect(Collectors.groupingBy(lot -> sanitizeAmfi(lot.getScheme().getAmfiCode())));
+                .collect(Collectors.groupingBy(lot -> CommonUtils.SANITIZE_AMFI.apply(lot.getScheme().getAmfiCode())));
         log.info("📦 Grouped into {} unique AMFI codes from tax lots.", lotsByAmfi.size());
 
-        var fundMetrics = convictionMetricsRepository.findMetricsForScoring(investorPan);
-        log.info("📊 [2/3] Found {} funds in fund_conviction_metrics to score.", fundMetrics.size());
+        List<Map<String, Object>> metrics = convictionMetricsRepository.findAllMap();
+        log.info("📊 [2/3] Found {} funds in fund_conviction_metrics to score.", metrics.size());
 
-        if (fundMetrics.isEmpty()) {
-            log.warn("⚠️ No metrics found for scoring! Check if nightly engine has run and AMFI codes match.");
-            return;
+        // We want to normalize the yieldScore relative to the portfolio's own max CAGR to make it a 0-100 scale
+        double maxCagrFound = metrics.stream()
+            .mapToDouble(m -> {
+                String amfi = CommonUtils.SANITIZE_AMFI.apply((String) m.get("amfi_code"));
+                return calculatePersonalCagr(lotsByAmfi.get(amfi));
+            }).max().orElse(35.0);
+
+        log.info("🎯 Dynamic Yield Upper Bound set to {:.2f}%", maxCagrFound);
+
+        for (Map<String, Object> fund : metrics) {
+            String amfi = CommonUtils.SANITIZE_AMFI.apply((String) fund.get("amfi_code"));
+            List<TaxLot> fundLots = lotsByAmfi.get(amfi);
+            if (fundLots == null || fundLots.isEmpty()) continue;
+
+            log.info("🔎 Scoring fund: {} (AMFI: {})", fundLots.get(0).getScheme().getName(), amfi);
+            
+            // 1. YIELD SCORE (Personal CAGR relative to portfolio max)
+            double cagr = calculatePersonalCagr(fundLots);
+            double yieldScore = Math.max(0, Math.min(100, (cagr / maxCagrFound) * 100));
+            log.info("  ├─ Found {} lots for this fund.", fundLots.size());
+            log.info("  ├─ CAGR: {:.2f}%", cagr);
+
+            // 2. RISK SCORE (Sortino Ratio)
+            // Normalizing Sortino: 0 is poor, 2.0 is excellent.
+            double sortino = (double) fund.getOrDefault("sortino_ratio", 0.0);
+            double riskScore = Math.max(0, Math.min(100, (sortino / 2.0) * 100));
+
+            // 3. VALUE SCORE (NAV Percentile + ATH Distance)
+            // We want high score when NAV is low (cheap)
+            double navPct = (double) fund.getOrDefault("nav_percentile_3yr", 0.5);
+            double valueScore = (1.0 - navPct) * 100;
+
+            // 4. PAIN SCORE (Max Drawdown)
+            // Low drawdown = High score (less pain)
+            double mdd = Math.abs((double) fund.getOrDefault("max_drawdown", 0.0));
+            double painScore = Math.max(0, 100 - (mdd * 2.5)); // 40% DD = 0 score
+
+            // 5. FRICTION SCORE (Tax Efficiency)
+            // Simulate exit friction
+            String amfiCode = CommonUtils.SANITIZE_AMFI.apply((String) fund.get("amfi_code"));
+            String category = navService.getLatestSchemeDetails(amfiCode).getCategory();
+            TaxSimulationResult taxResult = taxSimulator.simulateHifoExit(fundLots, category);
+            
+            double taxPctOfValue = (taxResult.sellAmount() > 0) 
+                ? (taxResult.estimatedTax() / taxResult.sellAmount()) * 100 
+                : 0;
+            
+            // Score is 100 if tax is 0%, 0 if tax is 15% of total value
+            double frictionScore = Math.max(0, 100 - (taxPctOfValue * 6.66));
+            log.info("  ├─ Tax Drag: {:.2f}%", taxPctOfValue);
+
+            // --- FINAL CALCULATION ---
+            double finalScore = (yieldScore * WEIGHT_YIELD) +
+                               (riskScore * WEIGHT_RISK) +
+                               (valueScore * WEIGHT_VALUE) +
+                               (painScore * WEIGHT_PAIN) +
+                               (frictionScore * WEIGHT_FRICTION);
+
+            convictionMetricsRepository.updateConvictionBreakdown(
+                (int) finalScore, yieldScore, riskScore, valueScore, painScore, frictionScore, amfi
+            );
         }
 
-        // --- Step 2.1: Pre-calculate Max Portfolio CAGR for dynamic normalization ---
-        double portfolioMaxCagr = 0.25; // Default floor
-        for (Map<String, Object> fund : fundMetrics) {
-            String amfi = sanitizeAmfi((String) fund.get("amfi_code"));
-            List<TaxLot> lots = lotsByAmfi.get(amfi);
-            if (lots != null && !lots.isEmpty() && !isDebtLikeCategory(safeStr(fund.get("asset_category")))) {
-                double cagr = calculatePersonalCagr(amfi, lots);
-                if (cagr > portfolioMaxCagr) portfolioMaxCagr = cagr;
-            }
-        }
-        double equityYieldUpperBound = Math.max(0.25, portfolioMaxCagr * 0.90);
-        log.info("🎯 Dynamic Yield Upper Bound set to {:.2f}%", equityYieldUpperBound * 100);
-
-        for (Map<String, Object> fund : fundMetrics) {
-            String amfiCode = sanitizeAmfi((String) fund.get("amfi_code"));
-            log.info("🔎 Scoring fund: {} (AMFI: {})", fund.get("amfi_code"), amfiCode);
-            try {
-                String assetCategory = safeStr(fund.get("asset_category"));
-                boolean isDebtLike = isDebtLikeCategory(assetCategory);
-
-                double sortino     = safeNum(fund.get("sortino_ratio"));
-                double maxDrawdown = Math.abs(safeNum(fund.get("max_drawdown")));
-                double navPercentile = safeNumDefault(fund.get("nav_percentile_3yr"), 0.5);
-                double athDrawdown   = safeNum(fund.get("drawdown_from_ath"));
-                double returnZScore  = safeNum(fund.get("return_z_score"));
-                double cqs           = safeNumDefault(fund.get("composite_quant_score"), -1.0);
-
-                double dynamicPersonalCagr = 0.0;
-                double dynamicTaxDrag = 0.0;
-
-                List<TaxLot> fundLots = lotsByAmfi.get(amfiCode);
-                if (fundLots != null && !fundLots.isEmpty()) {
-                    log.info("  ├─ Found {} lots for this fund.", fundLots.size());
-                    dynamicPersonalCagr = calculatePersonalCagr(amfiCode, fundLots);
-                    log.info("  ├─ CAGR: {:.2f}%", dynamicPersonalCagr * 100);
-                    
-                    var details = navService.getLatestSchemeDetails(amfiCode);
-                    double currentNav = (details != null && details.getNav() != null) ? details.getNav().doubleValue() : 0.0;
-                    if (currentNav > 0) {
-                        double totalValue = fundLots.stream().mapToDouble(l -> l.getRemainingUnits().doubleValue() * currentNav).sum();
-                        try {
-                            String schemeName = fundLots.get(0).getScheme().getName();
-                            TaxSimulationResult taxFriction = taxSimulator.simulateSellOrder(schemeName, totalValue, currentNav, investorPan);
-                            dynamicTaxDrag = taxFriction.taxDragPercentage();
-                            log.info("  ├─ Tax Drag: {:.2f}%", dynamicTaxDrag * 100);
-                        } catch (Exception ignored) {}
-                    }
-                } else {
-                    log.warn("  ├─ ⚠️ No lots found for AMFI {} in the lotsByAmfi map!", amfiCode);
-                }
-
-                double yieldScore, riskScore, valueScore, painScore, frictionScore;
-
-                if (isDebtLike) {
-                    yieldScore = normalize(dynamicPersonalCagr, 0.03, 0.09) * 100;
-                    riskScore = (cqs >= 0) ? cqs : normalize(sortino, 0.5, 5.0) * 100;
-                    double debtReturnConsistency = returnZScore > 0
-                        ? Math.min(100, 50 + (returnZScore * 15))
-                        : Math.max(0,  50 + (returnZScore * 15));
-                    valueScore = debtReturnConsistency;
-                    painScore = invertNormalize(maxDrawdown, 0.0, 0.05) * 100;
-                    frictionScore = invertNormalize(dynamicTaxDrag, 0.0, 0.30) * 100;
-                } else {
-                    yieldScore    = normalize(dynamicPersonalCagr, 0.05, equityYieldUpperBound) * 100;
-                    riskScore     = (cqs >= 0) ? cqs : normalize(sortino, 0.5, 2.5) * 100;
-                    valueScore    = calculateValueScore(navPercentile, athDrawdown, returnZScore, assetCategory);
-                    painScore     = invertNormalize(maxDrawdown, 0.05, 0.35) * 100;
-                    frictionScore = invertNormalize(dynamicTaxDrag, 0.0, 0.15) * 100;
-                }
-
-                double baseConviction = (yieldScore * WEIGHT_YIELD) + (riskScore * WEIGHT_RISK) +
-                                        (valueScore * WEIGHT_VALUE) + (painScore * WEIGHT_PAIN) +
-                                        (frictionScore * WEIGHT_FRICTION);
-
-                int finalScore = (int) Math.round(baseConviction);
-                finalScore = Math.max(1, Math.min(100, finalScore));
-
-                convictionMetricsRepository.updateConvictionBreakdown(
-                    finalScore, yieldScore, riskScore, valueScore, painScore, frictionScore, amfiCode);
-
-                log.debug("Score [{}] cat={} debtLike={} → {}/100 (Y:{:.0f} R:{:.0f} V:{:.0f} P:{:.0f} F:{:.0f})",
-                    amfiCode, assetCategory, isDebtLike, finalScore,
-                    yieldScore, riskScore, valueScore, painScore, frictionScore);
-
-            } catch (Exception e) {
-                log.error("❌ Crash scoring AMFI {}", amfiCode, e);
-            }
-        }
         log.info("🏁 [3/3] Dynamic Conviction Scoring completed.");
     }
 
-    private boolean isDebtLikeCategory(String assetCategory) {
-        if (assetCategory == null) return false;
-        String upper = assetCategory.toUpperCase();
-        return upper.contains("DEBT") || upper.contains("GILT") || upper.contains("BOND")
-            || upper.contains("LIQUID") || upper.contains("ARBITRAGE")
-            || upper.contains("MONEY MARKET") || upper.contains("BANKING AND PSU")
-            || upper.contains("CORPORATE") || upper.contains("OVERNIGHT")
-            || upper.contains("ULTRA SHORT") || upper.contains("LOW DURATION");
-    }
+    private double calculatePersonalCagr(List<TaxLot> lots) {
+        if (lots == null || lots.isEmpty()) return 0.0;
 
-    private double safeNum(Object o) { return o == null ? 0.0 : ((Number) o).doubleValue(); }
-    private double safeNumDefault(Object o, double def) { return o == null ? def : ((Number) o).doubleValue(); }
-    private String safeStr(Object o) { return o == null ? "" : o.toString(); }
+        double totalCost = 0;
+        double totalGain = 0;
+        double weightedDays = 0;
 
-    private double calculateValueScore(double navPercentile, double athDrawdown,
-                                   double returnZScore, String assetCategory) {
-        String cat = assetCategory != null ? assetCategory.toUpperCase() : "";
-        if (cat.contains("DEBT") || cat.contains("GILT") || cat.contains("BOND")
-                || cat.contains("GOLD") || cat.contains("LIQUID")) {
-            return 50.0;
-        }
-        double percentileScore = invertNormalize(navPercentile, 0.1, 0.9) * 100;
-        double athScore = normalize(Math.abs(athDrawdown), 0.0, 0.40) * 100;
-        double returnZNorm = invertNormalize(returnZScore, -2.0, 2.0) * 100;
-        return (percentileScore * 0.50) + (athScore * 0.30) + (returnZNorm * 0.20);
-    }
-
-    private double normalize(double value, double minBound, double maxBound) {
-        if (value <= minBound) return 0;
-        if (value >= maxBound) return 1;
-        return (value - minBound) / (maxBound - minBound);
-    }
-
-    private double invertNormalize(double value, double minBound, double maxBound) {
-        if (value <= minBound) return 1; 
-        if (value >= maxBound) return 0;   
-        return 1.0 - ((value - minBound) / (maxBound - minBound));
-    }
-
-    private String sanitizeAmfi(String amfi) {
-        if (amfi == null) return "";
-        String s = amfi.trim();
-        // Remove leading zeros for consistent matching (MFAPI vs AMFI)
-        return s.replaceFirst("^0+(?!$)", "");
-    }
-
-    private double calculatePersonalCagr(String amfi, List<TaxLot> lots) {
-        var details = navService.getLatestSchemeDetails(amfi);
-        double currentNav = (details != null && details.getNav() != null) ? details.getNav().doubleValue() : 0.0;
-        if (currentNav <= 0) return 0.0;
-
-        double totalCost = 0, totalValue = 0;
-        LocalDate oldestDate = LocalDate.now();
         for (TaxLot lot : lots) {
-            double lCost = lot.getRemainingUnits().doubleValue() * lot.getCostBasisPerUnit().doubleValue();
-            totalCost += lCost;
-            totalValue += lot.getRemainingUnits().doubleValue() * currentNav;
-            if (lot.getBuyDate().isBefore(oldestDate)) oldestDate = lot.getBuyDate();
+            double cost = lot.getRemainingUnits().doubleValue() * lot.getCostBasisPerUnit().doubleValue();
+            long days = ChronoUnit.DAYS.between(lot.getBuyDate(), LocalDate.now());
+            
+            // Simple absolute gain for this lot (unrealized)
+            double currentNav = navService.getLatestSchemeDetails(lot.getScheme().getAmfiCode()).getNav().doubleValue();
+            double value = lot.getRemainingUnits().doubleValue() * currentNav;
+            
+            totalCost += cost;
+            totalGain += (value - cost);
+            weightedDays += (cost * days);
         }
-        double absoluteReturn = totalCost > 0 ? (totalValue - totalCost) / totalCost : 0;
-        double yearsInvested = Math.max(0.5, ChronoUnit.DAYS.between(oldestDate, LocalDate.now()) / 365.0);
-        return Math.pow(1 + absoluteReturn, 1.0 / yearsInvested) - 1;
+
+        if (totalCost == 0 || weightedDays == 0) return 0.0;
+
+        double avgDays = weightedDays / totalCost;
+        double absoluteReturn = totalGain / totalCost;
+        
+        // Annualize
+        if (avgDays < 1) return 0.0;
+        return (Math.pow(1 + absoluteReturn, 365.0 / avgDays) - 1) * 100;
     }
 }
