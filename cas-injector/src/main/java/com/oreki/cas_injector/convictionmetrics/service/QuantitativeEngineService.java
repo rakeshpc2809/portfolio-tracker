@@ -91,31 +91,29 @@ public class QuantitativeEngineService {
             convictionMetricsRepository.updateRollingZScoreAndVolatilityTax();
 
             // ─── Pre-load caches ───
-            Map<String, double[]> returnsCache = loadAllReturns(252);
-            Map<String, double[]> navsCache = loadAllNavs(252);
-
+            Map<String, double[]> navsCache = loadAllNavs(253);
+            Map<String, double[]> returnsCache = computeReturnsFromNavs(navsCache);
+            // We use truncated navs for nav-based metrics if needed, but here we just need them for Python
+            
             // Step 5: Delegate to Python Sidecar for heavy math
-            updateStatus(5, "Delegating Hurst, OU and HMM to Python Sidecar...");
+            updateStatus(5, "Delegating Hurst, OU and HMM to Python Sidecar (Batched)...");
             
-            List<String> amfiCodes = new ArrayList<>(navsCache.keySet());
-            int totalAmfi = amfiCodes.size();
-            
-            for (int i = 0; i < totalAmfi; i++) {
-                String amfi = amfiCodes.get(i);
-                double[] navs = navsCache.get(amfi);
-                double[] returns = returnsCache.get(amfi);
-                
-                if (navs == null || returns == null) continue;
+            List<PythonQuantClient.QuantAnalyzeRequest> batch = navsCache.keySet().stream()
+                .filter(amfi -> navsCache.containsKey(amfi) && returnsCache.containsKey(amfi))
+                .map(amfi -> new PythonQuantClient.QuantAnalyzeRequest(
+                    amfi, navsCache.get(amfi), returnsCache.get(amfi)))
+                .toList();
 
-                // Call Python analyze API
-                QuantAnalyzeResponse res = pythonQuantClient.analyze(amfi, navs, returns);
-                if (res != null) {
-                    persistPythonMetrics(amfi, res);
-                }
+            List<QuantAnalyzeResponse> results = pythonQuantClient.analyzeBatch(batch);
+            results.forEach(res -> persistPythonMetrics(res.amfi_code(), res));
 
-                if (i % 10 == 0) {
-                    updateStatus(6, String.format("Processed %d/%d funds via Python...", i, totalAmfi));
-                }
+            int failed = batch.size() - results.size();
+            if (failed > 0) {
+                log.warn("⚠️ Python metrics failed for {}/{} funds — previous values retained.", 
+                    failed, batch.size());
+                updateStatus(6, "Warning: " + failed + " funds used cached metrics (Python sidecar issue).");
+            } else {
+                updateStatus(6, "All " + batch.size() + " funds processed via Python sidecar.");
             }
 
             long endTime = System.currentTimeMillis();
@@ -148,11 +146,12 @@ public class QuantitativeEngineService {
                 hmm_state = ?,
                 hmm_bull_prob = ?,
                 hmm_bear_prob = ?,
-                hmm_transition_bear = ?
+                hmm_transition_bear = ?,
+                last_python_update = CURRENT_TIMESTAMP
             WHERE LTRIM(amfi_code, '0') = LTRIM(?, '0')
             AND calculation_date = (SELECT MAX(calculation_date) FROM fund_conviction_metrics)
             """, res.hurst(), hRegime, res.ou_half_life(), res.ou_valid(), hmmStateStr, 
-                 res.bull_prob(), res.bear_prob(), res.transition_to_bear(), amfi, amfi);
+                 res.bull_prob(), res.bear_prob(), res.transition_to_bear(), amfi);
     }
 
     private Map<String, double[]> loadAllNavs(int days) {
@@ -191,18 +190,19 @@ public class QuantitativeEngineService {
         return result;
     }
 
-    private Map<String, double[]> loadAllReturns(int days) {
-        log.info("🗂️ Pre-loading log-returns for all funds ({} days)...", days);
-        Map<String, double[]> navsMap = loadAllNavs(days + 1);
+    private Map<String, double[]> computeReturnsFromNavs(Map<String, double[]> navsMap) {
+        log.info("🗂️ Computing log-returns from pre-loaded NAVs...");
         Map<String, double[]> returnsMap = new HashMap<>();
 
         for (var entry : navsMap.entrySet()) {
             double[] navs = entry.getValue();
+            if (navs.length < 2) continue;
+
             double[] returns = new double[navs.length - 1];
             for (int i = 0; i < returns.length; i++) {
                 double prev = navs[i];
                 double today = navs[i+1];
-                if (prev == 0) {
+                if (prev <= 0) {
                     returns[i] = 0;
                 } else {
                     returns[i] = Math.log(today / prev);
@@ -210,7 +210,7 @@ public class QuantitativeEngineService {
             }
             returnsMap.put(entry.getKey(), returns);
         }
-        log.info("🗂️ Cache primed with returns for {} funds.", returnsMap.size());
+        log.info("🗂️ Computed returns for {} funds.", returnsMap.size());
         return returnsMap;
     }
 }

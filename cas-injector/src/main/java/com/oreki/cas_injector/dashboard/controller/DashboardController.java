@@ -1,6 +1,5 @@
 package com.oreki.cas_injector.dashboard.controller;
 
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.CrossOrigin;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -25,22 +24,24 @@ import com.oreki.cas_injector.transactions.repository.TransactionRepository;
 
 import java.util.Map;
 import lombok.extern.slf4j.Slf4j;
+import lombok.RequiredArgsConstructor;
 
 @RestController
 @RequestMapping("/dashboard")
 @CrossOrigin(origins = "*")
 @Slf4j
+@RequiredArgsConstructor
 public class DashboardController {
 
-    @Autowired private DashboardService dashboardService;
-    @Autowired private PortfolioFullService fullService;
-    @Autowired private InvestorRepository investorRepo;
-    @Autowired private FolioRepository folioRepo;
-    @Autowired private SchemeRepository schemeRepo;
-    @Autowired private TransactionRepository txnRepo;
-    @Autowired private TaxLotRepository taxLotRepo;
-    @Autowired private CapitalGainAuditRepository auditRepo;
-    @Autowired private CacheManager cacheManager;
+    private final DashboardService dashboardService;
+    private final PortfolioFullService fullService;
+    private final InvestorRepository investorRepo;
+    private final FolioRepository folioRepo;
+    private final SchemeRepository schemeRepo;
+    private final TransactionRepository txnRepo;
+    private final TaxLotRepository taxLotRepo;
+    private final CapitalGainAuditRepository auditRepo;
+    private final CacheManager cacheManager;
 
     @GetMapping("/summary/{pan}")
     public ResponseEntity<DashboardSummaryDTO> getSummary(@PathVariable String pan) {
@@ -75,8 +76,14 @@ public class DashboardController {
     }
 
     @DeleteMapping("/reset")
-    public ResponseEntity<String> resetAllData() {
-        log.warn("Wiping all financial data for a fresh start...");
+    public ResponseEntity<String> resetAllData(@RequestParam(required = true) String confirmPhrase) {
+        if (!"I-CONFIRM-DATA-WIPE".equals(confirmPhrase)) {
+            log.warn("⚠️ Data wipe attempted without confirmation phrase.");
+            return ResponseEntity.badRequest()
+                .body("Safety phrase required: ?confirmPhrase=I-CONFIRM-DATA-WIPE");
+        }
+        
+        log.warn("🚨 Wiping all financial data for a fresh start...");
         
         // Order matters due to Foreign Key constraints
         auditRepo.deleteAll();

@@ -20,16 +20,19 @@ import com.oreki.cas_injector.core.repository.InvestorRepository;
 import com.oreki.cas_injector.core.utils.CommonUtils;
 import com.oreki.cas_injector.core.utils.FundStatus;
 import com.oreki.cas_injector.dashboard.dto.DashboardSummaryDTO;
+import com.oreki.cas_injector.dashboard.model.PortfolioSummary;
 import com.oreki.cas_injector.transactions.dto.TransactionDTO;
 import com.oreki.cas_injector.transactions.model.CapitalGainAudit;
 import com.oreki.cas_injector.transactions.model.TaxLot;
 import com.oreki.cas_injector.transactions.repository.CapitalGainAuditRepository;
 import com.oreki.cas_injector.transactions.repository.TaxLotRepository;
 import com.oreki.cas_injector.transactions.repository.TransactionRepository;
-import com.oreki.cas_injector.core.utils.FundStatus;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.cache.annotation.Cacheable;
+import org.springframework.jdbc.core.BeanPropertyRowMapper;
+import org.springframework.jdbc.core.JdbcTemplate;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -47,15 +50,25 @@ public class DashboardService {
     private final ConvictionMetricsRepository metricsRepo;
     private final HistoricalNavRepository historicalNavRepo;
     private final BenchmarkService benchmarkService;
+    private final JdbcTemplate jdbcTemplate;
 
     @Transactional(readOnly = true)
+    @Cacheable(value = "dashboardSummaryV3", key = "#rawPan")
     public DashboardSummaryDTO getInvestorSummary(String rawPan) {
         String pan = rawPan.trim().toUpperCase();
-        log.info("🔍 Generating Dashboard Summary for PAN: {}", pan);
+        log.info("🔍 Generating Dashboard Summary (from MV via JDBC) for PAN: {}", pan);
         
-        Optional<Investor> investorOpt = investorRepo.findByPanWithDetails(pan);
-        if (investorOpt.isEmpty()) {
-            log.warn("⚠️ Investor not found for PAN: {}", pan);
+        String sql = "SELECT * FROM mv_portfolio_summary WHERE investor_pan = ?";
+        List<PortfolioSummary> summaryData;
+        try {
+            summaryData = jdbcTemplate.query(sql, new BeanPropertyRowMapper<>(PortfolioSummary.class), pan);
+        } catch (Exception e) {
+            log.warn("⚠️ Materialized view query failed (likely first run): {}", e.getMessage());
+            summaryData = Collections.emptyList();
+        }
+
+        if (summaryData.isEmpty()) {
+            log.warn("⚠️ No data found in MV for PAN: {}", pan);
             return DashboardSummaryDTO.builder()
                 .investorName("New Investor")
                 .schemeBreakdown(Collections.emptyList())
@@ -66,10 +79,9 @@ public class DashboardService {
                 .build();
         }
 
-        Investor investor = investorOpt.get();
-        Set<Scheme> allSchemes = investor.getFolios().stream()
-            .flatMap(f -> f.getSchemes().stream())
-            .collect(Collectors.toSet());
+        String investorName = summaryData.get(0).getInvestorName();
+        Map<Long, List<PortfolioSummary>> txsBySchemeId = summaryData.stream()
+            .collect(Collectors.groupingBy(PortfolioSummary::getSchemeId));
 
         // Batch fetch heavy data to avoid N+1
         List<CapitalGainAudit> allInvestorAudits = auditRepo.findAllBySellTransactionSchemeFolioInvestorPan(pan);
@@ -80,14 +92,13 @@ public class DashboardService {
         Map<Long, List<TaxLot>> openLotsBySchemeId = allOpenLots.stream()
             .collect(Collectors.groupingBy(l -> l.getScheme().getId()));
 
-        List<String> amfiCodes = allSchemes.stream()
+        List<String> amfiCodes = summaryData.stream()
             .map(s -> CommonUtils.SANITIZE_AMFI.apply(s.getAmfiCode()))
             .distinct()
             .toList();
 
-        List<LocalDate> allTxDates = allSchemes.stream()
-            .flatMap(s -> s.getTransactions().stream())
-            .map(Transaction::getDate)
+        List<LocalDate> allTxDates = summaryData.stream()
+            .map(PortfolioSummary::getTransactionDate)
             .distinct()
             .toList();
 
@@ -99,11 +110,15 @@ public class DashboardService {
 
         List<TransactionDTO> totalCashFlow = new ArrayList<>();
 
-        List<SchemePerformanceDTO> breakdown = allSchemes.stream()
-            .map(scheme -> {
-                String code = CommonUtils.SANITIZE_AMFI.apply(scheme.getAmfiCode());
-                List<TaxLot> openLots = openLotsBySchemeId.getOrDefault(scheme.getId(), Collections.emptyList());
-                List<CapitalGainAudit> audits = auditMapBySchemeId.getOrDefault(scheme.getId(), Collections.emptyList());
+        List<SchemePerformanceDTO> breakdown = txsBySchemeId.entrySet().stream()
+            .map(entry -> {
+                Long schemeId = entry.getKey();
+                List<PortfolioSummary> txs = entry.getValue();
+                PortfolioSummary info = txs.get(0);
+                
+                String code = CommonUtils.SANITIZE_AMFI.apply(info.getAmfiCode());
+                List<TaxLot> openLots = openLotsBySchemeId.getOrDefault(schemeId, Collections.emptyList());
+                List<CapitalGainAudit> audits = auditMapBySchemeId.getOrDefault(schemeId, Collections.emptyList());
                 Map<LocalDate, BigDecimal> schemeNavHistory = navHistoryMap.getOrDefault(code, Collections.emptyMap());
 
                 // Value aggregation
@@ -115,7 +130,7 @@ public class DashboardService {
                     .map(lot -> lot.getRemainingUnits().multiply(lot.getCostBasisPerUnit()))
                     .reduce(BigDecimal.ZERO, BigDecimal::add);
 
-                SchemeDetailsDTO schemeDetails = navService.getLatestSchemeDetails(scheme.getAmfiCode());
+                SchemeDetailsDTO schemeDetails = navService.getLatestSchemeDetails(info.getAmfiCode());
                 BigDecimal currentNav = schemeDetails.getNav();
                 
                 BigDecimal currentValue = unitsHeld.multiply(currentNav).setScale(2, RoundingMode.HALF_UP);
@@ -150,9 +165,9 @@ public class DashboardService {
                     }).sum();
 
                 // Cash flows for XIRR
-                List<TransactionDTO> cashFlows = scheme.getTransactions().stream()
+                List<TransactionDTO> cashFlows = txs.stream()
                     .map(t -> {
-                        BigDecimal preciseAmount = Optional.ofNullable(schemeNavHistory.get(t.getDate()))
+                        BigDecimal preciseAmount = Optional.ofNullable(schemeNavHistory.get(t.getTransactionDate()))
                             .map(nav -> nav.multiply(t.getUnits().abs()))
                             .orElse(t.getAmount().abs());
                         
@@ -160,7 +175,7 @@ public class DashboardService {
                         boolean isOutflow = "BUY".equalsIgnoreCase(t.getTransactionType()) || "STAMP_DUTY".equalsIgnoreCase(t.getTransactionType());
                         BigDecimal flow = isOutflow ? preciseAmount.negate() : preciseAmount;
                         
-                        return new TransactionDTO(flow, t.getDate());
+                        return new TransactionDTO(flow, t.getTransactionDate());
                     })
                     .collect(Collectors.toList());
                                 
@@ -177,33 +192,32 @@ public class DashboardService {
 
                 String bucket = "OTHERS";
                 if (amfiCategory.contains("ELSS") || amfiCategory.contains("TAX")) bucket = "TAX_SAVER_ELSS";
-                else if (amfiCategory.contains("GOLD") || scheme.getName().toUpperCase().contains("GOLD")) bucket = "GOLD_HEDGE_24M";
+                else if (amfiCategory.contains("GOLD") || info.getSchemeName().toUpperCase().contains("GOLD")) bucket = "GOLD_HEDGE_24M";
                 else if (amfiCategory.contains("EQUITY") || amfiCategory.contains("INDEX") || amfiCategory.contains("GROWTH")) bucket = "AGGRESSIVE_GROWTH";
                 else if (amfiCategory.contains("DEBT") || amfiCategory.contains("LIQUID")) bucket = "DEBT_SLAB_TAXED";
 
-                double benchXirr = benchmarkService.getBenchmarkReturn(bucket, amfiCategory, scheme.getBenchmarkIndex());
+                double benchXirr = benchmarkService.getBenchmarkReturn(bucket, amfiCategory, info.getSchemeName());
                 MarketMetrics m = metricsMap.getOrDefault(code, MarketMetrics.fromLegacy(50, 0, 0, 0, 0, 0.5, 0, 0, LocalDate.of(1970, 1, 1)));
 
                 return SchemePerformanceDTO.builder()
-                    .schemeName(scheme.getName())
-                    .simpleName(CommonUtils.NORMALIZE_NAME.apply(scheme.getName()))
-                    .isin(scheme.getIsin())
-                    .amfiCode(scheme.getAmfiCode())
-                    .totalInvested(scheme.getTransactions().stream().filter(t -> t.getUnits().compareTo(BigDecimal.ZERO) > 0).map(Transaction::getAmount).reduce(BigDecimal.ZERO, BigDecimal::add))
+                    .schemeName(info.getSchemeName())
+                    .simpleName(CommonUtils.NORMALIZE_NAME.apply(info.getSchemeName()))
+                    .isin(info.getIsin())
+                    .amfiCode(info.getAmfiCode())
+                    .totalInvested(txs.stream().filter(t -> t.getUnits().compareTo(BigDecimal.ZERO) > 0).map(PortfolioSummary::getAmount).reduce(BigDecimal.ZERO, BigDecimal::add))
                     .currentInvested(currentInvested)
                     .currentValue(currentValue)
                     .realizedGain(realizedGain)
                     .unrealizedGain(unrealizedGain)
                     .ltcgUnrealizedGain(ltcgUnrealized)
                     .stcgUnrealizedGain(stcgUnrealized)
-                    .transactionCount(scheme.getTransactions().size())
+                    .transactionCount(txs.size())
                     .xirr(displayXirr)
                     .benchmarkXirr(benchXirr)
                     .status(status)
                     .category(amfiCategory)
                     .bucket(bucket)
-                    .amc(scheme.getFolio().getAmc())
-                    .benchmarkIndex(scheme.getBenchmarkIndex())
+                    .amc(info.getAmc())
                     .convictionScore(m.convictionScore())
                     .sortinoRatio(m.sortinoRatio())
                     .maxDrawdown(m.maxDrawdown())
@@ -248,8 +262,8 @@ public class DashboardService {
         BigDecimal totalXirr = CommonUtils.SOLVE_XIRR.apply(totalCashFlow);
 
         return DashboardSummaryDTO.builder()
-            .investorName(investor.getName())
-            .totalFolios(investor.getFolios().size())
+            .investorName(investorName)
+            .totalFolios((int) summaryData.stream().map(PortfolioSummary::getFolioId).distinct().count())
             .totalSchemes(breakdown.size())
             .totalTransactions(txnRepo.countActualTransactionsByPan(pan)) 
             .totalInvestedAmount(aggregateTotalInvested)

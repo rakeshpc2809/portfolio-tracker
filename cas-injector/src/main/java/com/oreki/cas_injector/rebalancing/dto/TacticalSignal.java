@@ -3,7 +3,9 @@ package com.oreki.cas_injector.rebalancing.dto;
 import java.time.LocalDate;
 import java.util.List;
 import com.oreki.cas_injector.core.utils.SignalType;
+import lombok.Builder;
 
+@Builder
 public record TacticalSignal(
     String schemeName,
     String simpleName,

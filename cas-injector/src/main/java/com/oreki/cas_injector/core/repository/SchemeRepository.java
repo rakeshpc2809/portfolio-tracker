@@ -13,4 +13,6 @@ public interface SchemeRepository extends JpaRepository<Scheme, Long> {
     Optional<Scheme> findByNameIgnoreCase(String name);
 
     Optional<Scheme> findByName(String schemeName);
+
+    Optional<Scheme> findFirstByAmfiCode(String amfiCode);
 }

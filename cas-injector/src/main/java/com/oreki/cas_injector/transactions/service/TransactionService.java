@@ -1,11 +1,12 @@
 package com.oreki.cas_injector.transactions.service;
 
 import com.oreki.cas_injector.dashboard.model.PortfolioSummary;
-import com.oreki.cas_injector.dashboard.repository.PortfolioSummaryReadRepository;
-import jakarta.persistence.criteria.Predicate;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
-import org.springframework.data.jpa.domain.Specification;
+import org.springframework.data.domain.Sort;
+import org.springframework.jdbc.core.BeanPropertyRowMapper;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -14,32 +15,61 @@ import java.util.List;
 @Service
 public class TransactionService {
 
-    private final PortfolioSummaryReadRepository summaryRepository;
+    private final JdbcTemplate jdbcTemplate;
 
-    public TransactionService(PortfolioSummaryReadRepository summaryRepository) {
-        this.summaryRepository = summaryRepository;
+    public TransactionService(JdbcTemplate jdbcTemplate) {
+        this.jdbcTemplate = jdbcTemplate;
     }
 
     public Page<PortfolioSummary> getFilteredTransactions(String pan, String type, Pageable pageable) {
-        return summaryRepository.findAll((Specification<PortfolioSummary>) (root, query, cb) -> {
-            List<Predicate> predicates = new ArrayList<>();
+        StringBuilder sql = new StringBuilder("SELECT * FROM mv_portfolio_summary WHERE 1=1");
+        List<Object> params = new ArrayList<>();
 
-            // 🧬 DIRECT LOOKUP on Materialized View (No joins needed!)
-            if (pan != null && !pan.isEmpty()) {
-                predicates.add(cb.equal(root.get("investorPan"), pan));
-            }
+        if (pan != null && !pan.isEmpty()) {
+            sql.append(" AND investor_pan = ?");
+            params.add(pan);
+        }
 
-            // 🏷️ FILTER: Transaction Type (BUY, SELL, etc.)
-            if (type != null && !type.equalsIgnoreCase("ALL")) {
-                predicates.add(cb.equal(root.get("transactionType"), type.toUpperCase()));
-            }
+        if (type != null && !type.equalsIgnoreCase("ALL")) {
+            sql.append(" AND UPPER(transaction_type) = ?");
+            params.add(type.toUpperCase());
+        } else {
+            sql.append(" AND UPPER(transaction_type) != 'STAMP_DUTY'");
+        }
 
-            // 🚫 EXCLUDE: Stamp Duty from main log by default if no type specified
-            if (type == null || type.isEmpty() || type.equalsIgnoreCase("ALL")) {
-                predicates.add(cb.notEqual(cb.upper(root.get("transactionType")), "STAMP_DUTY"));
-            }
+        // Handle Sorting
+        Sort sort = pageable.getSort();
+        if (sort.isSorted()) {
+            sql.append(" ORDER BY ");
+            sort.forEach(order -> {
+                String property = order.getProperty();
+                // Map Java properties to SQL columns
+                String column = switch (property) {
+                    case "transactionDate" -> "transaction_date";
+                    case "amount" -> "amount";
+                    case "units" -> "units";
+                    case "schemeName" -> "scheme_name";
+                    default -> "transaction_date";
+                };
+                sql.append(column).append(" ").append(order.getDirection().name()).append(", ");
+            });
+            sql.setLength(sql.length() - 2); // Remove trailing comma
+        }
 
-            return cb.and(predicates.toArray(new Predicate[0]));
-        }, pageable);
+        // Handle Pagination
+        String countSql = "SELECT COUNT(*) FROM (" + sql.toString() + ") AS count_query";
+        Long total = jdbcTemplate.queryForObject(countSql, params.toArray(), Long.class);
+
+        sql.append(" LIMIT ? OFFSET ?");
+        params.add(pageable.getPageSize());
+        params.add(pageable.getOffset());
+
+        List<PortfolioSummary> content = jdbcTemplate.query(
+                sql.toString(),
+                new BeanPropertyRowMapper<>(PortfolioSummary.class),
+                params.toArray()
+        );
+
+        return new PageImpl<>(content, pageable, total != null ? total : 0L);
     }
 }

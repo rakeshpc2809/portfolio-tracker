@@ -6,6 +6,7 @@ export function usePortfolioSummary(pan: string | null, sip: number, lumpsum: nu
     queryKey: ['portfolio', pan, sip, lumpsum],
     queryFn: () => fetchMasterPortfolio(pan!, sip, lumpsum),
     enabled: !!pan && pan !== 'SETUP',
-    staleTime: 1000 * 60 * 5, // 5 minutes
+    staleTime: 1000 * 60 * 10, // 10 minutes (matches server cache)
+    gcTime: 1000 * 60 * 15,    // 15 minutes (persist for quick back-navigation)
   });
 }

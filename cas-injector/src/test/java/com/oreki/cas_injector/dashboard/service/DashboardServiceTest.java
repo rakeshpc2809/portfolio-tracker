@@ -2,28 +2,29 @@ package com.oreki.cas_injector.dashboard.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 
 import java.util.Collections;
-import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
-import java.util.Optional;
-import java.util.Set;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.RowMapper;
 
 import com.oreki.cas_injector.backfill.repository.HistoricalNavRepository;
 import com.oreki.cas_injector.backfill.service.NavService;
-import com.oreki.cas_injector.convictionmetrics.dto.MarketMetrics;
 import com.oreki.cas_injector.convictionmetrics.repository.ConvictionMetricsRepository;
-import com.oreki.cas_injector.core.model.Investor;
 import com.oreki.cas_injector.core.repository.InvestorRepository;
 import com.oreki.cas_injector.dashboard.dto.DashboardSummaryDTO;
+import com.oreki.cas_injector.dashboard.model.PortfolioSummary;
 import com.oreki.cas_injector.transactions.repository.CapitalGainAuditRepository;
 import com.oreki.cas_injector.transactions.repository.TaxLotRepository;
 import com.oreki.cas_injector.transactions.repository.TransactionRepository;
@@ -39,13 +40,16 @@ public class DashboardServiceTest {
     @Mock private HistoricalNavRepository historicalNavRepo;
     @Mock private BenchmarkService benchmarkService;
     @Mock private ConvictionMetricsRepository metricsRepo;
+    @Mock private JdbcTemplate jdbcTemplate;
 
     @InjectMocks
     private DashboardService dashboardService;
 
     @Test
+    @SuppressWarnings("unchecked")
     public void testGetInvestorSummary_EmptyInvestor() {
-        when(investorRepo.findByPanWithDetails(anyString())).thenReturn(Optional.empty());
+        when(jdbcTemplate.query(anyString(), any(RowMapper.class), anyString()))
+            .thenReturn(Collections.emptyList());
 
         DashboardSummaryDTO summary = dashboardService.getInvestorSummary("NONEXISTENT");
 
@@ -55,13 +59,25 @@ public class DashboardServiceTest {
     }
 
     @Test
-    public void testGetInvestorSummary_WithMetrics() {
-        Investor investor = Investor.builder().pan("PAN123").name("Test Investor").folios(Set.of()).build();
-        when(investorRepo.findByPanWithDetails("PAN123")).thenReturn(Optional.of(investor));
+    @SuppressWarnings("unchecked")
+    public void testGetInvestorSummary_WithData() {
+        PortfolioSummary mockSummary = new PortfolioSummary();
+        mockSummary.setInvestorName("Test Investor");
+        mockSummary.setInvestorPan("PAN123");
+        mockSummary.setSchemeId(1L);
+        mockSummary.setAmfiCode("12345");
+        mockSummary.setTransactionDate(java.time.LocalDate.now());
+        mockSummary.setTransactionType("BUY");
+        mockSummary.setAmount(new java.math.BigDecimal("1000"));
+        mockSummary.setUnits(new java.math.BigDecimal("10"));
+
+        when(jdbcTemplate.query(anyString(), any(RowMapper.class), eq("PAN123")))
+            .thenReturn(List.of(mockSummary));
         
-        Map<String, MarketMetrics> metricsMap = new HashMap<>();
-        when(metricsRepo.fetchLiveMetricsMap("PAN123")).thenReturn(metricsMap);
+        when(metricsRepo.fetchLiveMetricsMap("PAN123")).thenReturn(Collections.emptyMap());
         when(auditRepo.findAllBySellTransactionSchemeFolioInvestorPan("PAN123")).thenReturn(Collections.emptyList());
+        when(taxLotRepo.findByStatusAndSchemeFolioInvestorPan("OPEN", "PAN123")).thenReturn(Collections.emptyList());
+        when(historicalNavRepo.findByAmfiCodeInAndNavDateIn(any(), any())).thenReturn(Collections.emptyList());
 
         DashboardSummaryDTO summary = dashboardService.getInvestorSummary("PAN123");
 

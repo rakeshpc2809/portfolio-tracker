@@ -63,35 +63,35 @@ public class CommonUtils {
             // Convert BigDecimal to double for the math
             double amount = tx.getAmount().doubleValue(); 
             long days = ChronoUnit.DAYS.between(txs.get(0).getDate(), tx.getDate());
+            // Use annualization: (1 + rate)^(days/365.25)
             npv += amount / Math.pow(1.0 + rate, days / 365.25);
         }
         return npv;
     }
 
-public static final Function<List<TransactionDTO>, BigDecimal> SOLVE_XIRR = txs -> {
+    public static final Function<List<TransactionDTO>, BigDecimal> SOLVE_XIRR = txs -> {
         if (txs == null || txs.size() < 2) return BigDecimal.ZERO;
 
         double rate = 0.1; // Initial guess 10%
         
-        for (int i = 0; i < 30; i++) { // Newton-Raphson iterations
+        // Phase 1: Newton-Raphson for fast convergence
+        for (int i = 0; i < 30; i++) {
             double epsilon = 0.0001;
             double npv = calculateNpv(rate, txs);
-            
-            // Numerical derivative (Newton's method)
             double derivative = (calculateNpv(rate + epsilon, txs) - npv) / epsilon;
             
-            // Prevent division by zero which causes NaN/Infinity
-            if (Math.abs(derivative) < 1e-7) {
-                break; 
-            }
-            
+            if (Math.abs(derivative) < 1e-7) break; 
             rate = rate - (npv / derivative);
         }
         
-        // SAFETY CHECK: Ensure the result is an actual number before converting to BigDecimal
-        if (!Double.isFinite(rate)) {
-            // log.warn("XIRR calculation failed to converge. Defaulting to 0.");
-            return BigDecimal.ZERO; 
+        // Phase 2: Robustness fallback (Bisection) for non-converged or extreme cases
+        if (!Double.isFinite(rate) || rate < -0.99 || rate > 10.0) { // Bound at 1000% return
+            double lo = -0.99, hi = 10.0;
+            for (int j = 0; j < 50; j++) {
+                double mid = (lo + hi) / 2.0;
+                if (calculateNpv(mid, txs) > 0) lo = mid; else hi = mid;
+            }
+            rate = (lo + hi) / 2.0;
         }
 
         return BigDecimal.valueOf(rate * 100);

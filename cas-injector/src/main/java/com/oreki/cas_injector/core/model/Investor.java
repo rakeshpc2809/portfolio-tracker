@@ -25,6 +25,9 @@ public class Investor {
     private String name;
     private String email;
 
+    @Builder.Default
+    private Double taxSlab = 0.30; // Default 30% slab
+
     // Mapping to multiple Folios
     @OneToMany(mappedBy = "investor", cascade = CascadeType.ALL, orphanRemoval = true)
     @ToString.Exclude // Prevents circular dependency in logs

@@ -20,9 +20,11 @@ import lombok.extern.slf4j.Slf4j;
 import java.util.Map;
 import java.util.List;
 
+import java.util.concurrent.Executor;
+import org.springframework.beans.factory.annotation.Qualifier;
+
 @RestController
 @RequestMapping("/admin")
-@RequiredArgsConstructor
 @Slf4j
 public class BackfillController {
 
@@ -32,20 +34,38 @@ public class BackfillController {
     private final CacheManager cacheManager;
     private final InvestorRepository investorRepository;
     private final com.oreki.cas_injector.core.service.MetricsSchedulerService metricsSchedulerService;
+    private final Executor taskExecutor;
+
+    public BackfillController(
+            HistoricalBackfillerService backfillerService,
+            QuantitativeEngineService quantitativeEngineService,
+            ConvictionScoringService convictionScoringService,
+            CacheManager cacheManager,
+            InvestorRepository investorRepository,
+            com.oreki.cas_injector.core.service.MetricsSchedulerService metricsSchedulerService,
+            @Qualifier("mathEngineExecutor") Executor taskExecutor) {
+        this.backfillerService = backfillerService;
+        this.quantitativeEngineService = quantitativeEngineService;
+        this.convictionScoringService = convictionScoringService;
+        this.cacheManager = cacheManager;
+        this.investorRepository = investorRepository;
+        this.metricsSchedulerService = metricsSchedulerService;
+        this.taskExecutor = taskExecutor;
+    }
 
     @PostMapping("/trigger-historical-backfill")
     public ResponseEntity<String> triggerBackfill() {
         if (backfillerService.getIsRunning().get()) {
             return ResponseEntity.badRequest().body("Backfill is already in progress.");
         }
-        new Thread(() -> backfillerService.executeOneShotBackfill()).start();
+        taskExecutor.execute(() -> backfillerService.executeOneShotBackfill());
         return ResponseEntity.ok("Historical backfill started.");
     }
 
     @PostMapping("/trigger-snapshot-backfill")
     public ResponseEntity<String> triggerSnapshotBackfill(@RequestParam String pan) {
         String cleanPan = pan.trim().toUpperCase();
-        new Thread(() -> metricsSchedulerService.backfillSnapshots(cleanPan)).start();
+        taskExecutor.execute(() -> metricsSchedulerService.backfillSnapshots(cleanPan));
         return ResponseEntity.ok("Retrospective snapshot backfill started for " + cleanPan);
     }
 
@@ -55,7 +75,7 @@ public class BackfillController {
             return ResponseEntity.badRequest().body("Engine sync is already in progress.");
         }
         
-        new Thread(() -> {
+        taskExecutor.execute(() -> {
             // Step 1: Run the global quant engine (market-wide metrics)
             quantitativeEngineService.runNightlyMathEngine();
             
@@ -81,7 +101,7 @@ public class BackfillController {
                 if (c != null) c.clear();
             });
             log.info("✅ Full sync complete for {} investors.", pansToScore.size());
-        }).start();
+        });
         
         return ResponseEntity.ok("Full sync started for " + 
             (pan != null ? pan : "all investors") + ".");

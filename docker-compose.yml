@@ -45,10 +45,10 @@ services:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/api/actuator/health"]
-      interval: 15s
+      interval: 20s
       timeout: 10s
-      retries: 5
-      start_period: 40s
+      retries: 10
+      start_period: 90s
 
   # 3. The Python Parser
   python-parser:
@@ -65,7 +65,10 @@ services:
 
   # 4. The React Frontend
   react-frontend:
-    build: ./portfolio-dashboard
+    build:
+      context: ./portfolio-dashboard
+      args:
+        - VITE_API_KEY=${PORTFOLIO_API_KEY:-dev-secret-key}
     container_name: cas_react_ui
     ports:
       - "80:80"

@@ -1,5 +1,6 @@
 package com.oreki.cas_injector.convictionmetrics.service;
 
+import java.util.List;
 import java.util.Map;
 
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -31,6 +32,7 @@ public class PythonQuantClient {
     ) {}
 
     public record QuantAnalyzeResponse(
+        String amfi_code,
         double hurst,
         double ou_half_life,
         boolean ou_valid,
@@ -39,6 +41,9 @@ public class PythonQuantClient {
         double bear_prob,
         double transition_to_bear
     ) {}
+
+    public record BatchAnalyzeRequest(List<QuantAnalyzeRequest> funds) {}
+    public record BatchAnalyzeResponse(List<QuantAnalyzeResponse> results) {}
 
     public QuantAnalyzeResponse analyze(String amfi, double[] navs, double[] returns) {
         try {
@@ -53,6 +58,23 @@ public class PythonQuantClient {
         } catch (Exception e) {
             log.warn("⚠️ Python Quant analysis failed for AMFI {}: {}", amfi, e.getMessage());
             return null;
+        }
+    }
+
+    public List<QuantAnalyzeResponse> analyzeBatch(List<QuantAnalyzeRequest> batch) {
+        try {
+            String url = casparserUrl + "/api/v1/quant/analyze-batch";
+            BatchAnalyzeRequest request = new BatchAnalyzeRequest(batch);
+
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_JSON);
+            HttpEntity<BatchAnalyzeRequest> entity = new HttpEntity<>(request, headers);
+
+            BatchAnalyzeResponse response = restTemplate.postForObject(url, entity, BatchAnalyzeResponse.class);
+            return response != null ? response.results() : List.of();
+        } catch (Exception e) {
+            log.error("❌ Batch Python Quant analysis failed: {}", e.getMessage());
+            return List.of();
         }
     }
 }

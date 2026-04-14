@@ -33,6 +33,11 @@ public class TaxSimulatorService {
 
         double unitsToSell = targetSellAmount / currentNav;
         
+        // Fetch investor's tax slab
+        Double investorSlab = jdbcTemplate.queryForObject(
+            "SELECT tax_slab FROM investor WHERE pan = ?", Double.class, investorPan);
+        double slabRate = (investorSlab != null) ? investorSlab : 0.30;
+
         String sql = """
                         SELECT
                             tl.id,
@@ -101,8 +106,7 @@ public class TaxSimulatorService {
             estimatedTax += Math.max(0, ltcgProfit) * EQUITY_LTCG_RATE;
         } else {
             // Post-April 2023: Debt gains are always slab-taxed regardless of holding period.
-            // We use 30% as the conservative upper bound — actual rate depends on investor's slab.
-            double slabRate = 0.30; 
+            // We use the investor's dynamic slab rate.
             estimatedTax += Math.max(0, stcgProfit) * slabRate;
         }
 
@@ -112,7 +116,7 @@ public class TaxSimulatorService {
         return new TaxSimulationResult(targetSellAmount, stcgProfit, ltcgProfit, estimatedTax, taxDragPercentage, isTaxLocked, !isEquity);
     }
 
-    public TaxSimulationResult simulateHifoExit(List<TaxLot> lots, String category) {
+    public TaxSimulationResult simulateHifoExit(List<TaxLot> lots, String category, double slabRate) {
         if (lots == null || lots.isEmpty()) {
             return new TaxSimulationResult(0, 0, 0, 0, 0, false, false);
         }
@@ -145,7 +149,7 @@ public class TaxSimulatorService {
             estimatedTax += Math.max(0, stcgProfit) * EQUITY_STCG_RATE;
             estimatedTax += Math.max(0, ltcgProfit) * EQUITY_LTCG_RATE;
         } else {
-            estimatedTax += Math.max(0, stcgProfit) * 0.30;
+            estimatedTax += Math.max(0, stcgProfit) * slabRate;
         }
 
         double taxDrag = totalValue > 0 ? estimatedTax / totalValue : 0;

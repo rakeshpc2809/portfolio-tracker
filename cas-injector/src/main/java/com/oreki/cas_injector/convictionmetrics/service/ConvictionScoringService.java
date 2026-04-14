@@ -42,6 +42,10 @@ public class ConvictionScoringService {
     public void calculateAndSaveFinalScores(String investorPan) {
         log.info("🚀 [1/3] Starting Conviction Scoring for PAN: {}", investorPan);
 
+        Double slab = convictionMetricsRepository.getJdbcTemplate().queryForObject(
+            "SELECT tax_slab FROM investor WHERE pan = ?", Double.class, investorPan);
+        double slabRate = (slab != null) ? slab : 0.30;
+
         List<TaxLot> allLots = taxLotRepository.findByStatusAndSchemeFolioInvestorPan("OPEN", investorPan);
         log.info("📦 Found {} total open lots for PAN: {}", allLots.size(), investorPan);
         
@@ -49,7 +53,7 @@ public class ConvictionScoringService {
                 .collect(Collectors.groupingBy(lot -> CommonUtils.SANITIZE_AMFI.apply(lot.getScheme().getAmfiCode())));
         log.info("📦 Grouped into {} unique AMFI codes from tax lots.", lotsByAmfi.size());
 
-        List<Map<String, Object>> metrics = convictionMetricsRepository.findAllMap();
+        List<Map<String, Object>> metrics = convictionMetricsRepository.findMetricsForInvestor(investorPan);
         log.info("📊 [2/3] Found {} funds in fund_conviction_metrics to score.", metrics.size());
 
         // We want to normalize the yieldScore relative to the portfolio's own max CAGR to make it a 0-100 scale
@@ -59,7 +63,7 @@ public class ConvictionScoringService {
                 return calculatePersonalCagr(lotsByAmfi.get(amfi));
             }).max().orElse(35.0);
 
-        log.info("🎯 Dynamic Yield Upper Bound set to {:.2f}%", maxCagrFound);
+        log.info("🎯 Dynamic Yield Upper Bound set to {}%", String.format("%.2f", maxCagrFound));
 
         for (Map<String, Object> fund : metrics) {
             String amfi = CommonUtils.SANITIZE_AMFI.apply((String) fund.get("amfi_code"));
@@ -72,17 +76,18 @@ public class ConvictionScoringService {
             double cagr = calculatePersonalCagr(fundLots);
             double yieldScore = Math.max(0, Math.min(100, (cagr / maxCagrFound) * 100));
             log.info("  ├─ Found {} lots for this fund.", fundLots.size());
-            log.info("  ├─ CAGR: {:.2f}%", cagr);
+            log.info("  ├─ CAGR: {}%", String.format("%.2f", cagr));
 
             // 2. RISK SCORE (Sortino Ratio)
             // Normalizing Sortino: 0 is poor, 2.0 is excellent.
             double sortino = (double) fund.getOrDefault("sortino_ratio", 0.0);
             double riskScore = Math.max(0, Math.min(100, (sortino / 2.0) * 100));
 
-            // 3. VALUE SCORE (NAV Percentile + ATH Distance)
-            // We want high score when NAV is low (cheap)
-            double navPct = (double) fund.getOrDefault("nav_percentile_3yr", 0.5);
-            double valueScore = (1.0 - navPct) * 100;
+            // 3. VALUE SCORE (Z-Score based cheapness)
+            // z < -2 = cheap, z > +2 = expensive
+            double zScore = (double) fund.getOrDefault("rolling_z_score_252", 0.0);
+            double valueScore = Math.max(0, Math.min(100, 50 - (zScore * 20))); // z=-2 -> 90, z=0 -> 50, z=+2 -> 10
+            log.info("  ├─ Z-Score: {} (Value: {})", String.format("%.2f", zScore), String.format("%.0f", valueScore));
 
             // 4. PAIN SCORE (Max Drawdown)
             // Low drawdown = High score (less pain)
@@ -93,7 +98,7 @@ public class ConvictionScoringService {
             // Simulate exit friction
             String amfiCode = CommonUtils.SANITIZE_AMFI.apply((String) fund.get("amfi_code"));
             String category = navService.getLatestSchemeDetails(amfiCode).getCategory();
-            TaxSimulationResult taxResult = taxSimulator.simulateHifoExit(fundLots, category);
+            TaxSimulationResult taxResult = taxSimulator.simulateHifoExit(fundLots, category, slabRate);
             
             double taxPctOfValue = (taxResult.sellAmount() > 0) 
                 ? (taxResult.estimatedTax() / taxResult.sellAmount()) * 100 
@@ -101,7 +106,7 @@ public class ConvictionScoringService {
             
             // Score is 100 if tax is 0%, 0 if tax is 15% of total value
             double frictionScore = Math.max(0, 100 - (taxPctOfValue * 6.66));
-            log.info("  ├─ Tax Drag: {:.2f}%", taxPctOfValue);
+            log.info("  ├─ Tax Drag: {}%", String.format("%.2f", taxPctOfValue));
 
             // --- FINAL CALCULATION ---
             double finalScore = (yieldScore * WEIGHT_YIELD) +

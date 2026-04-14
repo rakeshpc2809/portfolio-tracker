@@ -2,7 +2,7 @@ import { normalizeCategory } from '../utils/formatters';
 
 const BASE_URL = '/api';
 const PARSER_URL = '/parser';
-const API_KEY = 'dev-secret-key'; 
+const API_KEY = (import.meta.env.VITE_API_KEY as string) || 'dev-secret-key';
 
 const authenticatedFetch = (url: string, options: RequestInit = {}) => {
   return fetch(url, {

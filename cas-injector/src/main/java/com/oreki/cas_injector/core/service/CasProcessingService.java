@@ -12,7 +12,6 @@ import java.util.stream.Collectors;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
 
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.BatchPreparedStatementSetter;
 import org.springframework.stereotype.Service;
@@ -32,7 +31,9 @@ import com.oreki.cas_injector.taxmanagement.service.FifoInventoryService;
 import com.oreki.cas_injector.transactions.model.Transaction;
 import com.oreki.cas_injector.transactions.repository.TransactionRepository;
 
-import jakarta.transaction.Transactional;
+import org.springframework.transaction.annotation.Transactional;
+
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import com.fasterxml.jackson.databind.JsonNode;
 
@@ -42,19 +43,20 @@ import org.springframework.scheduling.annotation.Async;
 
 @Service
 @Slf4j
+@RequiredArgsConstructor
 public class CasProcessingService {
 
-    @Autowired private InvestorRepository investorRepo;
-    @Autowired private TransactionRepository txnRepo;
-    @Autowired private SchemeRepository schemeRepo;
-    @Autowired private FolioRepository folioRepo;
-    @Autowired private NavService navService;
-    @Autowired private CacheManager cacheManager;
-    @Autowired private FifoInventoryService fifoService;
-    @Autowired private QuantitativeEngineService quantitativeEngineService;
-    @Autowired private ConvictionScoringService convictionScoringService;
-    @Autowired private JdbcTemplate jdbcTemplate;
-    @Autowired private PortfolioSummaryRepository summaryRepo;
+    private final InvestorRepository investorRepo;
+    private final TransactionRepository txnRepo;
+    private final SchemeRepository schemeRepo;
+    private final FolioRepository folioRepo;
+    private final NavService navService;
+    private final CacheManager cacheManager;
+    private final FifoInventoryService fifoService;
+    private final QuantitativeEngineService quantitativeEngineService;
+    private final ConvictionScoringService convictionScoringService;
+    private final JdbcTemplate jdbcTemplate;
+    private final PortfolioSummaryRepository summaryRepo;
 
     @Transactional
     public void processJson(JsonNode root) {

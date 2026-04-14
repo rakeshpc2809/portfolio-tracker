@@ -28,4 +28,26 @@ public interface TransactionRepository extends JpaRepository<Transaction, Long>,
            "WHERE t.scheme.folio.investor.pan = :pan " +
            "AND UPPER(t.transactionType) != 'STAMP_DUTY'")
     long countActualTransactionsByPan(@Param("pan") String pan);
+
+    @Query(value = "SELECT * FROM \"transaction\" t " +
+           "WHERE t.scheme_id IN (" +
+           "  SELECT s.id FROM scheme s " +
+           "  JOIN folio f ON s.folio_id = f.id " +
+           "  WHERE LTRIM(s.amfi_code, '0') = LTRIM(:amfiCode, '0') " +
+           "  AND f.investor_pan = :pan" +
+           ") " +
+           "AND t.transaction_type = 'BUY' " +
+           "ORDER BY t.transaction_date DESC LIMIT 1", nativeQuery = true)
+    java.util.Optional<Transaction> findLatestBuyBySchemeAmfiCodeAndPan(@Param("amfiCode") String amfiCode, @Param("pan") String pan);
+
+    @Query(value = "SELECT * FROM \"transaction\" t " +
+           "WHERE t.scheme_id IN (" +
+           "  SELECT s.id FROM scheme s " +
+           "  JOIN folio f ON s.folio_id = f.id " +
+           "  WHERE LTRIM(s.amfi_code, '0') = LTRIM(:amfiCode, '0') " +
+           "  AND f.investor_pan = :pan" +
+           ") " +
+           "AND t.transaction_type = 'SELL' " +
+           "ORDER BY t.transaction_date DESC LIMIT 1", nativeQuery = true)
+    java.util.Optional<Transaction> findLatestSellBySchemeAmfiCodeAndPan(@Param("amfiCode") String amfiCode, @Param("pan") String pan);
 }

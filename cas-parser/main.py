@@ -51,6 +51,7 @@ class QuantAnalyzeRequest(BaseModel):
     returns: List[float]
 
 class QuantAnalyzeResponse(BaseModel):
+    amfi_code: str
     hurst: float
     ou_half_life: float
     ou_valid: bool
@@ -58,6 +59,12 @@ class QuantAnalyzeResponse(BaseModel):
     bull_prob: float
     bear_prob: float
     transition_to_bear: float
+
+class BatchAnalyzeRequest(BaseModel):
+    funds: List[QuantAnalyzeRequest]
+
+class BatchAnalyzeResponse(BaseModel):
+    results: List[QuantAnalyzeResponse]
 
 # --- 2. QUANT LOGIC ---
 
@@ -160,6 +167,7 @@ async def analyze_quant(req: QuantAnalyzeRequest):
         states, bull, bear, trans = calculate_hmm_regimes(req.returns)
         
         return {
+            "amfi_code": req.amfi_code,
             "hurst": hurst,
             "ou_half_life": ou["half_life"],
             "ou_valid": ou["valid"],
@@ -171,6 +179,31 @@ async def analyze_quant(req: QuantAnalyzeRequest):
     except Exception as e:
         logger.error(f"Quant analysis failed for {req.amfi_code}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/v1/quant/analyze-batch", response_model=BatchAnalyzeResponse)
+async def analyze_batch_quant(req: BatchAnalyzeRequest):
+    results = []
+    for fund in req.funds:
+        try:
+            hurst = calculate_hurst_vectorized(fund.returns)
+            ou = calculate_ou_params_vectorized(fund.navs)
+            states, bull, bear, trans = calculate_hmm_regimes(fund.returns)
+            
+            results.append({
+                "amfi_code": fund.amfi_code,
+                "hurst": hurst,
+                "ou_half_life": ou["half_life"],
+                "ou_valid": ou["valid"],
+                "hmm_state": states[-1],
+                "bull_prob": bull,
+                "bear_prob": bear,
+                "transition_to_bear": trans
+            })
+        except Exception as e:
+            logger.error(f"Quant analysis failed for {fund.amfi_code} in batch: {e}")
+            # We continue with other funds if one fails
+    
+    return {"results": results}
 
 @app.post("/api/scraper/sync-market")
 async def sync_market_data():

@@ -24,7 +24,6 @@ public class NavService {
     private final JdbcTemplate jdbcTemplate;
     private final Map<String, SchemeDetailsDTO> navCache = new ConcurrentHashMap<>();
 
-    @PostConstruct
     public void init() {
         log.info("🚀 Warm-booting NAV Cache from database...");
         refreshCache();
