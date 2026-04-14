@@ -15,6 +15,7 @@ public record MarketMetrics(
     double drawdownFromAth,
     double returnZScore,          // Legacy point-in-time Z-Score
     LocalDate lastBuyDate,
+    LocalDate lastSellDate,       // Added for informative warnings
 
     // ── NEW fields (default to safe neutrals if not yet computed) ───────────
     double rollingZScore252,      // Rolling 252-day Z-Score (primary trigger)
@@ -49,7 +50,7 @@ public record MarketMetrics(
     ) {
         return new MarketMetrics(
             convictionScore, sortinoRatio, cvar5, winRate, maxDrawdown,
-            navPercentile3yr, drawdownFromAth, returnZScore, lastBuyDate,
+            navPercentile3yr, drawdownFromAth, returnZScore, lastBuyDate, null,
             returnZScore,   // rollingZScore252: fall back to legacy z-score until first engine run
             0.5,            // hurstExponent: neutral
             0.0,            // volatilityTax
@@ -76,6 +77,7 @@ public record MarketMetrics(
                 getSafeDouble(r.get("drawdown_from_ath")),
                 getSafeDouble(r.get("return_z_score")),
                 getSafeDate(r.get("last_buy")),
+                getSafeDate(r.get("last_sell")),
                 getSafeDouble(r.get("rolling_z_score_252")),
                 getSafeDouble(r.get("hurst_exponent")),
                 getSafeDouble(r.get("volatility_tax")),

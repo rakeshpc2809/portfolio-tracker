@@ -158,7 +158,14 @@ public class ConvictionMetricsRepository {
                     JOIN folio f2 ON s2.folio_id = f2.id
                     WHERE LTRIM(s2.amfi_code, '0') = LTRIM(m.amfi_code, '0') 
                     AND f2.investor_pan = ? 
-                    AND t.transaction_type = 'BUY') as last_buy
+                    AND t.transaction_type = 'BUY') as last_buy,
+                   (SELECT MAX(t.transaction_date) 
+                    FROM "transaction" t 
+                    JOIN scheme s2 ON t.scheme_id = s2.id 
+                    JOIN folio f2 ON s2.folio_id = f2.id
+                    WHERE LTRIM(s2.amfi_code, '0') = LTRIM(m.amfi_code, '0') 
+                    AND f2.investor_pan = ? 
+                    AND t.transaction_type = 'SELL') as last_sell
             FROM fund_conviction_metrics m
             WHERE m.calculation_date = (SELECT MAX(calculation_date) FROM fund_conviction_metrics)
             AND LTRIM(m.amfi_code, '0') IN (""";
@@ -171,9 +178,12 @@ public class ConvictionMetricsRepository {
         }
         metricsSql += inClause.toString() + ")";
 
-        Object[] params = new Object[heldAmfis.size() + 1];
-        params[0] = pan;
-        for (int i = 0; i < heldAmfis.size(); i++) params[i+1] = heldAmfis.get(i);
+        Object[] params = new Object[heldAmfis.size() + 2];
+        params[0] = pan; // for last_buy subquery
+        params[1] = pan; // for last_sell subquery
+        for (int i = 0; i < heldAmfis.size(); i++) {
+            params[i + 2] = heldAmfis.get(i);
+        }
 
         List<Map<String, Object>> rows = jdbcTemplate.queryForList(metricsSql, params);
         Map<String, MarketMetrics> foundMetrics = MarketMetrics.fromRows(rows);

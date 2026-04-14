@@ -58,6 +58,7 @@ public class PortfolioOrchestrator {
     private final SystemicRiskMonitorService riskMonitor;
     private final TaxLossHarvestingService taxLossHarvestingService;
     private final com.oreki.cas_injector.transactions.repository.TransactionRepository txnRepo;
+    private final RebalanceEngine rebalanceEngine;
 
     @Value("${hrp.blend.ratio:0.5}")
     private double hrpBlendRatio;
@@ -70,6 +71,9 @@ public class PortfolioOrchestrator {
         List<TaxLot> openLots = taxLotRepository.findByStatusAndSchemeFolioInvestorPan("OPEN", pan);
         List<AggregatedHolding> holdings = aggregationService.aggregate(openLots);
         
+        Map<String, AggregatedHolding> holdingsByIsin = holdings.stream()
+            .collect(Collectors.toMap(AggregatedHolding::getIsin, h -> h));
+
         // Map ISIN to AMFI Code and Name to ISIN from pre-fetched lots
         Map<String, String> isinToAmfiMap = openLots.stream()
             .collect(Collectors.toMap(
@@ -87,11 +91,14 @@ public class PortfolioOrchestrator {
 
         List<SipLineItem> plan = new ArrayList<>();
         for (StrategyTarget target : targets) {
+            // HARD CONSTRAINT: Skip DROPPED or EXIT status funds
+            if ("DROPPED".equalsIgnoreCase(target.status()) || "EXIT".equalsIgnoreCase(target.status())) {
+                continue;
+            }
+
             String isin = target.isin();
-            // Try to get AMFI from held lots first
             String amfi = isinToAmfiMap.getOrDefault(isin, "");
             
-            // If not held, we might need a DB lookup, but only once per target fund
             if (amfi.isEmpty()) {
                 amfi = schemeRepository.findByIsin(isin)
                     .map(s -> CommonUtils.SANITIZE_AMFI.apply(s.getAmfiCode()))
@@ -99,26 +106,20 @@ public class PortfolioOrchestrator {
             }
             
             double targetPct = target.targetPortfolioPct();
-            
-            // Re-weight if HRP is active
             if (!amfi.isEmpty() && hrpWeights.containsKey(amfi)) {
                 double hrpW = hrpWeights.get(amfi);
                 targetPct = (targetPct * (1 - hrpBlendRatio)) + (hrpW * 100 * hrpBlendRatio);
             }
 
-            double currentVal = holdings.stream()
-                .filter(h -> h.getIsin().equals(isin))
-                .mapToDouble(AggregatedHolding::getCurrentValue)
-                .sum();
+            AggregatedHolding h = holdingsByIsin.get(isin);
+            double currentVal = (h != null) ? h.getCurrentValue() : 0.0;
 
-            // CONCENTRATION GUARD: Cap target at 30% of portfolio
             double cappedTargetPct = Math.min(targetPct, MAX_SINGLE_FUND_CONCENTRATION * 100);
             double targetValue = (cappedTargetPct / 100.0) * (totalValue + monthlySip);
 
             double gap = targetValue - currentVal;
             double sipAllocation = Math.max(0, Math.min(monthlySip, gap));
 
-            // Informative metadata about last transactions
             StringBuilder infoNote = new StringBuilder();
             if (!amfi.isEmpty()) {
                 txnRepo.findLatestBuyBySchemeAmfiCodeAndPan(amfi, pan)
@@ -146,7 +147,6 @@ public class PortfolioOrchestrator {
     }
 
     public List<TacticalSignal> generateDailySignals(String pan, double monthlySip, double lumpsum) {
-        // Logic to combine all tactical signals
         List<TacticalSignal> all = new ArrayList<>();
         all.addAll(computeOpportunisticSignals(pan, lumpsum));
         all.addAll(computeActiveSellSignals(pan));
@@ -155,126 +155,66 @@ public class PortfolioOrchestrator {
     }
 
     public List<TacticalSignal> computeOpportunisticSignals(String pan, double lumpsum) {
-        log.info("🔍 Computing opportunistic buy signals for PAN: {} with Lumpsum: ₹{}", pan, lumpsum);
-        Map<String, MarketMetrics> metricsMap = metricsRepo.fetchLiveMetricsMap(pan);
-        
-        List<TacticalSignal> signals = new ArrayList<>();
-        
-        // 1. Identify funds with statistically significant discounts (Z-Score < -1.5)
-        metricsMap.forEach((amfi, m) -> {
-            if (m.rollingZScore252() < -1.5) {
-                Scheme scheme = schemeRepository.findFirstByAmfiCode(amfi).orElse(null);
-                if (scheme == null) return;
-
-                String regime = m.hurstExponent() < 0.45 ? "MEAN_REVERTING" : (m.hurstExponent() > 0.55 ? "TRENDING" : "RANDOM_WALK");
-                
-                // If Mean Reverting and cheap, it's a strong buy
-                SignalType action = (regime.equals("MEAN_REVERTING") || m.rollingZScore252() < -2.0) ? SignalType.BUY : SignalType.WATCH;
-                
-                List<String> justs = new ArrayList<>();
-                justs.add("Statistical discount (z=" + String.format("%.2f", m.rollingZScore252()) + ") in " + regime + " regime.");
-                txnRepo.findLatestBuyBySchemeAmfiCodeAndPan(amfi, pan).ifPresent(t -> justs.add("Last buy: " + t.getDate()));
-                txnRepo.findLatestSellBySchemeAmfiCodeAndPan(amfi, pan).ifPresent(t -> justs.add("Last sell: " + t.getDate()));
-
-                signals.add(TacticalSignal.builder()
-                    .schemeName(scheme.getName())
-                    .amfiCode(amfi)
-                    .action(action)
-                    .returnZScore(m.rollingZScore252())
-                    .hurst20d(m.hurstExponent())
-                    .multiScaleRegime(regime)
-                    .convictionScore(m.convictionScore())
-                    .amount(lumpsum > 0 ? String.format("%.2f", lumpsum / 3.0) : "0")
-                    .justifications(justs)
-                    .build());
-            }
-        });
-
-        return signals.stream()
-            .sorted(Comparator.comparing(TacticalSignal::returnZScore)) // Cheapest first
+        return evaluateAll(pan).stream()
+            .filter(s -> s.action() == SignalType.BUY || (s.action() == SignalType.WATCH && "ACCUMULATOR".equals(s.fundStatus())))
+            .sorted(Comparator.comparing(TacticalSignal::returnZScore))
             .collect(Collectors.toList());
     }
 
     public List<TacticalSignal> computeActiveSellSignals(String pan) {
-        log.info("🔍 Computing active rebalance sell signals for PAN: {}", pan);
-        Map<String, MarketMetrics> metricsMap = metricsRepo.fetchLiveMetricsMap(pan);
-        List<TacticalSignal> signals = new ArrayList<>();
-
-        metricsMap.forEach((amfi, m) -> {
-            // High Z-Score + Bear Regime + Hurst Trending Down
-            if (m.rollingZScore252() > 2.0 && "VOLATILE_BEAR".equals(m.hmmState())) {
-                Scheme scheme = schemeRepository.findFirstByAmfiCode(amfi).orElse(null);
-                if (scheme == null) return;
-
-                List<String> justs = new ArrayList<>();
-                justs.add("Position overheated (z=" + String.format("%.2f", m.rollingZScore252()) + ") during " + m.hmmState() + " regime.");
-                txnRepo.findLatestBuyBySchemeAmfiCodeAndPan(amfi, pan).ifPresent(t -> justs.add("Last buy: " + t.getDate()));
-                txnRepo.findLatestSellBySchemeAmfiCodeAndPan(amfi, pan).ifPresent(t -> justs.add("Last sell: " + t.getDate()));
-
-                signals.add(TacticalSignal.builder()
-                    .schemeName(scheme.getName())
-                    .amfiCode(amfi)
-                    .action(SignalType.SELL)
-                    .returnZScore(m.rollingZScore252())
-                    .justifications(justs)
-                    .build());
-            }
-        });
-
-        return signals;
+        return evaluateAll(pan).stream()
+            .filter(s -> s.action() == SignalType.SELL && !"DROPPED".equals(s.fundStatus()))
+            .collect(Collectors.toList());
     }
 
     public List<TacticalSignal> computeExitQueue(String pan) {
-        log.info("🔍 Computing Exit Queue for PAN: {}", pan);
+        return evaluateAll(pan).stream()
+            .filter(s -> "DROPPED".equals(s.fundStatus()) || "EXIT".equals(s.fundStatus()) || s.action() == SignalType.EXIT)
+            .collect(Collectors.toList());
+    }
+
+    private List<TacticalSignal> evaluateAll(String pan) {
         List<TaxLot> openLots = taxLotRepository.findByStatusAndSchemeFolioInvestorPan("OPEN", pan);
         List<AggregatedHolding> holdings = aggregationService.aggregate(openLots);
+        Map<String, MarketMetrics> metricsMap = metricsRepo.fetchLiveMetricsMap(pan);
         List<StrategyTarget> targets = strategyService.fetchLatestStrategy();
-        
-        Set<String> strategyIsins = targets.stream()
-            .map(StrategyTarget::isin)
-            .collect(Collectors.toSet());
+        double totalValue = holdings.stream().mapToDouble(AggregatedHolding::getCurrentValue).sum();
 
-        // Map ISIN to AMFI Code from pre-fetched lots
-        Map<String, String> isinToAmfiMap = openLots.stream()
-            .collect(Collectors.toMap(
-                l -> l.getScheme().getIsin(),
-                l -> CommonUtils.SANITIZE_AMFI.apply(l.getScheme().getAmfiCode()),
-                (a, b) -> a));
+        Map<String, String> nameToAmfiMap = holdings.stream()
+            .collect(Collectors.toMap(AggregatedHolding::getSchemeName, h -> {
+                Scheme s = schemeRepository.findByName(h.getSchemeName()).orElse(null);
+                return (s != null) ? CommonUtils.SANITIZE_AMFI.apply(s.getAmfiCode()) : "";
+            }, (a, b) -> a));
 
-        List<TacticalSignal> exitSignals = new ArrayList<>();
+        Map<String, StrategyTarget> targetByIsin = targets.stream()
+            .collect(Collectors.toMap(StrategyTarget::isin, t -> t, (a, b) -> a));
 
-        // 1. Identify funds held but NOT in strategy
+        List<TacticalSignal> results = new ArrayList<>();
+
+        // Process existing holdings
         for (AggregatedHolding h : holdings) {
-            if (!strategyIsins.contains(h.getIsin())) {
-                exitSignals.add(TacticalSignal.builder()
-                    .schemeName(h.getSchemeName())
-                    .amfiCode(isinToAmfiMap.getOrDefault(h.getIsin(), ""))
-                    .action(SignalType.EXIT)
-                    .amount(String.format("%.2f", h.getCurrentValue()))
-                    .justifications(List.of("Asset not present in current investment strategy."))
-                    .build());
+            StrategyTarget t = targetByIsin.get(h.getIsin());
+            if (t == null) {
+                // If held but not in strategy, treat as DROPPED
+                t = new StrategyTarget(h.getIsin(), h.getSchemeName(), 0.0, 0.0, "DROPPED", "OTHERS");
+            }
+            String amfi = nameToAmfiMap.get(h.getSchemeName());
+            MarketMetrics m = metricsMap.getOrDefault(amfi, MarketMetrics.fromLegacy(50, 0, 0, 0, 0, 0.5, 0, 0, LocalDate.of(1970, 1, 1)));
+            
+            results.add(rebalanceEngine.evaluate(h, t, m, totalValue, amfi, holdings, nameToAmfiMap, t.targetPortfolioPct()));
+        }
+
+        // Process new entries (target > 0 but not held)
+        Set<String> heldIsins = holdings.stream().map(AggregatedHolding::getIsin).collect(Collectors.toSet());
+        for (StrategyTarget t : targets) {
+            if (!heldIsins.contains(t.isin()) && t.targetPortfolioPct() > 0) {
+                AggregatedHolding emptyH = new AggregatedHolding(t.schemeName(), 0, 0, 0, 0, 0, 0, 0, 0, 0, "UNKNOWN", "NEW_ENTRY", t.isin(), 0.0);
+                String amfi = schemeRepository.findByIsin(t.isin()).map(s -> CommonUtils.SANITIZE_AMFI.apply(s.getAmfiCode())).orElse("");
+                MarketMetrics m = metricsMap.getOrDefault(amfi, MarketMetrics.fromLegacy(50, 0, 0, 0, 0, 0.5, 0, 0, LocalDate.of(1970, 1, 1)));
+                results.add(rebalanceEngine.evaluate(emptyH, t, m, totalValue, amfi, holdings, nameToAmfiMap, t.targetPortfolioPct()));
             }
         }
 
-        // 2. Identify funds in strategy marked as DROPPED
-        Map<String, AggregatedHolding> holdingsByIsin = holdings.stream()
-            .collect(Collectors.toMap(AggregatedHolding::getIsin, h -> h));
-
-        for (StrategyTarget target : targets) {
-            if ("DROPPED".equalsIgnoreCase(target.status()) || "EXIT".equalsIgnoreCase(target.status())) {
-                AggregatedHolding h = holdingsByIsin.get(target.isin());
-                if (h != null) {
-                    exitSignals.add(TacticalSignal.builder()
-                        .schemeName(target.schemeName())
-                        .amfiCode(isinToAmfiMap.getOrDefault(target.isin(), ""))
-                        .action(SignalType.EXIT)
-                        .amount(String.format("%.2f", h.getCurrentValue()))
-                        .justifications(List.of("Strategy explicitly marked this fund for liquidation."))
-                        .build());
-                }
-            }
-        }
-
-        return exitSignals;
+        return results;
     }
 }
