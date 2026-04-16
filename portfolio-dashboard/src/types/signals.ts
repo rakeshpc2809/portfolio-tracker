@@ -69,3 +69,47 @@ export interface TacticalSignal {
   ouSellThreshold:     number;
   hrpOverrideActive:   boolean;
 }
+
+export interface RebalancingTrade {
+  sellFundName: string;
+  sellAmfiCode: string;
+  sellAmount: number;
+  estimatedSellTax: number;
+  netProceeds: number;
+  sellReason: string;
+  buyFundName: string;
+  buyAmfiCode: string;
+  buyAmount: number;
+  buyReason: string;
+  convictionDelta: number;
+  zScoreDelta: number;
+  tradeRationale: string;
+}
+
+export interface DroppedFundSummary {
+  schemeName: string;
+  amfiCode: string;
+  currentValue: number;
+  ltcgGains: number;
+  stcgGains: number;
+  daysToNextLtcg: number;
+  taxIfExitNow: number;
+  taxIfWaitForLtcg: number;
+  taxSavingByWaiting: number;
+  recommendedAction: string;
+  exitDateSuggestion: string;
+  reason: string;
+}
+
+export interface ExitScheduleItem {
+  schemeName: string;
+  currentValue: number;
+  ltcgGains: number;
+  stcgGains: number;
+  daysToLtcgConversion: number;
+  suggestedFY: string;
+  taxIfThisFY: number;
+  taxIfNextFY: number;
+  saving: number;
+  reason: string;
+}

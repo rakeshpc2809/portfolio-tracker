@@ -149,9 +149,10 @@ public class ConvictionMetricsRepository {
         Map<String, MarketMetrics> resultMap = new HashMap<>();
         if (heldAmfis.isEmpty()) return resultMap;
 
-        // 2. Fetch latest metrics from FCM
+        // 2. Fetch latest metrics from FCM using DISTINCT ON for per-fund freshness
         String metricsSql = """
-            SELECT m.*, 
+            SELECT DISTINCT ON (LTRIM(m.amfi_code, '0')) 
+                   m.*, 
                    (SELECT MAX(t.transaction_date) 
                     FROM "transaction" t 
                     JOIN scheme s2 ON t.scheme_id = s2.id 
@@ -167,8 +168,7 @@ public class ConvictionMetricsRepository {
                     AND f2.investor_pan = ? 
                     AND t.transaction_type = 'SELL') as last_sell
             FROM fund_conviction_metrics m
-            WHERE m.calculation_date = (SELECT MAX(calculation_date) FROM fund_conviction_metrics)
-            AND LTRIM(m.amfi_code, '0') IN (""";
+            WHERE LTRIM(m.amfi_code, '0') IN (""";
         
         // Build IN clause
         StringBuilder inClause = new StringBuilder();
@@ -176,7 +176,7 @@ public class ConvictionMetricsRepository {
             inClause.append("?");
             if (i < heldAmfis.size() - 1) inClause.append(",");
         }
-        metricsSql += inClause.toString() + ")";
+        metricsSql += inClause.toString() + ") ORDER BY LTRIM(m.amfi_code, '0'), m.calculation_date DESC";
 
         Object[] params = new Object[heldAmfis.size() + 2];
         params[0] = pan; // for last_buy subquery
@@ -188,13 +188,12 @@ public class ConvictionMetricsRepository {
         List<Map<String, Object>> rows = jdbcTemplate.queryForList(metricsSql, params);
         Map<String, MarketMetrics> foundMetrics = MarketMetrics.fromRows(rows);
 
-        // 3. Fill map, providing defaults for funds with no metrics yet
+        // 3. Fill map
         for (String amfi : heldAmfis) {
             String cleanAmfi = CommonUtils.SANITIZE_AMFI.apply(amfi);
             if (foundMetrics.containsKey(cleanAmfi)) {
                 resultMap.put(cleanAmfi, foundMetrics.get(cleanAmfi));
             } else {
-                // Return neutral defaults so engine doesn't crash or skip
                 resultMap.put(cleanAmfi, MarketMetrics.fromLegacy(50, 0, 0, 0, 0, 0.5, 0, 0, LocalDate.of(1970, 1, 1)));
             }
         }
@@ -204,19 +203,24 @@ public class ConvictionMetricsRepository {
 
     public List<Map<String, Object>> findMetricsForInvestor(String investorPan) {
         String sql = """
-            SELECT m.* FROM fund_conviction_metrics m
+            SELECT DISTINCT ON (LTRIM(m.amfi_code, '0')) m.* 
+            FROM fund_conviction_metrics m
             WHERE LTRIM(m.amfi_code, '0') IN (
                 SELECT LTRIM(s.amfi_code, '0') FROM scheme s
                 JOIN folio f ON s.folio_id = f.id
                 WHERE f.investor_pan = ?
             )
-            AND m.calculation_date = (SELECT MAX(calculation_date) FROM fund_conviction_metrics)
+            ORDER BY LTRIM(m.amfi_code, '0'), m.calculation_date DESC
             """;
         return jdbcTemplate.queryForList(sql, investorPan);
     }
 
     public List<Map<String, Object>> findAllMap() {
-        String sql = "SELECT * FROM fund_conviction_metrics WHERE calculation_date = (SELECT MAX(calculation_date) FROM fund_conviction_metrics)";
+        String sql = """
+            SELECT DISTINCT ON (amfi_code) * 
+            FROM fund_conviction_metrics 
+            ORDER BY amfi_code, calculation_date DESC
+            """;
         return jdbcTemplate.queryForList(sql);
     }
 
@@ -230,8 +234,8 @@ public class ConvictionMetricsRepository {
                 pain_score = ?,
                 friction_score = ?
             WHERE LTRIM(amfi_code, '0') = LTRIM(?, '0')
-            AND calculation_date = (SELECT MAX(calculation_date) FROM fund_conviction_metrics)
-            """, total, yield, risk, value, pain, friction, amfi);
+            AND calculation_date = (SELECT MAX(calculation_date) FROM fund_conviction_metrics WHERE LTRIM(amfi_code, '0') = LTRIM(?, '0'))
+            """, total, yield, risk, value, pain, friction, amfi, amfi);
     }
 
     public int runNightlyMathEngine() {
@@ -309,14 +313,7 @@ public class ConvictionMetricsRepository {
                 sortino_ratio = EXCLUDED.sortino_ratio,
                 cvar_5 = EXCLUDED.cvar_5,
                 win_rate = EXCLUDED.win_rate,
-                max_drawdown = EXCLUDED.max_drawdown,
-                conviction_score = 50,
-                composite_quant_score = 50,
-                yield_score = 50.0,
-                risk_score = 50.0,
-                value_score = 50.0,
-                pain_score = 50.0,
-                friction_score = 50.0;
+                max_drawdown = EXCLUDED.max_drawdown;
             """;
         return jdbcTemplate.update(sql);
     }
@@ -446,7 +443,7 @@ public class ConvictionMetricsRepository {
 
     public List<Map<String, Object>> findLatestMetricsByPan(String pan) {
         String sql = """
-            SELECT 
+            SELECT DISTINCT ON (m.amfi_code)
                 s.name as "schemeName",
                 m.amfi_code as "amfiCode",
                 m.sortino_ratio as "sortinoRatio",
@@ -459,7 +456,7 @@ public class ConvictionMetricsRepository {
             JOIN scheme s ON m.amfi_code = s.amfi_code 
             JOIN folio f ON s.folio_id = f.id
             WHERE f.investor_pan = ?
-            AND m.calculation_date = (SELECT MAX(calculation_date) FROM fund_conviction_metrics)
+            ORDER BY m.amfi_code, m.calculation_date DESC
             """;
         return jdbcTemplate.queryForList(sql, pan);
     }

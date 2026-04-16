@@ -2,10 +2,12 @@ package com.oreki.cas_injector.dashboard.service;
 
 import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.HashMap;
+import java.util.Set;
 import java.util.stream.Collectors;
 import java.math.BigDecimal;
 
@@ -19,8 +21,11 @@ import com.oreki.cas_injector.dashboard.dto.PortfolioPerformanceDTO;
 import com.oreki.cas_injector.dashboard.dto.SnapshotPoint;
 import com.oreki.cas_injector.dashboard.dto.BenchmarkPoint;
 import com.oreki.cas_injector.dashboard.dto.PeriodReturns;
+import com.oreki.cas_injector.dashboard.dto.DroppedFundSummary;
 import com.oreki.cas_injector.rebalancing.dto.SipLineItem;
 import com.oreki.cas_injector.rebalancing.dto.TacticalSignal;
+import com.oreki.cas_injector.rebalancing.dto.RebalancingTrade;
+import com.oreki.cas_injector.rebalancing.dto.StrategyTarget;
 import com.oreki.cas_injector.rebalancing.service.PortfolioOrchestrator;
 import com.oreki.cas_injector.rebalancing.service.HierarchicalRiskParityService;
 import com.oreki.cas_injector.taxmanagement.dto.TlhOpportunity;
@@ -150,6 +155,16 @@ public class PortfolioFullService {
         List<TacticalSignal> activeSells = orchestrator.computeActiveSellSignals(pan);
         List<TacticalSignal> exitQueue = orchestrator.computeExitQueue(pan);
 
+        List<RebalancingTrade> rebalancingTrades;
+        try {
+            rebalancingTrades = orchestrator.computeRebalancingTrades(pan);
+        } catch (Exception e) {
+            log.warn("Rebalancing trade pairs computation failed: {}", e.getMessage());
+            rebalancingTrades = List.of();
+        }
+
+        List<DroppedFundSummary> droppedFundSummaries = computeDroppedFundSummaries(pan);
+
         List<TlhOpportunity> harvestOps = Collections.emptyList();
         try {
             harvestOps = taxLossHarvestingService.scanForOpportunities(pan);
@@ -177,6 +192,8 @@ public class PortfolioFullService {
             .activeSellSignals(activeSells)
             .exitQueue(exitQueue)
             .harvestOpportunities(harvestOps)
+            .rebalancingTrades(rebalancingTrades)
+            .droppedFundSummaries(droppedFundSummaries)
             .totalHarvestValue(totalHarvestValue)
             .totalExitValue(totalExitValue)
             .droppedFundsCount(exitQueue.size())
@@ -220,6 +237,74 @@ public class PortfolioFullService {
         });
 
         return summary;
+    }
+
+    private List<DroppedFundSummary> computeDroppedFundSummaries(String pan) {
+        DashboardSummaryDTO summary = getBasePortfolioCached(pan);
+        List<DroppedFundSummary> result = new ArrayList<>();
+        
+        // Get strategy to identify dropped funds
+        List<StrategyTarget> targets = orchestrator.getStrategyService().fetchLatestStrategy();
+        Set<String> strategyIsins = targets.stream()
+            .filter(t -> !"DROPPED".equalsIgnoreCase(t.status()) && !"EXIT".equalsIgnoreCase(t.status()))
+            .map(StrategyTarget::isin)
+            .collect(Collectors.toSet());
+
+        summary.getSchemeBreakdown().stream()
+            .filter(s -> !strategyIsins.contains(s.getIsin()) && s.getCurrentValue().doubleValue() > 0)
+            .forEach(s -> {
+                double ltcg = s.getLtcgUnrealizedGain();
+                double stcg = s.getStcgUnrealizedGain();
+                int days = s.getDaysToNextLtcg();
+                double currentValue = s.getCurrentValue().doubleValue();
+                
+                // Fetch volatility tax for the scheme from orchestrator/metrics
+                // For simplicity, we can use a default or fetch if available
+                double vt = s.getVolatilityTax() > 0 ? s.getVolatilityTax() : 0.05; // 5% default VT if missing
+                
+                double taxIfExitNow = (ltcg > 125000 ? (ltcg - 125000) * 0.125 : 0) + (stcg * 0.20);
+                
+                double taxSavingIfWait = stcg * (0.20 - 0.125);
+                double driftCostOfWaiting = currentValue * vt * (days / 252.0);
+                
+                double taxIfWaitForLtcg = (ltcg + stcg > 125000 ? (ltcg + stcg - 125000) * 0.125 : 0);
+                
+                String recommendedAction = "EXIT_NOW";
+                if (ltcg + stcg < 1000) recommendedAction = "EXIT_NOW_TAX_FREE";
+                else if (taxSavingIfWait > driftCostOfWaiting && days > 0) recommendedAction = "WAIT_FOR_LTCG";
+                
+                // Hurst override from metrics
+                if (s.getHurstExponent() > 0.62 && s.getReturnZScore() < 0 && s.getAllocationPercentage() < 5.0) {
+                    recommendedAction = "HOLD_WAVE_RIDER";
+                }
+
+                result.add(new DroppedFundSummary(
+                    s.getSchemeName(),
+                    s.getAmfiCode(),
+                    currentValue,
+                    ltcg,
+                    stcg,
+                    days,
+                    taxIfExitNow,
+                    taxIfWaitForLtcg,
+                    taxSavingByWaiting(stcg, days, vt, currentValue),
+                    recommendedAction,
+                    LocalDate.now().plusDays(days).toString(),
+                    "Strategic assessment based on tax and momentum."
+                ));
+            });
+            
+        return result;
+    }
+
+    private double taxSavingByWaiting(double stcg, int days, double vt, double currentValue) {
+        double taxSaving = stcg * (0.20 - 0.125);
+        double driftCost = currentValue * vt * (days / 252.0);
+        return Math.max(0, taxSaving - driftCost);
+    }
+
+    public List<com.oreki.cas_injector.rebalancing.dto.RebalancingTrade> computeRebalancingTrades(String pan) {
+        return orchestrator.computeRebalancingTrades(pan);
     }
 
     /**

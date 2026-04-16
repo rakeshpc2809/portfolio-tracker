@@ -24,6 +24,7 @@ import lombok.RequiredArgsConstructor;
 public class RebalanceEngine {
 
     private final SystemicRiskMonitorService systemicRiskMonitor;
+    private final PositionSizingService positionSizingService;
 
     private static final double DRIFT_TOLERANCE     = 2.5;   
     private static final int    MIN_BUY_CONVICTION  = 35;    
@@ -38,6 +39,30 @@ public class RebalanceEngine {
 
     private static final int LTCG_WAIT_THRESHOLD_DAYS = 90;
 
+    private double getEffectiveDriftTolerance(String hmmState) {
+        return switch (hmmState != null ? hmmState : "STRESSED_NEUTRAL") {
+            case "VOLATILE_BEAR"   -> 1.5;   // Trim faster in bear markets
+            case "CALM_BULL"       -> 4.0;   // Let winners run in bull markets
+            default                -> DRIFT_TOLERANCE;   // 2.5 baseline
+        };
+    }
+
+    /**
+     * Graduated trim: avoids correcting the full drift in one transaction.
+     *
+     * f = clamp((overPct - tolerance) / (10.0 - tolerance), 0, 1)
+     * trimFraction = 0.40 + 0.60 * f
+     */
+    private double computeGraduatedSellAmount(
+            double overweightPct, double effectiveTolerance, double totalPortfolioValue) {
+        double excess = (overweightPct / 100.0) * totalPortfolioValue;
+        if (excess <= 0) return 0;
+        double span = Math.max(10.0 - effectiveTolerance, 1.0);
+        double f = Math.min(1.0, Math.max(0.0, (overweightPct - effectiveTolerance) / span));
+        double trimFraction = 0.40 + 0.60 * f;
+        return excess * trimFraction;
+    }
+
     public TacticalSignal evaluate(
             AggregatedHolding holding,
             StrategyTarget    target,
@@ -46,10 +71,13 @@ public class RebalanceEngine {
             String            amfiCode,
             List<AggregatedHolding> allHoldings,
             Map<String, String> nameToAmfiMap,
-            double            originalSheetPct) {
+            double            originalSheetPct,
+            double            fyLtcgAlreadyRealized) {
 
         TailRiskLevel tailRisk = systemicRiskMonitor.assessTailRisk(
             allHoldings, Map.of(amfiCode, metrics), nameToAmfiMap);
+
+        double effectiveTolerance = getEffectiveDriftTolerance(metrics.hmmState());
 
         if (tailRisk == TailRiskLevel.CRITICAL) {
             List<String> justifications = new ArrayList<>();
@@ -76,7 +104,7 @@ public class RebalanceEngine {
         
         // --- DROPPED FUND RULE ---
         if ("DROPPED".equals(status) || "EXIT".equals(status)) {
-            return handleDroppedFundExit(holding, target, metrics, totalPortfolioValue, amfiCode, status);
+            return handleDroppedFundExit(holding, target, metrics, totalPortfolioValue, amfiCode, status, fyLtcgAlreadyRealized);
         }
 
         SignalType action = SignalType.HOLD;
@@ -85,15 +113,17 @@ public class RebalanceEngine {
         if (tailRisk == TailRiskLevel.ELEVATED) justifications.add("⚠️ Elevated tail risk detected. Monitor closely.");
 
         // --- REBALANCING ONLY: SELL LOGIC ---
-        if (actualPct > targetPct + DRIFT_TOLERANCE) {
+        if (actualPct > targetPct + effectiveTolerance) {
             // Alpha Capture (Wave Rider) for active funds
-            if (H > H_TRENDING && z < Z_SELL_STRONG) {
-                justifications.add("Wave Rider: Trending regime detected. Holding to capture alpha.");
+            if (H > 0.62 && z < Z_SELL_MILD) {
+                justifications.add(String.format(
+                    "Wave Rider: Strong persistent trend (H=%.2f > 0.62) at fair value (z=%.2f). " +
+                    "Holding overweight position to capture momentum alpha.", H, z));
                 ReasoningMetadata meta = buildWaveRiderMetadata(holding, z, H, vt, regime, actualPct, metrics);
                 return buildSignal(holding, amfiCode, SignalType.HOLD, 0, targetPct, actualPct, sipPct, status, metrics, justifications, meta);
             }
             
-            double harvestAmount = (overweightPct / 100.0) * totalPortfolioValue;
+            double harvestAmount = computeGraduatedSellAmount(overweightPct, effectiveTolerance, totalPortfolioValue);
             double sellThreshold = metrics.ouValid() ? metrics.ouSellThreshold() : Z_SELL_STRONG;
             if ("CALM_BULL".equals(metrics.hmmState()) && metrics.hmmBullProb() > 0.65) sellThreshold += 0.5;
             
@@ -110,7 +140,7 @@ public class RebalanceEngine {
         }
 
         // --- REBALANCING ONLY: BUY LOGIC ---
-        if (actualPct < targetPct - DRIFT_TOLERANCE) {
+        if (actualPct < targetPct - effectiveTolerance) {
             double deficit = targetPct - actualPct;
             
             if ("NEW_ENTRY".equals(status)) {
@@ -151,46 +181,106 @@ public class RebalanceEngine {
             }
 
             ReasoningMetadata meta = buildRubberBandMetadata(holding, z, H, regime, rarity, deficit, action, metrics);
-            return buildSignal(holding, amfiCode, action, diffAmount, targetPct, actualPct, sipPct, status, metrics, justifications, meta);
+            double kellyAmount = positionSizingService.calculateAdjustedBuySize(Math.abs(diffAmount), metrics);
+            return buildSignal(holding, amfiCode, action, kellyAmount, targetPct, actualPct, sipPct, status, metrics, justifications, meta);
         }
 
         ReasoningMetadata meta = ReasoningMetadata.neutral(holding.getSchemeName());
         return buildSignal(holding, amfiCode, SignalType.HOLD, 0, targetPct, actualPct, sipPct, status, metrics, justifications, meta);
     }
 
-    private TacticalSignal handleDroppedFundExit(AggregatedHolding holding, StrategyTarget target, MarketMetrics metrics, double totalPortfolioValue, String amfiCode, String status) {
-        double z = metrics.rollingZScore252();
-        double H = metrics.hurstExponent();
+    private TacticalSignal handleDroppedFundExit(
+            AggregatedHolding holding,
+            StrategyTarget    target,
+            MarketMetrics     metrics,
+            double            totalPortfolioValue,
+            String            amfiCode,
+            String            status,
+            double            fyLtcgAlreadyRealized) {
+
+        double z     = metrics.rollingZScore252();
+        double H     = metrics.hurstExponent();
         String regime = metrics.hurstRegime();
+        double vt    = metrics.volatilityTax();
+
         List<String> justifications = new ArrayList<>();
-        SignalType action = SignalType.EXIT;
 
-        // 1. Beta Mitigation
+        // ─── PRIORITY 1: Bear Regime — No delays, exit now ───────────────────
         if ("VOLATILE_BEAR".equals(metrics.hmmState())) {
-            justifications.add("Beta Mitigation: Accelerating exit due to VOLATILE_BEAR regime.");
-            ReasoningMetadata meta = buildDroppedMetadata(holding, z, H, metrics.volatilityTax(), regime, metrics);
-            return buildSignal(holding, amfiCode, SignalType.EXIT, holding.getCurrentValue(), 0.0, (holding.getCurrentValue()/totalPortfolioValue*100), 0.0, status, metrics, justifications, meta);
+            justifications.add("Beta Mitigation: VOLATILE_BEAR regime. Exiting immediately to reduce drawdown exposure.");
+            return buildSignal(holding, amfiCode, SignalType.EXIT,
+                holding.getCurrentValue(), 0.0,
+                safeActualPct(holding, totalPortfolioValue), 0.0,
+                status, metrics, justifications,
+                buildDroppedMetadata(holding, z, H, vt, regime, metrics));
         }
 
-        // 2. LTCG Prioritization
-        if (holding.getDaysToNextLtcg() > 0 && holding.getDaysToNextLtcg() < LTCG_WAIT_THRESHOLD_DAYS && holding.getStcgValue() > 0) {
-            justifications.add("LTCG Harvesting: Within " + LTCG_WAIT_THRESHOLD_DAYS + " days of LTCG threshold. Holding to harvest tax-free gains.");
-            action = SignalType.HOLD;
-            ReasoningMetadata meta = buildWaveRiderMetadata(holding, z, H, metrics.volatilityTax(), regime, (holding.getCurrentValue()/totalPortfolioValue*100), metrics);
-            return buildSignal(holding, amfiCode, action, 0.0, 0.0, (holding.getCurrentValue()/totalPortfolioValue*100), 0.0, status, metrics, justifications, meta);
+        // ─── PRIORITY 2: LTCG Exemption Harvest ──────────────────────────────
+        double ltcgExemptionRemaining = Math.max(0, 125000.0 - fyLtcgAlreadyRealized);
+        double ltcgGains = holding.getLtcgAmount();
+        double stcgGains = holding.getStcgAmount();
+
+        boolean allGainsAreLtcg = (ltcgGains > 0 && stcgGains < 100);
+        boolean fitsInExemption = (ltcgGains <= ltcgExemptionRemaining);
+
+        if (allGainsAreLtcg && fitsInExemption) {
+            justifications.add(String.format(
+                "Tax-Free Exit: All unrealized gains (₹%.0f) are LTCG and fit within " +
+                "remaining ₹%.0f FY exemption. Exiting NOW is tax-free.",
+                ltcgGains, ltcgExemptionRemaining));
+            return buildSignal(holding, amfiCode, SignalType.EXIT,
+                holding.getCurrentValue(), 0.0,
+                safeActualPct(holding, totalPortfolioValue), 0.0,
+                status, metrics, justifications,
+                buildDroppedMetadata(holding, z, H, vt, regime, metrics));
         }
 
-        // 3. Alpha Capture (Wave Rider)
-        if (H > H_TRENDING && z < Z_SELL_STRONG) {
-            justifications.add("Wave Rider: Trending regime detected. Holding to capture remaining momentum before exit.");
-            action = SignalType.HOLD;
-            ReasoningMetadata meta = buildWaveRiderMetadata(holding, z, H, metrics.volatilityTax(), regime, (holding.getCurrentValue()/totalPortfolioValue*100), metrics);
-            return buildSignal(holding, amfiCode, action, 0.0, 0.0, (holding.getCurrentValue()/totalPortfolioValue*100), 0.0, status, metrics, justifications, meta);
+        // ─── PRIORITY 3: STCG lots approaching LTCG threshold ────────────────
+        if (holding.getDaysToNextLtcg() > 0 && holding.getDaysToNextLtcg() <= 90 && stcgGains > 1000) {
+            double taxSavingIfWait = stcgGains * (0.20 - 0.125);
+            double driftCostOfWaiting = holding.getCurrentValue() * vt * (holding.getDaysToNextLtcg() / 252.0);
+            if (taxSavingIfWait > driftCostOfWaiting) {
+                justifications.add(String.format(
+                    "LTCG Harvest: %d days to LTCG conversion. Waiting saves ₹%.0f in tax " +
+                    "vs ₹%.0f estimated drift cost. Holding.",
+                    holding.getDaysToNextLtcg(), taxSavingIfWait, driftCostOfWaiting));
+                return buildSignal(holding, amfiCode, SignalType.HOLD,
+                    0.0, 0.0,
+                    safeActualPct(holding, totalPortfolioValue), 0.0,
+                    status, metrics, justifications,
+                    buildWaveRiderMetadata(holding, z, H, vt, regime,
+                        safeActualPct(holding, totalPortfolioValue), metrics));
+            } else {
+                justifications.add(String.format(
+                    "Tax Math: Waiting %d days saves ₹%.0f in tax but drift cost is ₹%.0f. " +
+                    "Not worth waiting — exiting now.",
+                    holding.getDaysToNextLtcg(), taxSavingIfWait, driftCostOfWaiting));
+            }
         }
 
-        justifications.add("Strategic Exit: Fund is marked for liquidation in strategy.");
-        ReasoningMetadata meta = buildDroppedMetadata(holding, z, H, metrics.volatilityTax(), regime, metrics);
-        return buildSignal(holding, amfiCode, SignalType.EXIT, holding.getCurrentValue(), 0.0, (holding.getCurrentValue()/totalPortfolioValue*100), 0.0, status, metrics, justifications, meta);
+        // ─── PRIORITY 4: Strong momentum override (strict) ───────────────────
+        double actualPct = safeActualPct(holding, totalPortfolioValue);
+        if (H > 0.62 && z < 0.0 && actualPct < 5.0) {
+            justifications.add(String.format(
+                "Wave Rider: Strong trend (H=%.2f) on undervalued dropped fund (z=%.2f). " +
+                "Holding for momentum capture before planned exit.",
+                H, z));
+            return buildSignal(holding, amfiCode, SignalType.HOLD,
+                0.0, 0.0, actualPct, 0.0,
+                status, metrics, justifications,
+                buildWaveRiderMetadata(holding, z, H, vt, regime, actualPct, metrics));
+        }
+
+        // ─── DEFAULT: Strategic exit ──────────────────────────────────────────
+        justifications.add("Strategic Exit: No tax or momentum reason to delay. Exiting dropped fund.");
+        return buildSignal(holding, amfiCode, SignalType.EXIT,
+            holding.getCurrentValue(), 0.0, actualPct, 0.0,
+            status, metrics, justifications,
+            buildDroppedMetadata(holding, z, H, vt, regime, metrics));
+    }
+
+    private double safeActualPct(AggregatedHolding h, double totalPortfolioValue) {
+        return totalPortfolioValue > 0 ? (h.getCurrentValue() / totalPortfolioValue) * 100.0 : 0.0;
     }
 
     private String resolveStatus(double targetPct, double sipPct, double actualPct, double originalSheetPct) {

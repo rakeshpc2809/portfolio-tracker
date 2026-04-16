@@ -5,7 +5,8 @@ import {
 } from "recharts";
 import CurrencyValue from '../ui/CurrencyValue';
 import { motion } from 'framer-motion';
-import { Target, Clock } from 'lucide-react';
+import { Target, Clock, ArrowRight, TrendingUp, AlertCircle, ShieldAlert } from 'lucide-react';
+import type { RebalancingTrade } from '../../types/signals';
 
 export default function RebalanceView({ 
   portfolioData, 
@@ -35,7 +36,14 @@ export default function RebalanceView({
 
   // Step 3.6: Use server-computed SIP plan
   const sipPlan = portfolioData.tacticalPayload?.sipPlan || [];
+  const rebalancingTrades: RebalancingTrade[] = portfolioData.tacticalPayload?.rebalancingTrades || [];
   const portfolioValue = portfolioData.currentValueAmount || 1;
+
+  // LTCG Budget Logic
+  const LTCG_LIMIT = 125000;
+  const realizedLTCG = parseFloat(portfolioData.totalLTCG || 0);
+  const ltcgUsedPct = Math.min(100, (realizedLTCG / LTCG_LIMIT) * 100);
+  const remainingLtcg = Math.max(0, LTCG_LIMIT - realizedLTCG);
 
   // Step 3.4: Rebalance Timeline Data
   const timelines = useMemo(() => sipPlan
@@ -60,6 +68,198 @@ export default function RebalanceView({
         <h2 className="text-muted text-[10px] font-black uppercase tracking-[0.2em] mb-1">Target Alignment</h2>
         <p className="text-xl font-black text-primary tracking-tight">Allocation Drift · Strategic Balance</p>
       </header>
+
+      {/* REBALANCING MOVES */}
+      <section className="space-y-6">
+        <div className="flex items-center justify-between px-2">
+          <div className="space-y-1">
+            <h3 className="text-primary text-[10px] font-black uppercase tracking-[0.3em] flex items-center gap-2">
+              <TrendingUp size={12} className="text-accent" /> Rebalancing Moves This Month
+            </h3>
+            <p className="text-xs text-muted font-bold uppercase tracking-widest opacity-60">Paired Sell → Buy transactions for funded rebalancing</p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 gap-4">
+          {rebalancingTrades.map((trade, idx) => (
+            <motion.div 
+              key={idx}
+              initial={{ opacity: 0, x: -20 }}
+              animate={{ opacity: 1, x: 0 }}
+              className="bg-surface/40 backdrop-blur-xl border border-white/5 p-6 rounded-[2rem] shadow-xl"
+            >
+              <div className="flex flex-col md:flex-row items-center gap-8">
+                {/* SELL SIDE */}
+                <div className="flex-1 space-y-2 w-full">
+                  <div className="flex justify-between items-start">
+                    <p className="text-[10px] font-black text-exit uppercase tracking-widest">Trim Position</p>
+                    <p className="text-[10px] font-black text-muted uppercase tracking-widest">{trade.sellReason}</p>
+                  </div>
+                  <p className="text-sm font-black text-primary truncate">{trade.sellFundName}</p>
+                  <div className="flex justify-between items-end">
+                    <p className="text-lg font-black text-exit tabular-nums">
+                      -<CurrencyValue isPrivate={isPrivate} value={trade.sellAmount} />
+                    </p>
+                    <div className="text-right">
+                      <p className="text-[8px] font-black text-muted uppercase tracking-widest">Est. Tax</p>
+                      <p className="text-[10px] font-black text-exit tabular-nums"><CurrencyValue isPrivate={isPrivate} value={trade.estimatedSellTax} /></p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="text-muted opacity-20 hidden md:block">
+                  <ArrowRight size={24} />
+                </div>
+
+                {/* BUY SIDE */}
+                <div className="flex-1 space-y-2 w-full">
+                  <div className="flex justify-between items-start">
+                    <p className="text-[10px] font-black text-buy uppercase tracking-widest">Deploy Proceeds</p>
+                    <p className="text-[10px] font-black text-muted uppercase tracking-widest">{trade.buyReason}</p>
+                  </div>
+                  <p className="text-sm font-black text-primary truncate">{trade.buyFundName}</p>
+                  <div className="flex justify-between items-end">
+                    <p className="text-lg font-black text-buy tabular-nums">
+                      +<CurrencyValue isPrivate={isPrivate} value={trade.buyAmount} />
+                    </p>
+                    <div className="bg-buy/10 px-2 py-0.5 rounded border border-buy/20">
+                      <p className="text-[8px] font-black text-buy uppercase tracking-widest">Conviction +{trade.convictionDelta.toFixed(0)}</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div className="mt-6 pt-4 border-t border-white/5 text-[10px] font-bold text-muted uppercase tracking-widest italic flex justify-between items-center">
+                <span>{trade.tradeRationale}</span>
+                <span className="text-secondary font-black">Net Proceeds: <CurrencyValue isPrivate={isPrivate} value={trade.netProceeds} /></span>
+              </div>
+            </motion.div>
+          ))}
+          {rebalancingTrades.length === 0 && (
+            <div className="py-12 text-center border border-dashed border-white/10 rounded-[2.5rem] opacity-40">
+              <p className="text-[10px] font-black uppercase tracking-widest">Portfolio is balanced. No rebalancing moves required this month.</p>
+            </div>
+          )}
+        </div>
+      </section>
+
+      {/* TAX BUDGET TRACKER */}
+      <section className="bg-surface/40 backdrop-blur-xl border border-white/5 p-8 rounded-3xl shadow-xl space-y-6">
+        <div className="flex items-center justify-between">
+          <div className="space-y-1">
+            <h3 className="text-primary text-[10px] font-black uppercase tracking-[0.3em]">FY LTCG Exemption Budget</h3>
+            <p className="text-xs text-muted font-bold uppercase tracking-widest opacity-60">Tracking your ₹1.25L tax-free gain capacity</p>
+          </div>
+          <div className="text-right">
+            <p className="text-[10px] font-black text-buy uppercase tracking-widest">
+              <CurrencyValue isPrivate={isPrivate} value={remainingLtcg} /> Remaining
+            </p>
+          </div>
+        </div>
+
+        <div className="space-y-4">
+          <div className="h-4 w-full bg-white/5 rounded-full overflow-hidden border border-white/10 p-0.5">
+            <motion.div 
+              initial={{ width: 0 }}
+              animate={{ width: `${ltcgUsedPct}%` }}
+              className={`h-full rounded-full ${ltcgUsedPct > 90 ? 'bg-exit' : ltcgUsedPct > 60 ? 'bg-warning' : 'bg-buy'}`}
+            />
+          </div>
+          <div className="flex justify-between items-center px-1">
+            <p className="text-[9px] font-black text-muted uppercase tracking-widest">₹0 Realized</p>
+            <p className="text-[9px] font-black text-muted uppercase tracking-widest">₹1.25L Limit</p>
+          </div>
+        </div>
+
+        {remainingLtcg < 10000 && (
+          <div className="bg-exit/10 border border-exit/20 p-4 rounded-2xl flex items-center gap-4">
+            <AlertCircle size={20} className="text-exit" />
+            <p className="text-[10px] font-black text-exit uppercase tracking-widest leading-relaxed">
+              LTCG budget nearly exhausted. Defer non-urgent exits to next financial year (starting April 1).
+            </p>
+          </div>
+        )}
+      </section>
+
+      {/* DROPPED FUND EXIT TIMELINE */}
+      <section className="space-y-6">
+        <div className="flex items-center justify-between px-2">
+          <div className="space-y-1">
+            <h3 className="text-primary text-[10px] font-black uppercase tracking-[0.3em] flex items-center gap-2">
+              <ShieldAlert size={12} className="text-exit" /> Dropped Fund Exit Plan
+            </h3>
+            <p className="text-xs text-muted font-bold uppercase tracking-widest opacity-60">Strategic timeline to exit non-strategy holdings</p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {(portfolioData.tacticalPayload?.droppedFundSummaries || []).map((s: any) => (
+            <motion.div 
+              key={s.amfiCode}
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className={`bg-surface/40 backdrop-blur-xl border p-6 rounded-[2rem] shadow-xl space-y-4 ${
+                s.recommendedAction === 'WAIT_FOR_LTCG' ? 'border-warning/20' : 
+                s.recommendedAction === 'EXIT_NOW_TAX_FREE' ? 'border-buy/20' : 'border-white/5'
+              }`}
+            >
+              <div className="flex justify-between items-start">
+                <div className="min-w-0 flex-1">
+                  <h4 className="text-sm font-black text-primary truncate tracking-tight">{s.schemeName}</h4>
+                  <p className="text-[9px] font-black text-muted uppercase tracking-widest mt-1">Current Value: <CurrencyValue isPrivate={isPrivate} value={s.currentValue} /></p>
+                </div>
+                <div className={`px-3 py-1 rounded-full border text-[8px] font-black uppercase tracking-widest ${
+                  s.recommendedAction === 'EXIT_NOW_TAX_FREE' ? 'bg-buy/10 text-buy border-buy/20' :
+                  s.recommendedAction === 'WAIT_FOR_LTCG' ? 'bg-warning/10 text-warning border-warning/20' :
+                  s.recommendedAction === 'HOLD_WAVE_RIDER' ? 'bg-secondary/10 text-secondary border-secondary/20' :
+                  'bg-exit/10 text-exit border-exit/20'
+                }`}>
+                  {s.recommendedAction.replace(/_/g, ' ')}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4 py-2 border-y border-white/5">
+                <div>
+                  <p className="text-[8px] font-black text-muted uppercase tracking-widest">Unrealized LTCG</p>
+                  <p className="text-xs font-black text-primary tabular-nums"><CurrencyValue isPrivate={isPrivate} value={s.ltcgGains} /></p>
+                </div>
+                <div className="text-right">
+                  <p className="text-[8px] font-black text-muted uppercase tracking-widest">Unrealized STCG</p>
+                  <p className="text-xs font-black text-primary tabular-nums"><CurrencyValue isPrivate={isPrivate} value={s.stcgGains} /></p>
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                <div className="flex justify-between items-center text-[9px] font-black uppercase tracking-widest">
+                  <span className="text-muted">Exit Path Decision</span>
+                  <span className="text-secondary">Optimal: {new Date(s.exitDateSuggestion).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}</span>
+                </div>
+                
+                <div className="flex gap-2">
+                  <div className={`flex-1 p-2 rounded-xl border text-center ${s.recommendedAction.includes('EXIT_NOW') ? 'bg-white/5 border-white/10' : 'border-white/5 opacity-40'}`}>
+                    <p className="text-[7px] font-black text-muted uppercase tracking-widest mb-0.5">Exit Now</p>
+                    <p className="text-[10px] font-black text-exit tabular-nums"><CurrencyValue isPrivate={isPrivate} value={s.taxIfExitNow} /></p>
+                  </div>
+                  <div className={`flex-1 p-2 rounded-xl border text-center ${s.recommendedAction === 'WAIT_FOR_LTCG' ? 'bg-warning/5 border-warning/20' : 'border-white/5 opacity-40'}`}>
+                    <p className="text-[7px] font-black text-muted uppercase tracking-widest mb-0.5">Wait {s.daysToNextLtcg}d</p>
+                    <p className="text-[10px] font-black text-buy tabular-nums"><CurrencyValue isPrivate={isPrivate} value={s.taxIfWaitForLtcg} /></p>
+                  </div>
+                </div>
+                
+                {s.taxSavingByWaiting > 0 && (
+                  <p className="text-[8px] font-black text-buy uppercase tracking-widest text-center italic">
+                    Waiting saves <CurrencyValue isPrivate={isPrivate} value={s.taxSavingByWaiting} /> after drift cost
+                  </p>
+                )}
+              </div>
+            </motion.div>
+          ))}
+          {(portfolioData.tacticalPayload?.droppedFundSummaries || []).length === 0 && (
+            <div className="col-span-full py-10 text-center border border-dashed border-white/10 rounded-[2rem] opacity-40">
+              <p className="text-[10px] font-black uppercase tracking-widest">No dropped funds require exit planning</p>
+            </div>
+          )}
+        </div>
+      </section>
 
       {/* DRIFT CHART */}
       <section className="bg-surface/40 backdrop-blur-xl border border-white/5 p-8 rounded-3xl shadow-xl">

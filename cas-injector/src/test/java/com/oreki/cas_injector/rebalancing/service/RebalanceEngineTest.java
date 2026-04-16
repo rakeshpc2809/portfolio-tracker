@@ -45,7 +45,7 @@ public class RebalanceEngineTest {
         // New Entry: target > 0, actual = 0
         TacticalSignal signal = rebalanceEngine.evaluate(
             holding, target, metrics, 100000.0, "AMFI123", 
-            Collections.singletonList(holding), Map.of("Test Fund", "AMFI123"), 5.0);
+            Collections.singletonList(holding), Map.of("Test Fund", "AMFI123"), 5.0, 0.0);
 
         assertEquals("NEW_ENTRY", signal.fundStatus());
         assertEquals(SignalType.BUY, signal.action());
@@ -63,7 +63,7 @@ public class RebalanceEngineTest {
 
         TacticalSignal signal = rebalanceEngine.evaluate(
             holding, target, metrics, 100000.0, "AMFI123", 
-            Collections.singletonList(holding), Map.of("Test Fund", "AMFI123"), 10.0);
+            Collections.singletonList(holding), Map.of("Test Fund", "AMFI123"), 10.0, 0.0);
 
         assertEquals(SignalType.WATCH, signal.action());
         assert(signal.justifications().stream().anyMatch(j -> j.contains("Tail Risk Alert")));

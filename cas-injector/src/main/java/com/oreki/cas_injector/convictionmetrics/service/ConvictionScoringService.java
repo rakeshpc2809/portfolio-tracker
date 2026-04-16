@@ -60,8 +60,10 @@ public class ConvictionScoringService {
         double maxCagrFound = metrics.stream()
             .mapToDouble(m -> {
                 String amfi = CommonUtils.SANITIZE_AMFI.apply((String) m.get("amfi_code"));
-                return calculatePersonalCagr(lotsByAmfi.get(amfi));
+                return Math.max(0, calculatePersonalCagr(lotsByAmfi.get(amfi)));
             }).max().orElse(35.0);
+        
+        if (maxCagrFound <= 5.0) maxCagrFound = 35.0; // Floor for normalization to avoid division by zero or skew
 
         log.info("🎯 Dynamic Yield Upper Bound set to {}%", String.format("%.2f", maxCagrFound));
 
@@ -74,25 +76,22 @@ public class ConvictionScoringService {
             
             // 1. YIELD SCORE (Personal CAGR relative to portfolio max)
             double cagr = calculatePersonalCagr(fundLots);
-            double yieldScore = Math.max(0, Math.min(100, (cagr / maxCagrFound) * 100));
-            log.info("  ├─ Found {} lots for this fund.", fundLots.size());
-            log.info("  ├─ CAGR: {}%", String.format("%.2f", cagr));
-
+            double yieldScore = (cagr > 0) ? Math.min(100, (cagr / maxCagrFound) * 100) : 0;
+            
             // 2. RISK SCORE (Sortino Ratio)
-            // Normalizing Sortino: 0 is poor, 2.0 is excellent.
-            double sortino = (double) fund.getOrDefault("sortino_ratio", 0.0);
-            double riskScore = Math.max(0, Math.min(100, (sortino / 2.0) * 100));
+            // Normalizing Sortino: < 0 is 0, 0 is 10, 1.0 is 50, 2.0 is 90, > 2.5 is 100
+            double sortino = safeDouble(fund.get("sortino_ratio"));
+            double riskScore = (sortino <= 0) ? 10 : Math.min(100, 10 + (sortino * 40));
 
             // 3. VALUE SCORE (Z-Score based cheapness)
-            // z < -2 = cheap, z > +2 = expensive
-            double zScore = (double) fund.getOrDefault("rolling_z_score_252", 0.0);
-            double valueScore = Math.max(0, Math.min(100, 50 - (zScore * 20))); // z=-2 -> 90, z=0 -> 50, z=+2 -> 10
-            log.info("  ├─ Z-Score: {} (Value: {})", String.format("%.2f", zScore), String.format("%.0f", valueScore));
+            // z < -2 = cheap (90+), z = 0 = fair (50), z > +2 = expensive (10-)
+            double zScore = safeDouble(fund.get("rolling_z_score_252"));
+            double valueScore = Math.max(5, Math.min(95, 50 - (zScore * 22.5))); 
 
             // 4. PAIN SCORE (Max Drawdown)
-            // Low drawdown = High score (less pain)
-            double mdd = Math.abs((double) fund.getOrDefault("max_drawdown", 0.0));
-            double painScore = Math.max(0, 100 - (mdd * 2.5)); // 40% DD = 0 score
+            // Low drawdown = High score (less pain). 0% DD = 100, 40% DD = 0
+            double mdd = Math.abs(safeDouble(fund.get("max_drawdown")));
+            double painScore = Math.max(0, 100 - (mdd * 2.5));
 
             // 5. FRICTION SCORE (Tax Efficiency)
             // Simulate exit friction
@@ -106,8 +105,7 @@ public class ConvictionScoringService {
             
             // Score is 100 if tax is 0%, 0 if tax is 15% of total value
             double frictionScore = Math.max(0, 100 - (taxPctOfValue * 6.66));
-            log.info("  ├─ Tax Drag: {}%", String.format("%.2f", taxPctOfValue));
-
+            
             // --- FINAL CALCULATION ---
             double finalScore = (yieldScore * WEIGHT_YIELD) +
                                (riskScore * WEIGHT_RISK) +
@@ -115,9 +113,22 @@ public class ConvictionScoringService {
                                (painScore * WEIGHT_PAIN) +
                                (frictionScore * WEIGHT_FRICTION);
 
+            // Ensure we don't accidentally save 0 if it was a calculation error, 
+            // but here we want the actual computed values.
             convictionMetricsRepository.updateConvictionBreakdown(
-                (int) finalScore, yieldScore, riskScore, valueScore, painScore, frictionScore, amfi
+                (int) finalScore, 
+                Math.max(1, yieldScore), 
+                Math.max(1, riskScore), 
+                Math.max(1, valueScore), 
+                Math.max(1, painScore), 
+                Math.max(1, frictionScore), 
+                amfi
             );
+            
+            log.info("  ├─ CAGR: {}% -> Yield: {}", String.format("%.2f", cagr), (int)yieldScore);
+            log.info("  ├─ Sortino: {} -> Risk: {}", String.format("%.2f", sortino), (int)riskScore);
+            log.info("  ├─ Z-Score: {} -> Value: {}", String.format("%.2f", zScore), (int)valueScore);
+            log.info("  └─ FINAL: {}", (int)finalScore);
         }
 
         log.info("🏁 [3/3] Dynamic Conviction Scoring completed.");
@@ -127,29 +138,36 @@ public class ConvictionScoringService {
         if (lots == null || lots.isEmpty()) return 0.0;
 
         double totalCost = 0;
-        double totalGain = 0;
+        double totalValue = 0;
         double weightedDays = 0;
 
         for (TaxLot lot : lots) {
             double cost = lot.getRemainingUnits().doubleValue() * lot.getCostBasisPerUnit().doubleValue();
-            long days = ChronoUnit.DAYS.between(lot.getBuyDate(), LocalDate.now());
+            long days = Math.max(1, ChronoUnit.DAYS.between(lot.getBuyDate(), LocalDate.now()));
             
-            // Simple absolute gain for this lot (unrealized)
             double currentNav = navService.getLatestSchemeDetails(lot.getScheme().getAmfiCode()).getNav().doubleValue();
+            
+            // If currentNav is missing from cache, fallback to cost to avoid -100% skew
+            if (currentNav <= 0) currentNav = lot.getCostBasisPerUnit().doubleValue();
+            
             double value = lot.getRemainingUnits().doubleValue() * currentNav;
             
             totalCost += cost;
-            totalGain += (value - cost);
+            totalValue += value;
             weightedDays += (cost * days);
         }
 
-        if (totalCost == 0 || weightedDays == 0) return 0.0;
+        if (totalCost <= 0 || weightedDays <= 0) return 0.0;
 
         double avgDays = weightedDays / totalCost;
-        double absoluteReturn = totalGain / totalCost;
+        double absoluteReturn = (totalValue / totalCost) - 1;
         
         // Annualize
-        if (avgDays < 1) return 0.0;
         return (Math.pow(1 + absoluteReturn, 365.0 / avgDays) - 1) * 100;
+    }
+
+    private double safeDouble(Object o) {
+        if (o == null) return 0.0;
+        return ((Number) o).doubleValue();
     }
 }

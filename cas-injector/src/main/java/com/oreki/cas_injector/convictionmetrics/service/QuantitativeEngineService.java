@@ -149,9 +149,9 @@ public class QuantitativeEngineService {
                 hmm_transition_bear = ?,
                 last_python_update = CURRENT_TIMESTAMP
             WHERE LTRIM(amfi_code, '0') = LTRIM(?, '0')
-            AND calculation_date = (SELECT MAX(calculation_date) FROM fund_conviction_metrics)
+            AND calculation_date = (SELECT MAX(calculation_date) FROM fund_conviction_metrics WHERE LTRIM(amfi_code, '0') = LTRIM(?, '0'))
             """, res.hurst(), hRegime, res.ou_half_life(), res.ou_valid(), hmmStateStr, 
-                 res.bull_prob(), res.bear_prob(), res.transition_to_bear(), amfi);
+                 res.bull_prob(), res.bear_prob(), res.transition_to_bear(), amfi, amfi);
     }
 
     private Map<String, double[]> loadAllNavs(int days) {

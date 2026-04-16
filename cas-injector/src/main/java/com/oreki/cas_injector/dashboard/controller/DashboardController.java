@@ -14,15 +14,23 @@ import org.springframework.cache.Cache;
 import com.oreki.cas_injector.core.repository.FolioRepository;
 import com.oreki.cas_injector.core.repository.InvestorRepository;
 import com.oreki.cas_injector.core.repository.SchemeRepository;
+import com.oreki.cas_injector.core.GoogleSheetService;
+import com.oreki.cas_injector.core.utils.CommonUtils;
 import com.oreki.cas_injector.dashboard.dto.DashboardSummaryDTO;
 import com.oreki.cas_injector.dashboard.dto.PortfolioPerformanceDTO;
 import com.oreki.cas_injector.dashboard.service.DashboardService;
 import com.oreki.cas_injector.dashboard.service.PortfolioFullService;
+import com.oreki.cas_injector.rebalancing.dto.RebalancingTrade;
+import com.oreki.cas_injector.rebalancing.dto.StrategyTarget;
+import com.oreki.cas_injector.taxmanagement.service.LtcgExitSchedulerService;
+import com.oreki.cas_injector.taxmanagement.service.LtcgExitSchedulerService.ExitScheduleItem;
 import com.oreki.cas_injector.transactions.repository.CapitalGainAuditRepository;
 import com.oreki.cas_injector.transactions.repository.TaxLotRepository;
 import com.oreki.cas_injector.transactions.repository.TransactionRepository;
 
 import java.util.Map;
+import java.util.List;
+import org.springframework.jdbc.core.JdbcTemplate;
 import lombok.extern.slf4j.Slf4j;
 import lombok.RequiredArgsConstructor;
 
@@ -42,6 +50,9 @@ public class DashboardController {
     private final TaxLotRepository taxLotRepo;
     private final CapitalGainAuditRepository auditRepo;
     private final CacheManager cacheManager;
+    private final LtcgExitSchedulerService ltcgExitScheduler;
+    private final GoogleSheetService strategyService;
+    private final JdbcTemplate jdbcTemplate;
 
     @GetMapping("/summary/{pan}")
     public ResponseEntity<DashboardSummaryDTO> getSummary(@PathVariable String pan) {
@@ -73,6 +84,36 @@ public class DashboardController {
         String cleanPan = pan.trim().toUpperCase();
         log.info("🔗 Fetching HRP correlation matrix for PAN: {}", cleanPan);
         return ResponseEntity.ok(fullService.getCorrelationMatrix(cleanPan));
+    }
+
+    @GetMapping("/rebalancing-trades/{pan}")
+    public ResponseEntity<List<RebalancingTrade>> getRebalancingTrades(@PathVariable String pan) {
+        String cleanPan = pan.trim().toUpperCase();
+        return ResponseEntity.ok(fullService.computeRebalancingTrades(cleanPan));
+    }
+
+    @GetMapping("/ltcg-exit-schedule/{pan}")
+    public ResponseEntity<List<ExitScheduleItem>> getLtcgSchedule(@PathVariable String pan) {
+        String cleanPan = pan.trim().toUpperCase();
+        List<String> droppedIsins = strategyService.fetchLatestStrategy().stream()
+            .filter(t -> "DROPPED".equalsIgnoreCase(t.status()) || "EXIT".equalsIgnoreCase(t.status()))
+            .map(StrategyTarget::isin)
+            .toList();
+
+        Double fyLtcg = jdbcTemplate.queryForObject("""
+            SELECT COALESCE(SUM(cg.realized_gain), 0)
+            FROM capital_gain_audit cg
+            JOIN "transaction" t ON cg.sell_transaction_id = t.id
+            JOIN scheme s ON t.scheme_id = s.id
+            JOIN folio f ON s.folio_id = f.id
+            WHERE f.investor_pan = ?
+            AND cg.tax_category IN ('EQUITY_LTCG', 'HYBRID_LTCG', 'NON_EQUITY_LTCG_OLD')
+            AND t.transaction_date >= ?
+            """,
+            Double.class, cleanPan, CommonUtils.getCurrentFyStart());
+        if (fyLtcg == null) fyLtcg = 0.0;
+
+        return ResponseEntity.ok(ltcgExitScheduler.computeOptimalExitSchedule(cleanPan, fyLtcg, droppedIsins));
     }
 
     @DeleteMapping("/reset")

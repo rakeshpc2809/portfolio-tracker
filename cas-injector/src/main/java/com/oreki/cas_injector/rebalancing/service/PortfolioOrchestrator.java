@@ -60,6 +60,10 @@ public class PortfolioOrchestrator {
     private final com.oreki.cas_injector.transactions.repository.TransactionRepository txnRepo;
     private final RebalanceEngine rebalanceEngine;
 
+    public GoogleSheetService getStrategyService() {
+        return strategyService;
+    }
+
     @Value("${hrp.blend.ratio:0.5}")
     private double hrpBlendRatio;
 
@@ -129,6 +133,13 @@ public class PortfolioOrchestrator {
             }
 
             if (sipAllocation > 100) {
+                double standingAmount = (target.sipPct() / 100.0) * monthlySip;
+                String mode = (sipAllocation <= standingAmount + 1.0) ? "SIP_STANDING" : "SIP_ADDITIONAL";
+                String note = (mode.equals("SIP_STANDING") 
+                    ? "STANDING: Deploy as per your existing instruction to " + target.schemeName() + "." 
+                    : "ADDITIONAL: Gap of ₹" + Math.round(gap) + ". Consider adding beyond your SIP if you have the budget.") 
+                    + infoNote.toString();
+
                 plan.add(new SipLineItem(
                     target.schemeName(),
                     CommonUtils.NORMALIZE_NAME.apply(target.schemeName()),
@@ -137,9 +148,9 @@ public class PortfolioOrchestrator {
                     sipAllocation,
                     target.sipPct(),
                     cappedTargetPct,
-                    "SIP_BUY",
+                    mode,
                     "DEPLOY",
-                    "Targeting gap of " + String.format("%.1f", gap) + (cappedTargetPct < targetPct ? " (Capped)" : "") + infoNote.toString()
+                    note
                 ));
             }
         }
@@ -152,6 +163,56 @@ public class PortfolioOrchestrator {
         all.addAll(computeActiveSellSignals(pan));
         all.addAll(computeExitQueue(pan));
         return all;
+    }
+
+    public List<com.oreki.cas_injector.rebalancing.dto.RebalancingTrade> computeRebalancingTrades(String pan) {
+        List<TacticalSignal> sells = computeActiveSellSignals(pan);
+        List<TacticalSignal> buys  = evaluateAll(pan).stream()
+            .filter(s -> s.action() == SignalType.BUY)
+            .sorted(Comparator.comparingDouble(
+                s -> -(s.convictionScore() * Math.abs(s.returnZScore()))))
+            .collect(Collectors.toList());
+
+        List<com.oreki.cas_injector.rebalancing.dto.RebalancingTrade> trades = new ArrayList<>();
+
+        for (TacticalSignal sell : sells) {
+            double sellAmt = parseSignalAmount(sell.amount());
+            double taxRate  = 0.125; 
+            double taxCost  = sellAmt * taxRate * 0.5; 
+            double proceeds = sellAmt - taxCost;
+
+            if (!buys.isEmpty()) {
+                TacticalSignal bestBuy = buys.get(0);
+                buys.remove(0); 
+                double buyAmt = Math.min(parseSignalAmount(bestBuy.amount()), proceeds);
+                double convDelta = bestBuy.convictionScore() - sell.convictionScore();
+                double zDelta    = Math.abs(bestBuy.returnZScore()) - Math.abs(sell.returnZScore());
+
+                trades.add(new com.oreki.cas_injector.rebalancing.dto.RebalancingTrade(
+                    sell.schemeName(), sell.amfiCode(),
+                    sellAmt, taxCost, proceeds,
+                    "Overweight by " + String.format("%.1f", sell.actualPercentage() - sell.plannedPercentage()) + "%",
+                    bestBuy.schemeName(), bestBuy.amfiCode(),
+                    buyAmt,
+                    "Underweight by " + String.format("%.1f", bestBuy.plannedPercentage() - bestBuy.actualPercentage()) + "%",
+                    convDelta, zDelta,
+                    String.format("Rotating ₹%.0f from %s → %s (conviction delta: %+.0f)",
+                        buyAmt,
+                        CommonUtils.NORMALIZE_NAME.apply(sell.schemeName()),
+                        CommonUtils.NORMALIZE_NAME.apply(bestBuy.schemeName()),
+                        convDelta)
+                ));
+            }
+        }
+        return trades;
+    }
+
+    private double parseSignalAmount(String amount) {
+        try {
+            return Double.parseDouble(amount.replace(",", ""));
+        } catch (Exception e) {
+            return 0.0;
+        }
     }
 
     public List<TacticalSignal> computeOpportunisticSignals(String pan, double lumpsum) {
@@ -180,6 +241,19 @@ public class PortfolioOrchestrator {
         List<StrategyTarget> targets = strategyService.fetchLatestStrategy();
         double totalValue = holdings.stream().mapToDouble(AggregatedHolding::getCurrentValue).sum();
 
+        Double fyLtcgRealized = jdbcTemplate.queryForObject("""
+            SELECT COALESCE(SUM(cg.realized_gain), 0)
+            FROM capital_gain_audit cg
+            JOIN "transaction" t ON cg.sell_transaction_id = t.id
+            JOIN scheme s ON t.scheme_id = s.id
+            JOIN folio f ON s.folio_id = f.id
+            WHERE f.investor_pan = ?
+            AND cg.tax_category IN ('EQUITY_LTCG', 'HYBRID_LTCG', 'NON_EQUITY_LTCG_OLD')
+            AND t.transaction_date >= ?
+            """,
+            Double.class, pan, CommonUtils.getCurrentFyStart());
+        if (fyLtcgRealized == null) fyLtcgRealized = 0.0;
+
         Map<String, String> nameToAmfiMap = holdings.stream()
             .collect(Collectors.toMap(AggregatedHolding::getSchemeName, h -> {
                 Scheme s = schemeRepository.findByName(h.getSchemeName()).orElse(null);
@@ -201,7 +275,7 @@ public class PortfolioOrchestrator {
             String amfi = nameToAmfiMap.get(h.getSchemeName());
             MarketMetrics m = metricsMap.getOrDefault(amfi, MarketMetrics.fromLegacy(50, 0, 0, 0, 0, 0.5, 0, 0, LocalDate.of(1970, 1, 1)));
             
-            results.add(rebalanceEngine.evaluate(h, t, m, totalValue, amfi, holdings, nameToAmfiMap, t.targetPortfolioPct()));
+            results.add(rebalanceEngine.evaluate(h, t, m, totalValue, amfi, holdings, nameToAmfiMap, t.targetPortfolioPct(), fyLtcgRealized));
         }
 
         // Process new entries (target > 0 but not held)
@@ -211,7 +285,7 @@ public class PortfolioOrchestrator {
                 AggregatedHolding emptyH = new AggregatedHolding(t.schemeName(), 0, 0, 0, 0, 0, 0, 0, 0, 0, "UNKNOWN", "NEW_ENTRY", t.isin(), 0.0);
                 String amfi = schemeRepository.findByIsin(t.isin()).map(s -> CommonUtils.SANITIZE_AMFI.apply(s.getAmfiCode())).orElse("");
                 MarketMetrics m = metricsMap.getOrDefault(amfi, MarketMetrics.fromLegacy(50, 0, 0, 0, 0, 0.5, 0, 0, LocalDate.of(1970, 1, 1)));
-                results.add(rebalanceEngine.evaluate(emptyH, t, m, totalValue, amfi, holdings, nameToAmfiMap, t.targetPortfolioPct()));
+                results.add(rebalanceEngine.evaluate(emptyH, t, m, totalValue, amfi, holdings, nameToAmfiMap, t.targetPortfolioPct(), fyLtcgRealized));
             }
         }
 
