@@ -8,6 +8,7 @@ public record PortfolioPerformanceDTO(
     double totalReturn,
     double xirr,
     PeriodReturns periodReturns,
+    PeriodReturns niftyReturns,
     double alphaPct,
     double totalGainRs,
     double sipContributionRs,

@@ -49,10 +49,13 @@ public class BenchmarkServiceTest {
         // Mock computeReturnForPeriod for various intervals
         when(jdbcTemplate.queryForObject(anyString(), eq(Double.class), anyString(), anyString(), any()))
             .thenReturn(5.0);
+        // Mock computeItdReturn
+        when(jdbcTemplate.queryForObject(anyString(), eq(Double.class), eq("NIFTY 50"), eq("NIFTY 50")))
+            .thenReturn(100.0);
 
-        Map<String, Double> returns = benchmarkService.getBenchmarkReturnsForAllPeriods("NIFTY 50");
-        assert(returns.containsKey("1M"));
-        assert(returns.containsKey("1Y"));
-        assertEquals(5.0, returns.get("1Y"));
+        com.oreki.cas_injector.dashboard.dto.PeriodReturns returns = benchmarkService.getBenchmarkReturnsForAllPeriods("NIFTY 50");
+        assertEquals(5.0, returns.oneMonth());
+        assertEquals(5.0, returns.oneYear());
+        assertEquals(100.0, returns.itd());
     }
 }

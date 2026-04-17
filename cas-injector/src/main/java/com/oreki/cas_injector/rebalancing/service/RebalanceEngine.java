@@ -16,7 +16,7 @@ import com.oreki.cas_injector.core.utils.SignalType;
 import com.oreki.cas_injector.rebalancing.dto.ReasoningMetadata;
 import com.oreki.cas_injector.rebalancing.dto.StrategyTarget;
 import com.oreki.cas_injector.rebalancing.dto.TacticalSignal;
-
+import com.oreki.cas_injector.core.utils.FundStatus;
 import lombok.RequiredArgsConstructor;
 
 @Service
@@ -49,9 +49,6 @@ public class RebalanceEngine {
 
     /**
      * Graduated trim: avoids correcting the full drift in one transaction.
-     *
-     * f = clamp((overPct - tolerance) / (10.0 - tolerance), 0, 1)
-     * trimFraction = 0.40 + 0.60 * f
      */
     private double computeGraduatedSellAmount(
             double overweightPct, double effectiveTolerance, double totalPortfolioValue) {
@@ -84,14 +81,12 @@ public class RebalanceEngine {
             justifications.add("🚨 Tail Risk Alert: Portfolio CVaR has breached critical danger threshold. New buys suspended.");
             ReasoningMetadata meta = buildCriticalReviewMetadata(holding, metrics.rollingZScore252(), metrics.hurstExponent(), metrics.hurstRegime(), metrics.historicalRarityPct(), target.targetPortfolioPct() - (totalPortfolioValue > 0 ? (holding.getCurrentValue() / totalPortfolioValue * 100.0) : 0), metrics);
             return buildSignal(holding, amfiCode, SignalType.WATCH, 0.0, target.targetPortfolioPct(), 
-                (totalPortfolioValue > 0 ? (holding.getCurrentValue() / totalPortfolioValue * 100.0) : 0), target.sipPct(), "ACTIVE", metrics, justifications, meta);
+                (totalPortfolioValue > 0 ? (holding.getCurrentValue() / totalPortfolioValue * 100.0) : 0), target.sipPct(), FundStatus.ACTIVE, metrics, justifications, meta);
         }
 
         double targetPct = target.targetPortfolioPct();
         double sipPct    = target.sipPct();
         double actualPct = totalPortfolioValue > 0 ? (holding.getCurrentValue() / totalPortfolioValue) * 100.0 : 0.0;
-        double targetValueRs  = (targetPct / 100.0) * totalPortfolioValue;
-        double diffAmount     = targetValueRs - holding.getCurrentValue();
         double overweightPct  = actualPct - targetPct;
 
         double z = metrics.rollingZScore252();
@@ -100,10 +95,10 @@ public class RebalanceEngine {
         String regime = metrics.hurstRegime();
         double rarity = metrics.historicalRarityPct();
 
-        String status = resolveStatus(targetPct, sipPct, actualPct, originalSheetPct);
+        FundStatus status = resolveStatus(targetPct, sipPct, actualPct, originalSheetPct);
         
         // --- DROPPED FUND RULE ---
-        if ("DROPPED".equals(status) || "EXIT".equals(status)) {
+        if (status == FundStatus.DROPPED || status == FundStatus.EXIT) {
             return handleDroppedFundExit(holding, target, metrics, totalPortfolioValue, amfiCode, status, fyLtcgAlreadyRealized);
         }
 
@@ -143,7 +138,7 @@ public class RebalanceEngine {
         if (actualPct < targetPct - effectiveTolerance) {
             double deficit = targetPct - actualPct;
             
-            if ("NEW_ENTRY".equals(status)) {
+            if (status == FundStatus.NEW_ENTRY) {
                 action = SignalType.BUY;
                 justifications.add("New Position: Initial entry signal based on strategy.");
             }
@@ -181,6 +176,7 @@ public class RebalanceEngine {
             }
 
             ReasoningMetadata meta = buildRubberBandMetadata(holding, z, H, regime, rarity, deficit, action, metrics);
+            double diffAmount = (targetPct / 100.0) * totalPortfolioValue - holding.getCurrentValue();
             double kellyAmount = positionSizingService.calculateAdjustedBuySize(Math.abs(diffAmount), metrics);
             return buildSignal(holding, amfiCode, action, kellyAmount, targetPct, actualPct, sipPct, status, metrics, justifications, meta);
         }
@@ -195,7 +191,7 @@ public class RebalanceEngine {
             MarketMetrics     metrics,
             double            totalPortfolioValue,
             String            amfiCode,
-            String            status,
+            FundStatus        status,
             double            fyLtcgAlreadyRealized) {
 
         double z     = metrics.rollingZScore252();
@@ -205,7 +201,6 @@ public class RebalanceEngine {
 
         List<String> justifications = new ArrayList<>();
 
-        // ─── PRIORITY 1: Bear Regime — No delays, exit now ───────────────────
         if ("VOLATILE_BEAR".equals(metrics.hmmState())) {
             justifications.add("Beta Mitigation: VOLATILE_BEAR regime. Exiting immediately to reduce drawdown exposure.");
             return buildSignal(holding, amfiCode, SignalType.EXIT,
@@ -215,7 +210,6 @@ public class RebalanceEngine {
                 buildDroppedMetadata(holding, z, H, vt, regime, metrics));
         }
 
-        // ─── PRIORITY 2: LTCG Exemption Harvest ──────────────────────────────
         double ltcgExemptionRemaining = Math.max(0, 125000.0 - fyLtcgAlreadyRealized);
         double ltcgGains = holding.getLtcgAmount();
         double stcgGains = holding.getStcgAmount();
@@ -235,8 +229,7 @@ public class RebalanceEngine {
                 buildDroppedMetadata(holding, z, H, vt, regime, metrics));
         }
 
-        // ─── PRIORITY 3: STCG lots approaching LTCG threshold ────────────────
-        if (holding.getDaysToNextLtcg() > 0 && holding.getDaysToNextLtcg() <= 90 && stcgGains > 1000) {
+        if (holding.getDaysToNextLtcg() > 0 && holding.getDaysToNextLtcg() <= LTCG_WAIT_THRESHOLD_DAYS && stcgGains > 1000) {
             double taxSavingIfWait = stcgGains * (0.20 - 0.125);
             double driftCostOfWaiting = holding.getCurrentValue() * vt * (holding.getDaysToNextLtcg() / 252.0);
             if (taxSavingIfWait > driftCostOfWaiting) {
@@ -250,15 +243,9 @@ public class RebalanceEngine {
                     status, metrics, justifications,
                     buildWaveRiderMetadata(holding, z, H, vt, regime,
                         safeActualPct(holding, totalPortfolioValue), metrics));
-            } else {
-                justifications.add(String.format(
-                    "Tax Math: Waiting %d days saves ₹%.0f in tax but drift cost is ₹%.0f. " +
-                    "Not worth waiting — exiting now.",
-                    holding.getDaysToNextLtcg(), taxSavingIfWait, driftCostOfWaiting));
             }
         }
 
-        // ─── PRIORITY 4: Strong momentum override (strict) ───────────────────
         double actualPct = safeActualPct(holding, totalPortfolioValue);
         if (H > 0.62 && z < 0.0 && actualPct < 5.0) {
             justifications.add(String.format(
@@ -271,7 +258,6 @@ public class RebalanceEngine {
                 buildWaveRiderMetadata(holding, z, H, vt, regime, actualPct, metrics));
         }
 
-        // ─── DEFAULT: Strategic exit ──────────────────────────────────────────
         justifications.add("Strategic Exit: No tax or momentum reason to delay. Exiting dropped fund.");
         return buildSignal(holding, amfiCode, SignalType.EXIT,
             holding.getCurrentValue(), 0.0, actualPct, 0.0,
@@ -281,13 +267,6 @@ public class RebalanceEngine {
 
     private double safeActualPct(AggregatedHolding h, double totalPortfolioValue) {
         return totalPortfolioValue > 0 ? (h.getCurrentValue() / totalPortfolioValue) * 100.0 : 0.0;
-    }
-
-    private String resolveStatus(double targetPct, double sipPct, double actualPct, double originalSheetPct) {
-        if (originalSheetPct == 0.0 && sipPct == 0.0 && actualPct > 0.0) return "DROPPED";
-        if (targetPct > 0.0 && actualPct == 0.0) return "NEW_ENTRY";
-        if (sipPct > 0.0 && actualPct < targetPct) return "ACCUMULATOR";
-        return "ACTIVE";
     }
 
     private ReasoningMetadata buildRubberBandMetadata(AggregatedHolding h, double z, double H, String regime, double rarity, double deficit, SignalType action, MarketMetrics metrics) {
@@ -314,12 +293,20 @@ public class RebalanceEngine {
         return new ReasoningMetadata(h.getSchemeName() + " dropped", "", "Strategic exit.", "COOLING_OFF", z, H, vt, regime, "NEUTRAL", 50.0, 0.0, "", metrics.ouHalfLife(), "", null);
     }
 
-    private TacticalSignal buildSignal(AggregatedHolding h, String amfi, SignalType action, double amount, double targetPct, double actualPct, double sipPct, String status, MarketMetrics m, List<String> justs, ReasoningMetadata meta) {
+    private FundStatus resolveStatus(double targetPct, double sipPct, double actualPct, double originalSheetPct) {
+        if (originalSheetPct == 0.0 && sipPct == 0.0 && actualPct > 0.0) return FundStatus.DROPPED;
+        if (targetPct > 0.0 && actualPct == 0.0) return FundStatus.NEW_ENTRY;
+        if (sipPct > 0.0 && actualPct < targetPct) return FundStatus.ACCUMULATOR;
+        return FundStatus.ACTIVE;
+    }
+
+    private TacticalSignal buildSignal(AggregatedHolding h, String amfi, SignalType action, double amount, double targetPct, double actualPct, double sipPct, FundStatus status, MarketMetrics m, List<String> justs, ReasoningMetadata meta) {
         List<String> enrichedJusts = new ArrayList<>(justs);
         if (m.lastBuyDate() != null) enrichedJusts.add("Informative: Last buy recorded on " + m.lastBuyDate());
         if (m.lastSellDate() != null) enrichedJusts.add("Informative: Last sell recorded on " + m.lastSellDate());
         
-        return new TacticalSignal(h.getSchemeName(), CommonUtils.NORMALIZE_NAME.apply(h.getSchemeName()), amfi, action, String.format(Locale.US, "%.2f", Math.abs(amount)), round(targetPct), round(actualPct), round(sipPct), status, m.convictionScore(), m.sortinoRatio(), m.maxDrawdown(), m.navPercentile3yr(), m.drawdownFromAth(), m.returnZScore(), m.lastBuyDate(), enrichedJusts, meta, m.hurst20d(), m.hurst60d(), m.multiScaleRegime(), m.ouHalfLife(), m.ouValid(), m.ouBuyThreshold(), m.ouSellThreshold(), false);
+        return new TacticalSignal(h.getSchemeName(), CommonUtils.NORMALIZE_NAME.apply(h.getSchemeName()), amfi, action, String.format(Locale.US, "%.2f", Math.abs(amount)), round(targetPct), round(actualPct), round(sipPct), status, m.convictionScore(), m.sortinoRatio(), m.maxDrawdown(), m.navPercentile1yr(), m.navPercentile3yr(), m.drawdownFromAth(), m.returnZScore(), m.lastBuyDate(), enrichedJusts, meta, m.hurst20d(), m.hurst60d(), m.multiScaleRegime(), m.ouHalfLife(), m.ouValid(), m.ouBuyThreshold(), m.ouSellThreshold(), false);
+
     }
 
     private double round(double v) { return Math.round(v * 100.0) / 100.0; }

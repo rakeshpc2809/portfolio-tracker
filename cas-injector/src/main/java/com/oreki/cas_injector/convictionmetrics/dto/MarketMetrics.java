@@ -11,6 +11,7 @@ public record MarketMetrics(
     double cvar5,
     double winRate,
     double maxDrawdown,
+    double navPercentile1yr,
     double navPercentile3yr,
     double drawdownFromAth,
     double returnZScore,          // Legacy point-in-time Z-Score
@@ -45,12 +46,12 @@ public record MarketMetrics(
     /** Backward-compatible factory: creates a MarketMetrics from the old 9-field query result. */
     public static MarketMetrics fromLegacy(
         int convictionScore, double sortinoRatio, double cvar5, double winRate,
-        double maxDrawdown, double navPercentile3yr, double drawdownFromAth,
+        double maxDrawdown, double navPercentile1yr, double drawdownFromAth,
         double returnZScore, LocalDate lastBuyDate
     ) {
         return new MarketMetrics(
             convictionScore, sortinoRatio, cvar5, winRate, maxDrawdown,
-            navPercentile3yr, drawdownFromAth, returnZScore, lastBuyDate, null,
+            navPercentile1yr, navPercentile1yr, drawdownFromAth, returnZScore, lastBuyDate, null,
             returnZScore,   // rollingZScore252: fall back to legacy z-score until first engine run
             0.5,            // hurstExponent: neutral
             0.0,            // volatilityTax
@@ -73,6 +74,7 @@ public record MarketMetrics(
                 getSafeDouble(r.get("cvar_5")),
                 getSafeDouble(r.get("win_rate")),
                 getSafeDouble(r.get("max_drawdown")),
+                getSafeDouble(r.get("nav_percentile_1yr")),
                 getSafeDouble(r.get("nav_percentile_3yr")),
                 getSafeDouble(r.get("drawdown_from_ath")),
                 getSafeDouble(r.get("return_z_score")),

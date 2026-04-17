@@ -96,37 +96,51 @@ export default function FundDetailView({
     { 
       label: 'Yield', 
       score: hasRealScores ? fund.yieldScore : (fund.convictionScore || 0) * 0.8, 
-      weight: '20%', 
+      weight: '18%', 
       full: 'Yield Strength',
-      tooltip: 'Your personal CAGR from tax lots.' 
+      tooltip: 'Your personal CAGR from tax lots relative to portfolio best.' 
     },
     { 
       label: 'Risk', 
       score: hasRealScores ? fund.riskScore : (fund.sortinoRatio || 0) * 40, 
-      weight: '25%', 
+      weight: '20%', 
       full: 'Risk Adjusted',
-      tooltip: 'Sortino ratio - return relative to downside risk.' 
+      tooltip: 'Sortino ratio (fixed curve) - captures negative risk meaningfully.' 
     },
     { 
       label: 'Value', 
       score: hasRealScores ? fund.valueScore : (1 - (fund.navPercentile3yr || 0)) * 100, 
-      weight: '25%', 
+      weight: '20%', 
       full: 'Value Entry',
-      tooltip: 'NAV position + drawdown from ATH.' 
+      tooltip: '252-day Rolling Z-Score. Measures statistical cheapness.' 
     },
     { 
       label: 'Pain', 
       score: hasRealScores ? fund.painScore : (1 - Math.abs((fund.maxDrawdown || 0) / 100)) * 100, 
       weight: '15%', 
-      full: 'Drawdown Guard',
-      tooltip: 'Max drawdown resilience.' 
+      full: 'Recovery Quality',
+      tooltip: 'Blended Max Drawdown + OU Mean Reversion Speed.' 
+    },
+    { 
+      label: 'Regime', 
+      score: fund.hmmBearProb != null ? (1 - fund.hmmBearProb) * 100 : 50, 
+      weight: '12%', 
+      full: 'Market Context',
+      tooltip: 'HMM Bear Probability. Suppresses buys in deteriorating regimes.' 
     },
     { 
       label: 'Friction', 
       score: hasRealScores ? fund.frictionScore : 85, 
-      weight: '15%', 
+      weight: '10%', 
       full: 'Tax Logic',
-      tooltip: 'Tax drag simulation results.' 
+      tooltip: 'Tax drag simulation (aligned to 20% STCG ceiling).' 
+    },
+    { 
+      label: 'Quality', 
+      score: 85, // Placeholder for Expense + AUM score
+      weight: '5%', 
+      full: 'Cost & Size',
+      tooltip: 'Expense Ratio drag + AUM sweet-spot scoring.' 
     },
   ];
 
@@ -249,6 +263,34 @@ export default function FundDetailView({
                     )}
                   </div>
                 ))}
+              </div>
+
+              {/* Quant Signals Strip */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div className="p-4 bg-white/[0.02] border border-white/5 rounded-2xl">
+                  <p className="text-[9px] font-black text-muted uppercase tracking-widest mb-1">Regime State</p>
+                  <p className="text-xs font-black text-primary truncate">
+                    {fund.hmmState?.replace('_', ' ') || 'NEUTRAL'}
+                  </p>
+                </div>
+                <div className="p-4 bg-white/[0.02] border border-white/5 rounded-2xl">
+                  <p className="text-[9px] font-black text-muted uppercase tracking-widest mb-1">Price Nature</p>
+                  <p className="text-xs font-black text-primary truncate">
+                    {fund.hurstRegime?.replace('_', ' ') || 'RANDOM WALK'}
+                  </p>
+                </div>
+                <div className="p-4 bg-white/[0.02] border border-white/5 rounded-2xl">
+                  <p className="text-[9px] font-black text-muted uppercase tracking-widest mb-1">Reversion</p>
+                  <p className="text-xs font-black text-primary truncate">
+                    {fund.ouValid ? `${fund.ouHalfLife.toFixed(0)} Days HL` : 'Weak Signal'}
+                  </p>
+                </div>
+                <div className="p-4 bg-white/[0.02] border border-white/5 rounded-2xl">
+                  <p className="text-[9px] font-black text-muted uppercase tracking-widest mb-1">Bear Prob</p>
+                  <p className={`text-xs font-black ${fund.hmmBearProb > 0.6 ? 'text-exit' : 'text-buy'}`}>
+                    {(fund.hmmBearProb * 100).toFixed(1)}%
+                  </p>
+                </div>
               </div>
 
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-10">

@@ -57,16 +57,35 @@ public class BenchmarkService {
         return 14.8; 
     }
 
-    public Map<String, Double> getBenchmarkReturnsForAllPeriods(String benchmarkIndex) {
+    public com.oreki.cas_injector.dashboard.dto.PeriodReturns getBenchmarkReturnsForAllPeriods(String benchmarkIndex) {
         String index = (benchmarkIndex == null || benchmarkIndex.isEmpty()) ? "NIFTY 50" : benchmarkIndex.trim().toUpperCase();
         
-        return Map.of(
-            "1M", computeReturnForPeriod(index, 30),
-            "3M", computeReturnForPeriod(index, 90),
-            "6M", computeReturnForPeriod(index, 180),
-            "1Y", computeReturnForPeriod(index, 365),
-            "3Y", computeReturnForPeriod(index, 1095)
+        return new com.oreki.cas_injector.dashboard.dto.PeriodReturns(
+            computeReturnForPeriod(index, 30),
+            computeReturnForPeriod(index, 90),
+            computeReturnForPeriod(index, 180),
+            computeReturnForPeriod(index, 365),
+            computeReturnForPeriod(index, 1095),
+            computeItdReturn(index)
         );
+    }
+
+    private double computeItdReturn(String index) {
+        try {
+            String sql = """
+                WITH latest AS (
+                    SELECT closing_price FROM index_fundamentals WHERE index_name = ? ORDER BY date DESC LIMIT 1
+                ),
+                earliest AS (
+                    SELECT closing_price FROM index_fundamentals WHERE index_name = ? ORDER BY date ASC LIMIT 1
+                )
+                SELECT (latest.closing_price / NULLIF(earliest.closing_price, 0) - 1) * 100 FROM latest, earliest
+                """;
+            Double res = jdbcTemplate.queryForObject(sql, Double.class, index, index);
+            return res != null ? res : 0.0;
+        } catch (Exception e) {
+            return 0.0;
+        }
     }
 
     private double computeReturnForPeriod(String index, int days) {

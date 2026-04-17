@@ -51,6 +51,7 @@ public class ConvictionMetricsRepository {
 
         // Individual ALTERS for maximum resilience across Postgres versions
         String[] columns = {
+            "nav_percentile_1yr DOUBLE PRECISION DEFAULT 0.5",
             "nav_percentile_3yr DOUBLE PRECISION DEFAULT 0.5",
             "drawdown_from_ath DOUBLE PRECISION DEFAULT 0.0",
             "return_z_score DOUBLE PRECISION DEFAULT 0.0",
@@ -203,8 +204,14 @@ public class ConvictionMetricsRepository {
 
     public List<Map<String, Object>> findMetricsForInvestor(String investorPan) {
         String sql = """
-            SELECT DISTINCT ON (LTRIM(m.amfi_code, '0')) m.* 
+            SELECT DISTINCT ON (LTRIM(m.amfi_code, '0')) m.*, 
+                   fm.expense_ratio, fm.aum_cr
             FROM fund_conviction_metrics m
+            LEFT JOIN (
+                SELECT DISTINCT ON (scheme_code) scheme_code, expense_ratio, aum_cr
+                FROM fund_metrics
+                ORDER BY scheme_code, fetch_date DESC
+            ) fm ON LTRIM(fm.scheme_code, '0') = LTRIM(m.amfi_code, '0')
             WHERE LTRIM(m.amfi_code, '0') IN (
                 SELECT LTRIM(s.amfi_code, '0') FROM scheme s
                 JOIN folio f ON s.folio_id = f.id
@@ -217,9 +224,15 @@ public class ConvictionMetricsRepository {
 
     public List<Map<String, Object>> findAllMap() {
         String sql = """
-            SELECT DISTINCT ON (amfi_code) * 
-            FROM fund_conviction_metrics 
-            ORDER BY amfi_code, calculation_date DESC
+            SELECT DISTINCT ON (m.amfi_code) m.*, 
+                   fm.expense_ratio, fm.aum_cr
+            FROM fund_conviction_metrics m
+            LEFT JOIN (
+                SELECT DISTINCT ON (scheme_code) scheme_code, expense_ratio, aum_cr
+                FROM fund_metrics
+                ORDER BY scheme_code, fetch_date DESC
+            ) fm ON LTRIM(fm.scheme_code, '0') = LTRIM(m.amfi_code, '0')
+            ORDER BY m.amfi_code, m.calculation_date DESC
             """;
         return jdbcTemplate.queryForList(sql);
     }
@@ -274,17 +287,15 @@ public class ConvictionMetricsRepository {
                 GROUP BY d.amfi_code
             ),
             drawdown_and_winrate AS (
-                SELECT d.amfi_code,
-                       SUM(CASE WHEN d.daily_return > (0.07 / 252.0) THEN 1 ELSE 0 END) * 100.0 / COUNT(*) AS win_rate,
-                       (
-                           SELECT MIN((h2.nav - h1.nav) / h1.nav)
-                           FROM fund_history h1
-                           JOIN fund_history h2 ON h1.amfi_code = h2.amfi_code AND h2.nav_date > h1.nav_date
-                           WHERE h1.amfi_code = d.amfi_code 
-                           AND h1.nav_date >= CURRENT_DATE - INTERVAL '3 years'
-                       ) AS max_drawdown
-                FROM daily_stats d
-                GROUP BY d.amfi_code
+                SELECT amfi_code,
+                       SUM(CASE WHEN daily_return > (0.07 / 252.0) THEN 1 ELSE 0 END) * 100.0 / COUNT(*) AS win_rate,
+                       MIN((current_nav - peak_nav) / NULLIF(peak_nav, 0)) AS max_drawdown
+                FROM (
+                    SELECT amfi_code, daily_return, current_nav,
+                           MAX(current_nav) OVER (PARTITION BY amfi_code ORDER BY nav_date) AS peak_nav
+                    FROM daily_stats
+                ) sub
+                GROUP BY amfi_code
             ),
             annualized_aggregations AS (
                 SELECT amfi_code,
@@ -360,7 +371,8 @@ public class ConvictionMetricsRepository {
             )
             UPDATE fund_conviction_metrics fcm
             SET
-                nav_percentile_3yr    = p.nav_percentile_1yr,
+                nav_percentile_1yr    = p.nav_percentile_1yr,
+                nav_percentile_3yr    = p.nav_percentile_1yr, -- Backwards compatibility
                 drawdown_from_ath     = p.drawdown_from_ath,
                 return_z_score        = CASE WHEN rz.std_1yr > 0
                                             THEN (rz.latest_1yr - rz.mean_1yr) / rz.std_1yr
@@ -368,7 +380,7 @@ public class ConvictionMetricsRepository {
             FROM percentile_and_ath p
             LEFT JOIN return_z rz ON p.amfi_code = rz.amfi_code
             WHERE fcm.amfi_code = p.amfi_code
-              AND fcm.calculation_date = (SELECT MAX(calculation_date) FROM fund_conviction_metrics);
+              AND fcm.calculation_date = (SELECT MAX(calculation_date) FROM fund_conviction_metrics fcm2 WHERE fcm2.amfi_code = fcm.amfi_code);
         """;
         return jdbcTemplate.update(sql);
     }
@@ -436,8 +448,8 @@ public class ConvictionMetricsRepository {
                 volatility_tax      = l.volatility_tax_annual
             FROM latest_per_fund l
             WHERE m.amfi_code = l.amfi_code
-            AND m.calculation_date = (SELECT MAX(calculation_date) FROM fund_conviction_metrics)
-            """;
+            AND m.calculation_date = (SELECT MAX(calculation_date) FROM fund_conviction_metrics fcm2 WHERE fcm2.amfi_code = m.amfi_code);
+        """;
         return jdbcTemplate.update(sql);
     }
 
@@ -450,6 +462,7 @@ public class ConvictionMetricsRepository {
                 m.cvar_5 as "cvar5",
                 m.win_rate as "winRate",
                 m.max_drawdown as "maxDrawdown",
+                m.nav_percentile_1yr as "navPercentile1yr",
                 m.conviction_score as "convictionScore",
                 m.calculation_date as "calculationDate"
             FROM fund_conviction_metrics m

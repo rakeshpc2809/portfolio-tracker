@@ -158,16 +158,36 @@ public class PortfolioOrchestrator {
     }
 
     public List<TacticalSignal> generateDailySignals(String pan, double monthlySip, double lumpsum) {
-        List<TacticalSignal> all = new ArrayList<>();
-        all.addAll(computeOpportunisticSignals(pan, lumpsum));
-        all.addAll(computeActiveSellSignals(pan));
-        all.addAll(computeExitQueue(pan));
-        return all;
+        List<TacticalSignal> allEvaluated = evaluateAll(pan);
+        
+        List<TacticalSignal> opportunistic = allEvaluated.stream()
+            .filter(s -> s.action() == SignalType.BUY || (s.action() == SignalType.WATCH && s.fundStatus() == FundStatus.ACCUMULATOR))
+            .sorted(Comparator.comparing(TacticalSignal::returnZScore)
+                .thenComparing(Comparator.comparingDouble(TacticalSignal::convictionScore).reversed()))
+            .collect(Collectors.toList());
+            
+        List<TacticalSignal> activeSells = allEvaluated.stream()
+            .filter(s -> s.action() == SignalType.SELL && s.fundStatus() != FundStatus.DROPPED)
+            .collect(Collectors.toList());
+            
+        List<TacticalSignal> exitQueue = allEvaluated.stream()
+            .filter(s -> s.fundStatus() == FundStatus.DROPPED || s.fundStatus() == FundStatus.EXIT)
+            .collect(Collectors.toList());
+
+        List<TacticalSignal> combined = new ArrayList<>();
+        combined.addAll(opportunistic);
+        combined.addAll(activeSells);
+        combined.addAll(exitQueue);
+        return combined;
     }
 
     public List<com.oreki.cas_injector.rebalancing.dto.RebalancingTrade> computeRebalancingTrades(String pan) {
-        List<TacticalSignal> sells = computeActiveSellSignals(pan);
-        List<TacticalSignal> buys  = evaluateAll(pan).stream()
+        List<TacticalSignal> allEvaluated = evaluateAll(pan);
+        List<TacticalSignal> sells = allEvaluated.stream()
+            .filter(s -> s.action() == SignalType.SELL && s.fundStatus() != FundStatus.DROPPED)
+            .collect(Collectors.toList());
+            
+        List<TacticalSignal> buys  = allEvaluated.stream()
             .filter(s -> s.action() == SignalType.BUY)
             .sorted(Comparator.comparingDouble(
                 s -> -(s.convictionScore() * Math.abs(s.returnZScore()))))
@@ -175,10 +195,25 @@ public class PortfolioOrchestrator {
 
         List<com.oreki.cas_injector.rebalancing.dto.RebalancingTrade> trades = new ArrayList<>();
 
+        Double slab = metricsRepo.getJdbcTemplate().queryForObject(
+            "SELECT tax_slab FROM investor WHERE pan = ?", Double.class, pan);
+        double slabRate = (slab != null) ? slab : 0.30;
+
         for (TacticalSignal sell : sells) {
             double sellAmt = parseSignalAmount(sell.amount());
-            double taxRate  = 0.125; 
-            double taxCost  = sellAmt * taxRate * 0.5; 
+            
+            // Accurate Tax Calculation
+            List<TaxLot> fundLots = taxLotRepository.findByStatusAndSchemeAmfiCodeAndSchemeFolioInvestorPan(
+                "OPEN", sell.amfiCode(), pan);
+            String category = amfiService.getLatestSchemeDetails(sell.amfiCode()).getCategory();
+            
+            var taxRes = taxSimulator.simulateHifoExit(fundLots, category, slabRate);
+            
+            double totalValue = fundLots.stream().mapToDouble(l -> l.getRemainingUnits().doubleValue() * 
+                amfiService.getLatestSchemeDetails(sell.amfiCode()).getNav().doubleValue()).sum();
+            
+            double sellRatio = (totalValue > 0) ? Math.min(1.0, sellAmt / totalValue) : 1.0;
+            double taxCost  = taxRes.estimatedTax() * sellRatio; 
             double proceeds = sellAmt - taxCost;
 
             if (!buys.isEmpty()) {

@@ -88,7 +88,8 @@ public class PortfolioFullService {
 
             // 3. Compute period returns from snapshots
             PeriodReturns periods = computePeriodReturns(history);
-            
+            PeriodReturns niftyReturns = benchmarkService.getBenchmarkReturnsForAllPeriods("NIFTY 50");
+
             // 4. Compute alpha
             DashboardSummaryDTO summary = dashboardService.getInvestorSummary(pan);
             double xirr = 0;
@@ -106,16 +107,17 @@ public class PortfolioFullService {
             double totalGain = currentValue - totalInvested;
 
             return new PortfolioPerformanceDTO(
-                history, niftyHistory, 
+                history, niftyHistory,
                 totalInvested > 0 ? (totalGain / totalInvested) * 100 : 0,
-                xirr, periods, alpha, totalGain,
+                xirr, periods, niftyReturns, alpha, totalGain,
                 totalInvested, // SIP contribution proxy
                 totalGain // market gain
             );
-        }
-        
-        return new PortfolioPerformanceDTO(List.of(), List.of(), 0, 0, 
-            new PeriodReturns(0,0,0,0,0,0), 0, 0, 0, 0);
+            }
+
+            return new PortfolioPerformanceDTO(List.of(), List.of(), 0, 0,
+            new PeriodReturns(0,0,0,0,0,0), new PeriodReturns(0,0,0,0,0,0), 0, 0, 0, 0);
+
     }
 
     private PeriodReturns computePeriodReturns(List<SnapshotPoint> history) {
@@ -232,7 +234,7 @@ public class PortfolioFullService {
                 scheme.setSignalAmount(new BigDecimal(sig.amount().replace(",", "")));
                 scheme.setJustifications(sig.justifications());
                 scheme.setLastBuyDate(sig.lastBuyDate());
-                scheme.setSignalType(sig.fundStatus());
+                scheme.setSignalType(sig.fundStatus().name());
             }
         });
 
@@ -355,6 +357,7 @@ public class PortfolioFullService {
                 scheme.setSortinoRatio(getSafeDouble(fundMetrics.get("sortino_ratio")));
                 scheme.setMaxDrawdown(getSafeDouble(fundMetrics.get("max_drawdown")));
                 scheme.setCvar5(getSafeDouble(fundMetrics.get("cvar_5")));
+                scheme.setNavPercentile1yr(getSafeDouble(fundMetrics.get("nav_percentile_1yr")));
                 scheme.setNavPercentile3yr(getSafeDouble(fundMetrics.get("nav_percentile_3yr")));
                 scheme.setDrawdownFromAth(getSafeDouble(fundMetrics.get("drawdown_from_ath")));
                 scheme.setReturnZScore(getSafeDouble(fundMetrics.get("return_z_score")));

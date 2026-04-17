@@ -3,6 +3,7 @@ package com.oreki.cas_injector.rebalancing.dto;
 import java.time.LocalDate;
 import java.util.List;
 import com.oreki.cas_injector.core.utils.SignalType;
+import com.oreki.cas_injector.core.utils.FundStatus;
 import lombok.Builder;
 
 @Builder
@@ -15,10 +16,11 @@ public record TacticalSignal(
     double plannedPercentage,
     double actualPercentage,
     double sipPercentage,
-    String fundStatus,
+    FundStatus fundStatus,
     int    convictionScore,
     double sortinoRatio,
     double maxDrawdown,
+    double navPercentile1yr,
     double navPercentile3yr,
     double drawdownFromAth,
     double returnZScore,

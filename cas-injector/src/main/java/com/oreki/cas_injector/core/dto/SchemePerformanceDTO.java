@@ -58,6 +58,7 @@ public class SchemePerformanceDTO {
     private double cvar5; // Added for Bug 1
     private double allocationPercentage;
     private double plannedPercentage;
+    private double navPercentile1yr;
     private double navPercentile3yr;
     private double drawdownFromAth;
     private double returnZScore;

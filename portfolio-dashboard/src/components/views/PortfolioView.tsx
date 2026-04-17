@@ -543,8 +543,8 @@ export default function PortfolioView({
                   }}
                 />
                 
-                <ReferenceLine x={50} stroke="rgba(255,255,255,0.05)" strokeDasharray="5 5" label={{ position: 'top', value: 'Avg Conviction', fill: 'rgba(255,255,255,0.1)', fontSize: 8, fontWeight: 900 }} />
-                <ReferenceLine y={15} stroke="rgba(255,255,255,0.05)" strokeDasharray="5 5" label={{ position: 'right', value: 'Typical DD', fill: 'rgba(255,255,255,0.1)', fontSize: 8, fontWeight: 900 }} />
+                <ReferenceLine x={50} stroke="rgba(255,255,255,0.1)" strokeDasharray="5 5" label={{ position: 'top', value: 'Avg Conviction', fill: 'rgba(255,255,255,0.35)', fontSize: 10, fontWeight: 900 }} />
+                <ReferenceLine y={15} stroke="rgba(255,255,255,0.1)" strokeDasharray="5 5" label={{ position: 'right', value: 'Typical DD', fill: 'rgba(255,255,255,0.35)', fontSize: 10, fontWeight: 900 }} />
 
                 <Scatter 
                   name="Funds" 

@@ -19,7 +19,6 @@ import lombok.extern.slf4j.Slf4j;
 @RequiredArgsConstructor
 public class PythonQuantClient {
 
-    @Qualifier("hmmRestTemplate")
     private final RestTemplate restTemplate;
 
     @Value("${casparser.url:http://cas-parser:8000}")

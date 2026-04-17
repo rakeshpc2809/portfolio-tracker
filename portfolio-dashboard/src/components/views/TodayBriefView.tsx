@@ -187,7 +187,7 @@ export default function TodayBriefView({
                 <span className="text-accent font-black tracking-tighter"><CurrencyValue isPrivate={isPrivate} value={sipAmount} /></span>
               </div>
               <input 
-                type="range" min="0" max="200000" step="5000" 
+                type="range" min="0" max="1000000" step="10000" 
                 value={sipAmount} 
                 onChange={(e) => setSipAmount(parseInt(e.target.value) || 0)}
                 className="w-48 h-1.5 bg-white/10 rounded-full appearance-none cursor-pointer accent-accent hover:accent-accent-bright transition-all"

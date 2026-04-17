@@ -187,11 +187,12 @@ export default function PerformanceView({
             </thead>
             <tbody className="divide-y divide-white/5">
               {[
-                { label: '1 Month', val: perf.periodReturns.oneMonth, bench: 1.2 }, 
-                { label: '3 Months', val: perf.periodReturns.threeMonth, bench: 4.5 },
-                { label: '6 Months', val: perf.periodReturns.sixMonth, bench: 8.2 },
-                { label: '1 Year', val: perf.periodReturns.oneYear, bench: 14.8 },
-                { label: 'ITD', val: perf.periodReturns.itd, bench: 18.5 },
+                { label: '1 Month', val: perf.periodReturns.oneMonth, bench: perf.niftyReturns?.oneMonth ?? 0 }, 
+                { label: '3 Months', val: perf.periodReturns.threeMonth, bench: perf.niftyReturns?.threeMonth ?? 0 },
+                { label: '6 Months', val: perf.periodReturns.sixMonth, bench: perf.niftyReturns?.sixMonth ?? 0 },
+                { label: '1 Year', val: perf.periodReturns.oneYear, bench: perf.niftyReturns?.oneYear ?? 0 },
+                { label: '3 Years', val: perf.periodReturns.threeYear, bench: perf.niftyReturns?.threeYear ?? 0 },
+                { label: 'ITD', val: perf.periodReturns.itd, bench: perf.niftyReturns?.itd ?? 0 },
               ].map((row) => (
                 <tr key={row.label} className="group hover:bg-white/[0.02] transition-colors">
                   <td className="py-5 text-xs font-black text-secondary uppercase tracking-widest">{row.label}</td>
