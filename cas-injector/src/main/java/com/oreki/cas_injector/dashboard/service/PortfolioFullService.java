@@ -98,7 +98,8 @@ public class PortfolioFullService {
             } catch (Exception e) {
                 log.warn("Failed to parse XIRR for alpha calculation: {}", summary.getOverallXirr());
             }
-            double benchmarkXirr = benchmarkService.getBenchmarkReturn("", "", "NIFTY 50");
+            Double benchX = benchmarkService.getBenchmarkReturn("", "", "NIFTY 50");
+            double benchmarkXirr = benchX != null ? benchX : 0.0;
             double alpha = xirr - benchmarkXirr;
 
             // 5. Total gain breakdown
@@ -152,66 +153,23 @@ public class PortfolioFullService {
         log.info("📦 Base portfolio loaded for {}. Schemes found: {}", pan, summary.getSchemeBreakdown().size());
         
         // Lightweight - NOT cached (depends on SIP sliders)
-        List<SipLineItem> sipPlan = orchestrator.computeSipPlan(pan, monthlySip);
-        List<TacticalSignal> opportunistic = orchestrator.computeOpportunisticSignals(pan, lumpsum);
-        List<TacticalSignal> activeSells = orchestrator.computeActiveSellSignals(pan);
-        List<TacticalSignal> exitQueue = orchestrator.computeExitQueue(pan);
-
-        List<RebalancingTrade> rebalancingTrades;
-        try {
-            rebalancingTrades = orchestrator.computeRebalancingTrades(pan);
-        } catch (Exception e) {
-            log.warn("Rebalancing trade pairs computation failed: {}", e.getMessage());
-            rebalancingTrades = List.of();
-        }
+        com.oreki.cas_injector.dashboard.dto.UnifiedTacticalPayload tactical = orchestrator.generateUnifiedPayload(pan, monthlySip, lumpsum);
 
         List<DroppedFundSummary> droppedFundSummaries = computeDroppedFundSummaries(pan);
 
-        List<TlhOpportunity> harvestOps = Collections.emptyList();
-        try {
-            harvestOps = taxLossHarvestingService.scanForOpportunities(pan);
-        } catch (Exception e) {
-            log.warn("TLH scan failed, continuing without harvest opportunities: {}", e.getMessage());
-        }
-        
-        double totalHarvestValue = harvestOps.stream()
-            .mapToDouble(TlhOpportunity::estimatedTaxSaving)
-            .sum();
-
-        double totalExitValue = exitQueue.stream()
-            .mapToDouble(s -> {
-                try {
-                    return s.amount() != null ? Double.parseDouble(s.amount().replace(",", "")) : 0.0;
-                } catch (Exception e) {
-                    return 0.0;
-                }
-            })
-            .sum();
-
-        UnifiedTacticalPayload tacticalPayload = UnifiedTacticalPayload.builder()
-            .sipPlan(sipPlan)
-            .opportunisticSignals(opportunistic)
-            .activeSellSignals(activeSells)
-            .exitQueue(exitQueue)
-            .harvestOpportunities(harvestOps)
-            .rebalancingTrades(rebalancingTrades)
+        summary.setTacticalPayload(tactical.toBuilder()
             .droppedFundSummaries(droppedFundSummaries)
-            .totalHarvestValue(totalHarvestValue)
-            .totalExitValue(totalExitValue)
-            .droppedFundsCount(exitQueue.size())
-            .build();
-
-        summary.setTacticalPayload(tacticalPayload);
+            .build());
 
         // Build a lookup map from SIP plan: isin -> SipLineItem
-        Map<String, SipLineItem> sipByIsin = sipPlan.stream()
+        Map<String, SipLineItem> sipByIsin = tactical.getSipPlan().stream()
             .collect(Collectors.toMap(SipLineItem::isin, s -> s, (a, b) -> a));
 
         // Map tactical signals onto the breakdown for UI consistency
         Map<String, TacticalSignal> signalByAmfi = new HashMap<>();
-        opportunistic.forEach(s -> signalByAmfi.put(s.amfiCode(), s));
-        exitQueue.forEach(s -> signalByAmfi.put(s.amfiCode(), s));
-        activeSells.forEach(s -> signalByAmfi.put(s.amfiCode(), s));
+        tactical.getOpportunisticSignals().forEach(s -> signalByAmfi.put(s.amfiCode(), s));
+        tactical.getExitQueue().forEach(s -> signalByAmfi.put(s.amfiCode(), s));
+        tactical.getActiveSellSignals().forEach(s -> signalByAmfi.put(s.amfiCode(), s));
 
         summary.getSchemeBreakdown().forEach(scheme -> {
             String isin = scheme.getIsin();
@@ -317,6 +275,21 @@ public class PortfolioFullService {
     public DashboardSummaryDTO getBasePortfolioCached(String pan) {
         log.info("🧮 Calculating Base Portfolio for {} (Cache Miss)", pan);
         DashboardSummaryDTO summary = dashboardService.getInvestorSummary(pan);
+        
+        // Fetch FY Realized LTCG
+        Double fyLtcg = jdbcTemplate.queryForObject("""
+            SELECT COALESCE(SUM(cg.realized_gain), 0)
+            FROM capital_gain_audit cg
+            JOIN "transaction" t ON cg.sell_transaction_id = t.id
+            JOIN scheme s ON t.scheme_id = s.id
+            JOIN folio f ON s.folio_id = f.id
+            WHERE f.investor_pan = ?
+            AND cg.tax_category IN ('EQUITY_LTCG', 'HYBRID_LTCG', 'NON_EQUITY_LTCG_OLD')
+            AND t.transaction_date >= ?
+            """,
+            Double.class, pan, CommonUtils.getCurrentFyStart());
+        summary.setFyLtcgAlreadyRealized(fyLtcg != null ? fyLtcg : 0.0);
+
         log.info("📊 Raw summary for {} has {} schemes", pan, summary.getSchemeBreakdown().size());
         enrichWithMetricsAndTax(summary, pan);
         return summary;
@@ -324,14 +297,27 @@ public class PortfolioFullService {
 
     private void enrichWithMetricsAndTax(DashboardSummaryDTO summary, String pan) {
         // 1. Fetch Metrics
-        String metricsSql = "SELECT amfi_code, conviction_score, sortino_ratio, max_drawdown, " +
-                           "cvar_5, nav_percentile_3yr, drawdown_from_ath, return_z_score, " +
-                           "yield_score, risk_score, value_score, pain_score, friction_score " +
-                           "FROM fund_conviction_metrics " +
-                           "WHERE calculation_date = (SELECT MAX(calculation_date) FROM fund_conviction_metrics)";
+        String metricsSql = "SELECT m.amfi_code, m.conviction_score, m.sortino_ratio, m.max_drawdown, " +
+                           "m.cvar_5, m.nav_percentile_1yr, m.nav_percentile_3yr, m.drawdown_from_ath, m.return_z_score, " +
+                           "m.yield_score, m.risk_score, m.value_score, m.pain_score, m.friction_score, " +
+                           "m.regime_score, m.expense_score, fm.expense_ratio, fm.aum_cr " +
+                           "FROM fund_conviction_metrics m " +
+                           "LEFT JOIN ( " +
+                           "    SELECT DISTINCT ON (scheme_code) scheme_code, expense_ratio, aum_cr " +
+                           "    FROM fund_metrics " +
+                           "    ORDER BY scheme_code, fetch_date DESC " +
+                           ") fm ON LTRIM(fm.scheme_code, '0') = LTRIM(m.amfi_code, '0') " +
+                           "WHERE m.calculation_date = (SELECT MAX(calculation_date) FROM fund_conviction_metrics)";
         
         Map<String, Map<String, Object>> metrics = jdbcTemplate.queryForList(metricsSql).stream()
-            .collect(Collectors.toMap(m -> (String) m.get("amfi_code"), m -> m, (m1, m2) -> m1));
+            .collect(Collectors.toMap(m -> CommonUtils.SANITIZE_AMFI.apply((String) m.get("amfi_code")), m -> m, (m1, m2) -> m1));
+
+        // 1.1 Fetch Conviction History (Last 30 days)
+        Map<String, List<Integer>> historyMap = new HashMap<>();
+        jdbcTemplate.query("SELECT amfi_code, conviction_score FROM fund_conviction_metrics WHERE calculation_date >= CURRENT_DATE - INTERVAL '30 days' ORDER BY amfi_code, calculation_date ASC", (rs) -> {
+            String amfi = CommonUtils.SANITIZE_AMFI.apply(rs.getString("amfi_code"));
+            historyMap.computeIfAbsent(amfi, k -> new ArrayList<>()).add(rs.getInt("conviction_score"));
+        });
 
         // 2. Fetch Open Lots for Tax countdown
         List<TaxLot> allLots = taxLotRepository.findByStatusAndSchemeFolioInvestorPan("OPEN", pan);
@@ -366,7 +352,10 @@ public class PortfolioFullService {
                 scheme.setRiskScore(getSafeDouble(fundMetrics.get("risk_score")));
                 scheme.setValueScore(getSafeDouble(fundMetrics.get("value_score")));
                 scheme.setPainScore(getSafeDouble(fundMetrics.get("pain_score")));
+                scheme.setRegimeScore(getSafeDouble(fundMetrics.get("regime_score")));
                 scheme.setFrictionScore(getSafeDouble(fundMetrics.get("friction_score")));
+                scheme.setExpenseScore(getSafeDouble(fundMetrics.get("expense_score")));
+                scheme.setConvictionHistory(historyMap.getOrDefault(code, List.of()));
             }
 
             // Allocation %

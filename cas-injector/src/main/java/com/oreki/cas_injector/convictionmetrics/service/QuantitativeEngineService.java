@@ -28,7 +28,6 @@ import lombok.extern.slf4j.Slf4j;
 public class QuantitativeEngineService {
 
     private final ConvictionMetricsRepository convictionMetricsRepository;
-    private final BucketZScorerService bucketZScorerService;
     private final SimpMessagingTemplate messagingTemplate;
     private final Executor taskExecutor;
     private final PythonQuantClient pythonQuantClient;
@@ -39,12 +38,10 @@ public class QuantitativeEngineService {
 
     public QuantitativeEngineService(
             ConvictionMetricsRepository convictionMetricsRepository,
-            BucketZScorerService bucketZScorerService,
             SimpMessagingTemplate messagingTemplate,
             @Qualifier("mathEngineExecutor") Executor taskExecutor,
             PythonQuantClient pythonQuantClient) {
         this.convictionMetricsRepository = convictionMetricsRepository;
-        this.bucketZScorerService = bucketZScorerService;
         this.messagingTemplate = messagingTemplate;
         this.taskExecutor = taskExecutor;
         this.pythonQuantClient = pythonQuantClient;
@@ -82,9 +79,8 @@ public class QuantitativeEngineService {
             updateStatus(2, "Updating NAV signals (Percentile, ATH)...");
             int navSignalRows = convictionMetricsRepository.updateNavSignals();
 
-            // 3. Run Bucket Z-Scorer
-            updateStatus(3, "Computing relative Bucket Z-Scores...");
-            bucketZScorerService.computeBucketCqs();
+            // 3. Skip Bucket Z-Scorer (Pruned)
+            updateStatus(3, "Skipping relative Bucket Z-Scores (Pruned)...");
 
             // 4. Run Rolling Z-Score & Volatility Tax
             updateStatus(4, "Computing Rolling 252-day Z-Score & Volatility Tax...");

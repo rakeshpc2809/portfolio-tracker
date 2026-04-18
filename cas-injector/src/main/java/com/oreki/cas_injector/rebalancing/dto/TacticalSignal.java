@@ -30,17 +30,20 @@ public record TacticalSignal(
     // ── NEW: structured "Why" payload for the Explanation Engine ─────────────
     ReasoningMetadata reasoningMetadata,
 
-    // ── MULTI-SCALE HURST (Task 1B) ──
-    double hurst20d,
-    double hurst60d,
-    String multiScaleRegime,
+    // ── Conviction Sub-scores (7-Factor) ──
+    double yieldScore,
+    double riskScore,
+    double valueScore,
+    double painScore,
+    double regimeScore,
+    double frictionScore,
+    double expenseScore,
 
-    // ── OU FIELDS (Task 2B) ──
+    // ── Metadata ──
+    double expenseRatio,
+    double aumCr,
+
+    // ── OU FIELDS ──
     double ouHalfLife,
-    boolean ouValid,
-    double ouBuyThreshold,
-    double ouSellThreshold,
-
-    // ── HRP FIELDS (Task 4B) ──
-    boolean hrpOverrideActive
+    boolean ouValid
 ) {}

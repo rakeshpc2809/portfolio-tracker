@@ -18,26 +18,31 @@ public record MarketMetrics(
     LocalDate lastBuyDate,
     LocalDate lastSellDate,       // Added for informative warnings
 
-    // ── NEW fields (default to safe neutrals if not yet computed) ───────────
+    // ── Conviction Sub-scores (7-Factor) ──
+    double yieldScore,
+    double riskScore,
+    double valueScore,
+    double painScore,
+    double regimeScore,
+    double frictionScore,
+    double expenseScore,
+    
+    // ── Metadata ──
+    double expenseRatio,
+    double aumCr,
+
+    // ── NEW fields ───────────
     double rollingZScore252,      // Rolling 252-day Z-Score (primary trigger)
     double hurstExponent,         // H value from R/S analysis
     double volatilityTax,         // Annual variance drag = 2σ²
     String hurstRegime,           // "MEAN_REVERTING" | "TRENDING" | "RANDOM_WALK"
     double historicalRarityPct,   // % of days with equally extreme Z-Score
-    double hurst20d,
-    double hurst60d,
-    String multiScaleRegime,
 
-    // ── OU fields (Task 2B) ──────────────────────────────────────────────────
-    double ouTheta,
-    double ouMu,
-    double ouSigma,
+    // ── OU fields ──────────────────────────────────────────────────────────
     double ouHalfLife,
     boolean ouValid,
-    double ouBuyThreshold,
-    double ouSellThreshold,
 
-    // ── HMM fields (Task 3C) ──────────────────────────────────────────────────
+    // ── HMM fields ──────────────────────────────────────────────────────────
     String hmmState,               // "CALM_BULL" | "STRESSED_NEUTRAL" | "VOLATILE_BEAR"
     double hmmBullProb,
     double hmmBearProb,
@@ -52,15 +57,14 @@ public record MarketMetrics(
         return new MarketMetrics(
             convictionScore, sortinoRatio, cvar5, winRate, maxDrawdown,
             navPercentile1yr, navPercentile1yr, drawdownFromAth, returnZScore, lastBuyDate, null,
+            50, 50, 50, 50, 50, 50, 50, // Sub-scores
+            0, 0, // Metadata
             returnZScore,   // rollingZScore252: fall back to legacy z-score until first engine run
             0.5,            // hurstExponent: neutral
             0.0,            // volatilityTax
             "RANDOM_WALK",  // hurstRegime
             50.0,           // historicalRarityPct: neutral
-            0.5,            // hurst20d
-            0.5,            // hurst60d
-            "RANDOM_WALK",  // multiScaleRegime
-            0.0, 0.0, 0.0, 0.0, false, 0.0, 0.0, // OU defaults
+            0.0, false,     // OU defaults
             "STRESSED_NEUTRAL", 0.33, 0.33, 0.33 // HMM defaults
         );
     }
@@ -80,27 +84,28 @@ public record MarketMetrics(
                 getSafeDouble(r.get("return_z_score")),
                 getSafeDate(r.get("last_buy")),
                 getSafeDate(r.get("last_sell")),
+                getSafeDouble(r.get("yield_score")),
+                getSafeDouble(r.get("risk_score")),
+                getSafeDouble(r.get("value_score")),
+                getSafeDouble(r.get("pain_score")),
+                getSafeDouble(r.get("regime_score")),
+                getSafeDouble(r.get("friction_score")),
+                getSafeDouble(r.get("expense_score")),
+                getSafeDouble(r.get("expense_ratio")),
+                getSafeDouble(r.get("aum_cr")),
                 getSafeDouble(r.get("rolling_z_score_252")),
                 getSafeDouble(r.get("hurst_exponent")),
                 getSafeDouble(r.get("volatility_tax")),
                 String.valueOf(r.getOrDefault("hurst_regime", "RANDOM_WALK")),
                 getSafeDouble(r.get("historical_rarity_pct")),
-                getSafeDouble(r.get("hurst_20d")),
-                getSafeDouble(r.get("hurst_60d")),
-                String.valueOf(r.getOrDefault("multi_scale_regime", "RANDOM_WALK")),
-                getSafeDouble(r.get("ou_theta")),
-                getSafeDouble(r.get("ou_mu")),
-                getSafeDouble(r.get("ou_sigma")),
                 getSafeDouble(r.get("ou_half_life")),
                 getSafeBoolean(r.get("ou_valid")),
-                getSafeDouble(r.get("ou_buy_threshold")),
-                getSafeDouble(r.get("ou_sell_threshold")),
                 String.valueOf(r.getOrDefault("hmm_state", "STRESSED_NEUTRAL")),
                 getSafeDouble(r.get("hmm_bull_prob")),
                 getSafeDouble(r.get("hmm_bear_prob")),
                 getSafeDouble(r.get("hmm_transition_bear"))
             ),
-            (a, b) -> a // Merge function to handle potential (though unexpected) duplicate AMFI codes
+            (a, b) -> a 
         ));
     }
 

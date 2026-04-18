@@ -60,23 +60,15 @@ public class ConvictionMetricsRepository {
             "value_score DOUBLE PRECISION DEFAULT 50.0",
             "pain_score DOUBLE PRECISION DEFAULT 50.0",
             "friction_score DOUBLE PRECISION DEFAULT 50.0",
-            "composite_quant_score INT DEFAULT 50",
-            "bucket_peer_count INT DEFAULT 0",
+            "regime_score DOUBLE PRECISION DEFAULT 50.0",
+            "expense_score DOUBLE PRECISION DEFAULT 50.0",
             "rolling_z_score_252 DOUBLE PRECISION DEFAULT 0.0",
             "hurst_exponent DOUBLE PRECISION DEFAULT 0.5",
             "volatility_tax DOUBLE PRECISION DEFAULT 0.0",
             "hurst_regime VARCHAR(20) DEFAULT 'RANDOM_WALK'",
             "historical_rarity_pct DOUBLE PRECISION DEFAULT 50.0",
-            "hurst_20d DOUBLE PRECISION DEFAULT 0.5",
-            "hurst_60d DOUBLE PRECISION DEFAULT 0.5",
-            "multi_scale_regime VARCHAR(20) DEFAULT 'RANDOM_WALK'",
-            "ou_theta DOUBLE PRECISION DEFAULT 0.0",
-            "ou_mu DOUBLE PRECISION DEFAULT 0.0",
-            "ou_sigma DOUBLE PRECISION DEFAULT 0.0",
             "ou_half_life DOUBLE PRECISION DEFAULT 0.0",
             "ou_valid BOOLEAN DEFAULT FALSE",
-            "ou_buy_threshold DOUBLE PRECISION DEFAULT 0.0",
-            "ou_sell_threshold DOUBLE PRECISION DEFAULT 0.0",
             "hmm_state VARCHAR(20) DEFAULT 'STRESSED_NEUTRAL'",
             "hmm_bull_prob DOUBLE PRECISION DEFAULT 0.33",
             "hmm_bear_prob DOUBLE PRECISION DEFAULT 0.33",
@@ -92,19 +84,32 @@ public class ConvictionMetricsRepository {
             }
         }
 
+        // PRUNING: Drop dead columns from previous versions to reduce bloat
+        String[] columnsToDrop = {
+            "hurst_20d", "hurst_60d", "multi_scale_regime",
+            "ou_theta", "ou_mu", "ou_sigma"
+        };
+        for (String col : columnsToDrop) {
+            try {
+                jdbcTemplate.execute("ALTER TABLE fund_conviction_metrics DROP COLUMN IF EXISTS " + col);
+            } catch (Exception e) {
+                log.debug("Column already dropped or error dropping: {}", col);
+            }
+        }
+
         // SELF-HEALING: Update existing NULLs or 0s to defaults
         try {
             jdbcTemplate.execute("""
                 UPDATE fund_conviction_metrics
                 SET conviction_score = COALESCE(NULLIF(conviction_score, 0), 50),
-                    composite_quant_score = COALESCE(NULLIF(composite_quant_score, 0), 50),
                     yield_score = COALESCE(NULLIF(yield_score, 0), 50.0),
                     risk_score = COALESCE(NULLIF(risk_score, 0), 50.0),
                     value_score = COALESCE(NULLIF(value_score, 0), 50.0),
                     pain_score = COALESCE(NULLIF(pain_score, 0), 50.0),
-                    friction_score = COALESCE(NULLIF(friction_score, 0), 50.0)
+                    friction_score = COALESCE(NULLIF(friction_score, 0), 50.0),
+                    regime_score = COALESCE(NULLIF(regime_score, 0), 50.0),
+                    expense_score = COALESCE(NULLIF(expense_score, 0), 50.0)
                 WHERE conviction_score IS NULL OR conviction_score = 0
-                   OR composite_quant_score IS NULL OR composite_quant_score = 0
                    OR yield_score IS NULL OR yield_score = 0
             """);
         } catch (Exception e) {
@@ -237,7 +242,7 @@ public class ConvictionMetricsRepository {
         return jdbcTemplate.queryForList(sql);
     }
 
-    public void updateConvictionBreakdown(int total, double yield, double risk, double value, double pain, double friction, String amfi) {
+    public void updateConvictionBreakdown(int total, double yield, double risk, double value, double pain, double regime, double friction, double expense, String amfi) {
         jdbcTemplate.update("""
             UPDATE fund_conviction_metrics 
             SET conviction_score = ?,
@@ -245,10 +250,12 @@ public class ConvictionMetricsRepository {
                 risk_score = ?,
                 value_score = ?,
                 pain_score = ?,
-                friction_score = ?
+                regime_score = ?,
+                friction_score = ?,
+                expense_score = ?
             WHERE LTRIM(amfi_code, '0') = LTRIM(?, '0')
             AND calculation_date = (SELECT MAX(calculation_date) FROM fund_conviction_metrics WHERE LTRIM(amfi_code, '0') = LTRIM(?, '0'))
-            """, total, yield, risk, value, pain, friction, amfi, amfi);
+            """, total, yield, risk, value, pain, regime, friction, expense, amfi, amfi);
     }
 
     public int runNightlyMathEngine() {

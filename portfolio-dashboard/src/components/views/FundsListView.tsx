@@ -86,19 +86,16 @@ function ActionPill({ action }: { action: string }) {
   );
 }
 
-function RegimeBadge({ metaphor, multiScaleRegime }: { metaphor: string; multiScaleRegime: string }) {
+function RegimeBadge({ metaphor, hurstRegime }: { metaphor: string; hurstRegime: string }) {
   let label = '';
   let colorClass = '';
   let icon = '';
   let tooltip = '';
 
-  if (multiScaleRegime === "FRACTAL_BREAKOUT") {
-    label = "Breakout"; colorClass = "text-violet-400"; icon = "🚀";
-    tooltip = "Strong momentum confirmed across short and long term horizons.";
-  } else if (multiScaleRegime === "STRONG_HOLD") {
-    label = "Momentum"; colorClass = "text-emerald-400"; icon = "🏄";
-  } else if (multiScaleRegime === "MEAN_REVERSION_RALLY") {
-    label = "Rally"; colorClass = "text-amber-400"; icon = "🎯";
+  if (hurstRegime === "TRENDING") {
+    label = "Trending"; colorClass = "text-emerald-400"; icon = "🏄";
+  } else if (hurstRegime === "MEAN_REVERTING") {
+    label = "Reverting"; colorClass = "text-amber-400"; icon = "🎯";
   } else if (metaphor === "RUBBER_BAND") {
     label = "Oversold"; colorClass = "text-blue-400"; icon = "🔴";
     tooltip = "Stretched away from fair value — likely snapback ahead.";
@@ -128,6 +125,39 @@ function RegimeBadge({ metaphor, multiScaleRegime }: { metaphor: string; multiSc
         </Tooltip.Portal>
       </Tooltip.Root>
     </Tooltip.Provider>
+  );
+}
+
+function ConvictionSparkline({ history }: { history?: number[] }) {
+  if (!history || history.length < 2) return null;
+  
+  const min = Math.min(...history);
+  const max = Math.max(...history);
+  const range = max - min || 1;
+  const points = history.slice(-30).map((val, i, arr) => ({
+    x: (i / (arr.length - 1)) * 100,
+    y: 100 - ((val - min) / range) * 100
+  }));
+
+  const pathData = `M ${points.map(p => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' L ')}`;
+  const isUp = history[history.length - 1] >= history[0];
+
+  return (
+    <div className="h-4 w-12 group/spark relative mr-2">
+      <svg viewBox="0 0 100 100" className="w-full h-full overflow-visible" preserveAspectRatio="none">
+        <motion.path
+          d={pathData}
+          fill="none"
+          stroke={isUp ? "#a6e3a1" : "#f38ba8"}
+          strokeWidth="12"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          initial={{ pathLength: 0 }}
+          animate={{ pathLength: 1 }}
+          transition={{ duration: 1, ease: "easeOut" }}
+        />
+      </svg>
+    </div>
   );
 }
 
@@ -319,7 +349,8 @@ export default function FundsListView({
                   </div>
                   <div className="flex flex-col items-end gap-2.5 shrink-0">
                     <div className="flex items-center gap-2">
-                      <RegimeBadge metaphor={fund.reasoningMetadata?.uiMetaphor} multiScaleRegime={fund.multiScaleRegime} />
+                      <ConvictionSparkline history={fund.convictionHistory} />
+                      <RegimeBadge metaphor={fund.reasoningMetadata?.uiMetaphor} hurstRegime={fund.hurstRegime} />
                       <ActionPill action={fund.action ?? 'HOLD'} />
                     </div>
                     {renderConvictionDots(fund.convictionScore)}

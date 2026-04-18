@@ -238,13 +238,14 @@ export default function PortfolioView({
               .filter((s: any) => (s.currentValue || 0) > 5000)
               .map((s: any) => {
                 const personal = parseFloat(s.xirr || '0');
-                const bench = parseFloat(s.benchmarkXirr || '14.8');
+                const bench = (s.benchmarkXirr !== null && s.benchmarkXirr !== undefined) ? parseFloat(s.benchmarkXirr) : null;
                 const name = s.simpleName || s.schemeName;
                 return {
                   fund: name.length > 12 ? name.substring(0, 12) + '…' : name,
                   "Personal XIRR": parseFloat(personal.toFixed(1)),
-                  "Benchmark": parseFloat(bench.toFixed(1)),
-                  isWinning: personal >= bench
+                  "Benchmark": bench !== null ? parseFloat(bench.toFixed(1)) : 0,
+                  isWinning: bench !== null ? personal >= bench : true,
+                  hasBench: bench !== null
                 };
               })
               .sort((a: any, b: any) => a["Personal XIRR"] - b["Personal XIRR"])
@@ -256,7 +257,7 @@ export default function PortfolioView({
             layout="vertical"
             groupMode="grouped"
             colors={({ id, data }: any) => {
-              if (id === "Benchmark") return "rgba(255,255,255,0.1)";
+              if (id === "Benchmark") return data.hasBench ? "rgba(255,255,255,0.1)" : "transparent";
               return data.isWinning ? "#a6e3a1" : "#f38ba8";
             }}
             borderRadius={4}
@@ -427,8 +428,11 @@ export default function PortfolioView({
 
             {/* Alpha Edge */}
             {(() => {
-              const winning = activeBreakdown.filter((s: any) => parseFloat(s.xirr) > s.benchmarkXirr).length;
-              const total = activeBreakdown.length || 1;
+              const winning = activeBreakdown.filter((s: any) => 
+                (s.benchmarkXirr !== null && s.benchmarkXirr !== undefined) && 
+                parseFloat(s.xirr) > s.benchmarkXirr
+              ).length;
+              const total = activeBreakdown.filter((s: any) => (s.benchmarkXirr !== null && s.benchmarkXirr !== undefined)).length || 1;
               const pct = (winning / total) * 100;
 
               return (
@@ -466,7 +470,8 @@ export default function PortfolioView({
               </thead>
               <tbody className="divide-y divide-white/5">
                 {activeBreakdown.map((s: any) => {
-                  const alpha = parseFloat(s.xirr || '0') - (s.benchmarkXirr || 14.8);
+                  const bench = (s.benchmarkXirr !== null && s.benchmarkXirr !== undefined) ? s.benchmarkXirr : null;
+                  const alpha = bench !== null ? parseFloat(s.xirr || '0') - bench : null;
                   return (
                     <tr key={s.schemeName} className="group hover:bg-white/[0.02] transition-colors">
                       <td className="py-5 pl-4">
@@ -482,8 +487,8 @@ export default function PortfolioView({
                         </span>
                       </td>
                       <td className="py-5 text-center tabular-nums text-xs font-black text-secondary">{mask((s.allocationPercentage || 0).toFixed(1) + '%')}</td>
-                      <td className={`py-5 text-right pr-4 tabular-nums text-xs font-black ${alpha >= 0 ? 'text-buy' : 'text-exit'}`}>
-                        {mask((alpha > 0 ? '+' : '') + alpha.toFixed(1) + '%')}
+                      <td className={`py-5 text-right pr-4 tabular-nums text-xs font-black ${alpha !== null ? (alpha >= 0 ? 'text-buy' : 'text-exit') : 'text-muted'}`}>
+                        {alpha !== null ? mask((alpha > 0 ? '+' : '') + alpha.toFixed(1) + '%') : '—'}
                       </td>
                     </tr>
                   );

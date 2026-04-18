@@ -24,6 +24,7 @@ public class DashboardSummaryDTO {
     private BigDecimal totalUnrealizedGain; 
     private String overallReturn;
     private String overallXirr;
+    private double fyLtcgAlreadyRealized;
     private List<SchemePerformanceDTO> schemeBreakdown;
     private UnifiedTacticalPayload tacticalPayload; // 🚀 ADD THIS
 }

@@ -1,11 +1,13 @@
 package com.oreki.cas_injector.rebalancing.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyDouble;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 
 import java.time.LocalDate;
@@ -31,7 +33,8 @@ import com.oreki.cas_injector.core.repository.SchemeRepository;
 import com.oreki.cas_injector.core.service.LotAggregationService;
 import com.oreki.cas_injector.core.service.SystemicRiskMonitorService;
 import com.oreki.cas_injector.core.utils.SignalType;
-import com.oreki.cas_injector.rebalancing.dto.ReasoningMetadata;
+import com.oreki.cas_injector.core.utils.FundStatus;
+import com.oreki.cas_injector.dashboard.dto.UnifiedTacticalPayload;
 import com.oreki.cas_injector.rebalancing.dto.StrategyTarget;
 import com.oreki.cas_injector.rebalancing.dto.TacticalSignal;
 import com.oreki.cas_injector.taxmanagement.service.TaxLossHarvestingService;
@@ -56,37 +59,39 @@ public class PortfolioOrchestratorTest {
     @Mock private SystemicRiskMonitorService riskMonitor;
     @Mock private TaxLossHarvestingService tlhService;
     @Mock private TransactionRepository txnRepo;
+    @Mock private RebalanceEngine rebalanceEngine;
 
     @InjectMocks
     private PortfolioOrchestrator orchestrator;
 
     @Test
-    public void testComputeOpportunisticSignals_UnconstrainedCash() {
-        StrategyTarget target = new StrategyTarget("ISIN1", "Fund 1", 10.0, 5.0, "ACTIVE", "CORE");
-        
-        LocalDate oldDate = LocalDate.now().minusDays(30);
-        when(metricsRepo.fetchLiveMetricsMap("PAN1")).thenReturn(Map.of("AMFI1", MarketMetrics.fromLegacy(80, 1.5, -2.0, 0.7, -10.0, 0.5, 0.0, -2.0, oldDate)));
-        when(schemeRepository.findFirstByAmfiCode("AMFI1")).thenReturn(Optional.of(Scheme.builder().isin("ISIN1").amfiCode("AMFI1").name("Fund 1").build()));
-        when(taxLotRepository.findByStatusAndSchemeFolioInvestorPan("OPEN", "PAN1")).thenReturn(Collections.emptyList());
+    public void testGenerateUnifiedPayload() {
+        String pan = "PAN123";
+        when(taxLotRepository.findByStatusAndSchemeFolioInvestorPan(anyString(), anyString())).thenReturn(Collections.emptyList());
+        when(lotAggregationService.aggregate(anyList())).thenReturn(Collections.emptyList());
+        when(metricsRepo.fetchLiveMetricsMap(anyString())).thenReturn(Collections.emptyMap());
+        when(strategyService.fetchLatestStrategy()).thenReturn(List.of(
+            new StrategyTarget("ISIN1", "Fund 1", 10.0, 5.0, "ACTIVE", "CORE")
+        ));
+        when(jdbcTemplate.queryForObject(anyString(), eq(Double.class), any(), any())).thenReturn(0.0);
+        when(riskMonitor.assessTailRisk(anyList(), anyMap(), anyMap())).thenReturn(SystemicRiskMonitorService.TailRiskLevel.NORMAL);
+        when(schemeRepository.findByIsin(anyString())).thenReturn(Optional.of(Scheme.builder().amfiCode("AMFI1").build()));
 
-        List<TacticalSignal> signals = orchestrator.computeOpportunisticSignals("PAN1", 100000.0);
+        TacticalSignal mockSignal = TacticalSignal.builder()
+            .schemeName("Fund 1")
+            .action(SignalType.BUY)
+            .amount("5000.00")
+            .returnZScore(-2.1)
+            .fundStatus(FundStatus.NEW_ENTRY)
+            .build();
 
-        assertEquals(1, signals.size());
-        assertEquals(SignalType.BUY, signals.get(0).action());
-        assertEquals("33333.33", signals.get(0).amount());
-    }
+        when(rebalanceEngine.evaluate(any(), any(), any(), anyDouble(), anyString(), anyList(), anyMap(), anyDouble(), anyDouble(), any()))
+            .thenReturn(mockSignal);
 
-    @Test
-    public void testComputeOpportunisticSignals_ConstrainedCash() {
-        LocalDate oldDate = LocalDate.now().minusDays(30);
-        when(metricsRepo.fetchLiveMetricsMap("PAN1")).thenReturn(Map.of("AMFI1", MarketMetrics.fromLegacy(100, 1.5, -2.0, 0.7, -10.0, 0.5, 0.0, -2.5, oldDate)));
-        when(schemeRepository.findFirstByAmfiCode("AMFI1")).thenReturn(Optional.of(Scheme.builder().isin("ISIN1").amfiCode("AMFI1").name("Fund 1").build()));
-        when(taxLotRepository.findByStatusAndSchemeFolioInvestorPan("OPEN", "PAN1")).thenReturn(Collections.emptyList());
+        UnifiedTacticalPayload payload = orchestrator.generateUnifiedPayload(pan, 75000.0, 0.0);
 
-        List<TacticalSignal> signals = orchestrator.computeOpportunisticSignals("PAN1", 10000.0);
-
-        assertEquals(1, signals.size());
-        assertEquals(SignalType.BUY, signals.get(0).action());
-        assertEquals("3333.33", signals.get(0).amount());
+        assertFalse(payload.getOpportunisticSignals().isEmpty());
+        assertEquals("Fund 1", payload.getOpportunisticSignals().get(0).schemeName());
+        assertEquals(SignalType.BUY, payload.getOpportunisticSignals().get(0).action());
     }
 }

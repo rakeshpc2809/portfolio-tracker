@@ -1,5 +1,6 @@
 package com.oreki.cas_injector.rebalancing.service;
 
+import com.oreki.cas_injector.dashboard.dto.UnifiedTacticalPayload;
 import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
@@ -64,9 +65,6 @@ public class PortfolioOrchestrator {
         return strategyService;
     }
 
-    @Value("${hrp.blend.ratio:0.5}")
-    private double hrpBlendRatio;
-
     private static final double MAX_SINGLE_FUND_CONCENTRATION = 0.30;
 
     public List<SipLineItem> computeSipPlan(String pan, double monthlySip) {
@@ -89,10 +87,6 @@ public class PortfolioOrchestrator {
         List<StrategyTarget> targets = strategyService.fetchLatestStrategy();
         double totalValue = holdings.stream().mapToDouble(AggregatedHolding::getCurrentValue).sum();
 
-        // Compute HRP weights for held assets
-        List<String> heldAmfis = isinToAmfiMap.values().stream().filter(s -> !s.isEmpty()).toList();
-        Map<String, Double> hrpWeights = hrpService.computeHrpWeights(heldAmfis).weights();
-
         List<SipLineItem> plan = new ArrayList<>();
         for (StrategyTarget target : targets) {
             // HARD CONSTRAINT: Skip DROPPED or EXIT status funds
@@ -110,10 +104,6 @@ public class PortfolioOrchestrator {
             }
             
             double targetPct = target.targetPortfolioPct();
-            if (!amfi.isEmpty() && hrpWeights.containsKey(amfi)) {
-                double hrpW = hrpWeights.get(amfi);
-                targetPct = (targetPct * (1 - hrpBlendRatio)) + (hrpW * 100 * hrpBlendRatio);
-            }
 
             AggregatedHolding h = holdingsByIsin.get(isin);
             double currentVal = (h != null) ? h.getCurrentValue() : 0.0;
@@ -157,41 +147,79 @@ public class PortfolioOrchestrator {
         return plan;
     }
 
-    public List<TacticalSignal> generateDailySignals(String pan, double monthlySip, double lumpsum) {
-        List<TacticalSignal> allEvaluated = evaluateAll(pan);
-        
-        List<TacticalSignal> opportunistic = allEvaluated.stream()
-            .filter(s -> s.action() == SignalType.BUY || (s.action() == SignalType.WATCH && s.fundStatus() == FundStatus.ACCUMULATOR))
-            .sorted(Comparator.comparing(TacticalSignal::returnZScore)
-                .thenComparing(Comparator.comparingDouble(TacticalSignal::convictionScore).reversed()))
-            .collect(Collectors.toList());
-            
-        List<TacticalSignal> activeSells = allEvaluated.stream()
-            .filter(s -> s.action() == SignalType.SELL && s.fundStatus() != FundStatus.DROPPED)
-            .collect(Collectors.toList());
-            
-        List<TacticalSignal> exitQueue = allEvaluated.stream()
-            .filter(s -> s.fundStatus() == FundStatus.DROPPED || s.fundStatus() == FundStatus.EXIT)
-            .collect(Collectors.toList());
-
-        List<TacticalSignal> combined = new ArrayList<>();
-        combined.addAll(opportunistic);
-        combined.addAll(activeSells);
-        combined.addAll(exitQueue);
-        return combined;
+    public List<com.oreki.cas_injector.rebalancing.dto.RebalancingTrade> computeRebalancingTrades(String pan) {
+        return computeRebalancingTradesFromSignals(pan, evaluateAll(pan));
     }
 
-    public List<com.oreki.cas_injector.rebalancing.dto.RebalancingTrade> computeRebalancingTrades(String pan) {
-        List<TacticalSignal> allEvaluated = evaluateAll(pan);
-        List<TacticalSignal> sells = allEvaluated.stream()
+    private double parseSignalAmount(String amount) {
+        try {
+            return amount != null ? Double.parseDouble(amount.replace(",", "")) : 0.0;
+        } catch (Exception e) {
+            return 0.0;
+        }
+    }
+
+    public UnifiedTacticalPayload generateUnifiedPayload(String pan, double monthlySip, double lumpsum) {
+        log.info("🎯 Generating Unified Tactical Payload for PAN: {}", pan);
+        List<TacticalSignal> all = evaluateAll(pan);
+        
+        // 1. Partition signals using stream filters to prevent redundant computation
+        List<TacticalSignal> opportunistic = all.stream()
+            .filter(s -> s.action() == SignalType.BUY || (s.action() == SignalType.WATCH && s.fundStatus() == FundStatus.ACCUMULATOR))
+            .sorted(Comparator.comparing(TacticalSignal::returnZScore))
+            .collect(Collectors.toList());
+
+        List<TacticalSignal> activeSells = all.stream()
+            .filter(s -> s.action() == SignalType.SELL && s.fundStatus() != FundStatus.DROPPED)
+            .collect(Collectors.toList());
+
+        List<TacticalSignal> exitQueue = all.stream()
+            .filter(s -> s.fundStatus() == FundStatus.DROPPED || s.fundStatus() == FundStatus.EXIT || s.action() == SignalType.EXIT)
+            .collect(Collectors.toList());
+
+        // 2. Compute SIP Plan (Already optimized or can be passed 'all' if needed)
+        List<SipLineItem> sip = computeSipPlan(pan, monthlySip); 
+
+        // 3. Compute Rebalancing Trades using already evaluated signals
+        List<com.oreki.cas_injector.rebalancing.dto.RebalancingTrade> rebalancingTrades = computeRebalancingTradesFromSignals(pan, all);
+
+        // 4. TLH Opportunities
+        List<com.oreki.cas_injector.taxmanagement.dto.TlhOpportunity> harvest = java.util.Collections.emptyList();
+        try {
+            harvest = taxLossHarvestingService.scanForOpportunities(pan);
+        } catch (Exception e) {
+            log.warn("TLH scan failed: {}", e.getMessage());
+        }
+
+        double totalHarvest = harvest.stream().mapToDouble(com.oreki.cas_injector.taxmanagement.dto.TlhOpportunity::estimatedTaxSaving).sum();
+
+        double totalExitValue = exitQueue.stream()
+            .mapToDouble(s -> parseSignalAmount(s.amount()))
+            .sum();
+
+        return UnifiedTacticalPayload.builder()
+            .sipPlan(sip)
+            .opportunisticSignals(opportunistic)
+            .activeSellSignals(activeSells)
+            .exitQueue(exitQueue)
+            .harvestOpportunities(harvest)
+            .rebalancingTrades(rebalancingTrades)
+            .totalExitValue(totalExitValue)
+            .totalHarvestValue(totalHarvest)
+            .droppedFundsCount(exitQueue.size())
+            .build();
+    }
+
+    public List<com.oreki.cas_injector.rebalancing.dto.RebalancingTrade> computeRebalancingTradesFromSignals(String pan, List<TacticalSignal> allSignals) {
+        List<TacticalSignal> sells = allSignals.stream()
             .filter(s -> s.action() == SignalType.SELL && s.fundStatus() != FundStatus.DROPPED)
             .collect(Collectors.toList());
             
-        List<TacticalSignal> buys  = allEvaluated.stream()
+        List<TacticalSignal> buys  = allSignals.stream()
             .filter(s -> s.action() == SignalType.BUY)
             .sorted(Comparator.comparingDouble(
                 s -> -(s.convictionScore() * Math.abs(s.returnZScore()))))
-            .collect(Collectors.toList());
+            .collect(Collectors.toCollection(ArrayList::new)); // Mutable for removal
 
         List<com.oreki.cas_injector.rebalancing.dto.RebalancingTrade> trades = new ArrayList<>();
 
@@ -242,33 +270,6 @@ public class PortfolioOrchestrator {
         return trades;
     }
 
-    private double parseSignalAmount(String amount) {
-        try {
-            return Double.parseDouble(amount.replace(",", ""));
-        } catch (Exception e) {
-            return 0.0;
-        }
-    }
-
-    public List<TacticalSignal> computeOpportunisticSignals(String pan, double lumpsum) {
-        return evaluateAll(pan).stream()
-            .filter(s -> s.action() == SignalType.BUY || (s.action() == SignalType.WATCH && "ACCUMULATOR".equals(s.fundStatus())))
-            .sorted(Comparator.comparing(TacticalSignal::returnZScore))
-            .collect(Collectors.toList());
-    }
-
-    public List<TacticalSignal> computeActiveSellSignals(String pan) {
-        return evaluateAll(pan).stream()
-            .filter(s -> s.action() == SignalType.SELL && !"DROPPED".equals(s.fundStatus()))
-            .collect(Collectors.toList());
-    }
-
-    public List<TacticalSignal> computeExitQueue(String pan) {
-        return evaluateAll(pan).stream()
-            .filter(s -> "DROPPED".equals(s.fundStatus()) || "EXIT".equals(s.fundStatus()) || s.action() == SignalType.EXIT)
-            .collect(Collectors.toList());
-    }
-
     private List<TacticalSignal> evaluateAll(String pan) {
         List<TaxLot> openLots = taxLotRepository.findByStatusAndSchemeFolioInvestorPan("OPEN", pan);
         List<AggregatedHolding> holdings = aggregationService.aggregate(openLots);
@@ -295,6 +296,9 @@ public class PortfolioOrchestrator {
                 return (s != null) ? CommonUtils.SANITIZE_AMFI.apply(s.getAmfiCode()) : "";
             }, (a, b) -> a));
 
+        // Systemic Risk Assessment (Once per portfolio)
+        SystemicRiskMonitorService.TailRiskLevel tailRisk = riskMonitor.assessTailRisk(holdings, metricsMap, nameToAmfiMap);
+
         Map<String, StrategyTarget> targetByIsin = targets.stream()
             .collect(Collectors.toMap(StrategyTarget::isin, t -> t, (a, b) -> a));
 
@@ -304,23 +308,22 @@ public class PortfolioOrchestrator {
         for (AggregatedHolding h : holdings) {
             StrategyTarget t = targetByIsin.get(h.getIsin());
             if (t == null) {
-                // If held but not in strategy, treat as DROPPED
                 t = new StrategyTarget(h.getIsin(), h.getSchemeName(), 0.0, 0.0, "DROPPED", "OTHERS");
             }
             String amfi = nameToAmfiMap.get(h.getSchemeName());
             MarketMetrics m = metricsMap.getOrDefault(amfi, MarketMetrics.fromLegacy(50, 0, 0, 0, 0, 0.5, 0, 0, LocalDate.of(1970, 1, 1)));
             
-            results.add(rebalanceEngine.evaluate(h, t, m, totalValue, amfi, holdings, nameToAmfiMap, t.targetPortfolioPct(), fyLtcgRealized));
+            results.add(rebalanceEngine.evaluate(h, t, m, totalValue, amfi, holdings, nameToAmfiMap, t.targetPortfolioPct(), fyLtcgRealized, tailRisk));
         }
 
-        // Process new entries (target > 0 but not held)
+        // Process new entries
         Set<String> heldIsins = holdings.stream().map(AggregatedHolding::getIsin).collect(Collectors.toSet());
         for (StrategyTarget t : targets) {
             if (!heldIsins.contains(t.isin()) && t.targetPortfolioPct() > 0) {
                 AggregatedHolding emptyH = new AggregatedHolding(t.schemeName(), 0, 0, 0, 0, 0, 0, 0, 0, 0, "UNKNOWN", "NEW_ENTRY", t.isin(), 0.0);
                 String amfi = schemeRepository.findByIsin(t.isin()).map(s -> CommonUtils.SANITIZE_AMFI.apply(s.getAmfiCode())).orElse("");
                 MarketMetrics m = metricsMap.getOrDefault(amfi, MarketMetrics.fromLegacy(50, 0, 0, 0, 0, 0.5, 0, 0, LocalDate.of(1970, 1, 1)));
-                results.add(rebalanceEngine.evaluate(emptyH, t, m, totalValue, amfi, holdings, nameToAmfiMap, t.targetPortfolioPct(), fyLtcgRealized));
+                results.add(rebalanceEngine.evaluate(emptyH, t, m, totalValue, amfi, holdings, nameToAmfiMap, t.targetPortfolioPct(), fyLtcgRealized, tailRisk));
             }
         }
 

@@ -127,7 +127,7 @@ public class ConvictionScoringService {
                                (combinedExpAum * WEIGHT_EXPENSE);
 
             convictionMetricsRepository.updateConvictionBreakdown(
-                (int) finalScore, yieldScore, riskScore, valueScore, painRecoveryScore, frictionScore, amfi
+                (int) finalScore, yieldScore, riskScore, valueScore, painRecoveryScore, regimeScore, frictionScore, combinedExpAum, amfi
             );
         }
         log.info("🏁 [3/3] Revised 7-Factor Scoring completed.");

@@ -41,7 +41,7 @@ public class SchemePerformanceDTO {
     private FundStatus status; // ACTIVE or REDEEMED
 
     private String xirr;
-    private double benchmarkXirr;
+    private Double benchmarkXirr;
 
     private String category;
 
@@ -70,12 +70,14 @@ public class SchemePerformanceDTO {
     private double stcgValue;      // alias for stcgUnrealizedGain (keep for compat)
     private double ltcgValue;      // alias for ltcgUnrealizedGain (keep for compat)
 
-    // Conviction Sub-scores (Added for Design Improvement 5)
+    // Conviction Sub-scores (Revised 7-Factor)
     private double yieldScore;
     private double riskScore;
     private double valueScore;
     private double painScore;
     private double frictionScore;
+    private double regimeScore;
+    private double expenseScore;
     
     private String simpleName;
 
@@ -97,4 +99,5 @@ public class SchemePerformanceDTO {
     private BigDecimal signalAmount;
     private List<String> justifications;
     private LocalDate lastBuyDate;
+    private List<Integer> convictionHistory;
 }

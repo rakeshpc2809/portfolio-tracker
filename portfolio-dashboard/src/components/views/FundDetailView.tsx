@@ -89,55 +89,55 @@ export default function FundDetailView({
     return { normalizedHistory: series, needsBackfill: false };
   }, [history, fund.lastBuyDate]);
 
-  // Design Improvement 5: Use real sub-scores if available, otherwise estimate
+  // Design Improvement 5: Use real sub-scores from the 7-factor model
   const hasRealScores = fund.yieldScore != null && fund.riskScore != null && fund.valueScore != null;
   
   const components = [
     { 
       label: 'Yield', 
-      score: hasRealScores ? fund.yieldScore : (fund.convictionScore || 0) * 0.8, 
+      score: hasRealScores ? fund.yieldScore : 50, 
       weight: '18%', 
       full: 'Yield Strength',
       tooltip: 'Your personal CAGR from tax lots relative to portfolio best.' 
     },
     { 
       label: 'Risk', 
-      score: hasRealScores ? fund.riskScore : (fund.sortinoRatio || 0) * 40, 
+      score: hasRealScores ? fund.riskScore : 50, 
       weight: '20%', 
       full: 'Risk Adjusted',
       tooltip: 'Sortino ratio (fixed curve) - captures negative risk meaningfully.' 
     },
     { 
       label: 'Value', 
-      score: hasRealScores ? fund.valueScore : (1 - (fund.navPercentile3yr || 0)) * 100, 
+      score: hasRealScores ? fund.valueScore : 50, 
       weight: '20%', 
       full: 'Value Entry',
       tooltip: '252-day Rolling Z-Score. Measures statistical cheapness.' 
     },
     { 
       label: 'Pain', 
-      score: hasRealScores ? fund.painScore : (1 - Math.abs((fund.maxDrawdown || 0) / 100)) * 100, 
+      score: hasRealScores ? fund.painScore : 50, 
       weight: '15%', 
       full: 'Recovery Quality',
       tooltip: 'Blended Max Drawdown + OU Mean Reversion Speed.' 
     },
     { 
       label: 'Regime', 
-      score: fund.hmmBearProb != null ? (1 - fund.hmmBearProb) * 100 : 50, 
+      score: hasRealScores ? fund.regimeScore : 50, 
       weight: '12%', 
       full: 'Market Context',
       tooltip: 'HMM Bear Probability. Suppresses buys in deteriorating regimes.' 
     },
     { 
       label: 'Friction', 
-      score: hasRealScores ? fund.frictionScore : 85, 
+      score: hasRealScores ? fund.frictionScore : 50, 
       weight: '10%', 
       full: 'Tax Logic',
       tooltip: 'Tax drag simulation (aligned to 20% STCG ceiling).' 
     },
     { 
       label: 'Quality', 
-      score: 85, // Placeholder for Expense + AUM score
+      score: hasRealScores ? fund.expenseScore : 50, 
       weight: '5%', 
       full: 'Cost & Size',
       tooltip: 'Expense Ratio drag + AUM sweet-spot scoring.' 
@@ -208,6 +208,14 @@ export default function FundDetailView({
                 
                 <div className="flex items-center gap-8">
                   <div className="text-right">
+                    <p className="text-[10px] font-black uppercase tracking-[0.3em] text-muted mb-1 opacity-40">Win Rate</p>
+                    <p className="text-xl font-black text-buy">{(fund.winRate * 100).toFixed(0)}%</p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-[10px] font-black uppercase tracking-[0.3em] text-muted mb-1 opacity-40">Tail Loss</p>
+                    <p className="text-xl font-black text-exit">{fund.cvar5?.toFixed(2)}%</p>
+                  </div>
+                  <div className="text-right">
                     <p className="text-[10px] font-black uppercase tracking-[0.3em] text-muted mb-1 opacity-40">Logic Confidence</p>
                     <p className="text-4xl font-black tabular-nums text-primary glow-accent">{fund.convictionScore}<span className="text-sm text-muted font-light ml-1">/100</span></p>
                   </div>
@@ -239,7 +247,7 @@ export default function FundDetailView({
                 </div>
                 <div className="flex-none px-4 py-2 rounded-2xl bg-white/[0.03] border border-white/5 space-y-1">
                   <p className="text-[8px] font-black uppercase tracking-widest text-muted opacity-60">Range Index</p>
-                  <p className="text-xs font-black text-primary uppercase tracking-tighter">{Math.round((fund.navPercentile3yr || 0) * 100)}%</p>
+                  <p className="text-xs font-black text-primary uppercase tracking-tighter">{Math.round((fund.navPercentile1yr || 0) * 100)}%</p>
                 </div>
                 <div className="flex-none px-4 py-2 rounded-2xl bg-white/[0.03] border border-white/5 space-y-1">
                   <p className="text-[8px] font-black uppercase tracking-widest text-muted opacity-60">Correction</p>
@@ -455,7 +463,7 @@ export default function FundDetailView({
                     
                     <motion.div 
                       initial={{ left: '50%' }}
-                      animate={{ left: `${Math.min(98, Math.max(2, (fund.navPercentile3yr || 0) * 100))}%` }}
+                      animate={{ left: `${Math.min(98, Math.max(2, (fund.navPercentile1yr || 0) * 100))}%` }}
                       transition={{ type: "spring", stiffness: 100, damping: 20 }}
                       className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-4 h-4 bg-accent rounded-full border-4 border-[#0d0d1a] shadow-[0_0_20px_rgba(129,140,248,0.8)] z-10 cursor-help"
                     />
@@ -466,7 +474,7 @@ export default function FundDetailView({
                     <div className="space-y-1">
                       <p className="text-muted text-[9px] font-black uppercase tracking-[0.2em] opacity-50">Range Index</p>
                       <p className="text-xl font-black text-primary tracking-tighter">
-                        {Math.round((fund.navPercentile3yr || 0) * 100)}<span className="text-xs text-muted font-light ml-1">%ile</span>
+                        {Math.round((fund.navPercentile1yr || 0) * 100)}<span className="text-xs text-muted font-light ml-1">%ile</span>
                       </p>
                     </div>
                     <div className="space-y-1">

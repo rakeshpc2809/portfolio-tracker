@@ -1,12 +1,11 @@
 package com.oreki.cas_injector.dashboard.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
-
-import java.util.Map;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -30,7 +29,7 @@ public class BenchmarkServiceTest {
         when(jdbcTemplate.queryForObject(anyString(), eq(Double.class), eq("NIFTY 50"), eq("NIFTY 50")))
             .thenReturn(15.5);
 
-        double result = benchmarkService.getBenchmarkReturn("CORE", "LARGE CAP", null);
+        Double result = benchmarkService.getBenchmarkReturn("CORE", "LARGE CAP", null);
         assertEquals(15.5, result, 0.01);
     }
 
@@ -40,8 +39,18 @@ public class BenchmarkServiceTest {
         when(jdbcTemplate.queryForObject(anyString(), eq(Double.class), anyString(), anyString()))
             .thenThrow(new RuntimeException("No data"));
 
-        double result = benchmarkService.getBenchmarkReturn("CORE", "MID CAP", null);
+        Double result = benchmarkService.getBenchmarkReturn("CORE", "MID CAP", null);
         assertEquals(22.4, result, 0.01);
+    }
+
+    @Test
+    public void testGetBenchmarkReturn_NullFallback() {
+        // Mock SQL failure or no rows and no category match
+        when(jdbcTemplate.queryForObject(anyString(), eq(Double.class), anyString(), anyString()))
+            .thenThrow(new RuntimeException("No data"));
+
+        Double result = benchmarkService.getBenchmarkReturn("UNKNOWN", "UNKNOWN", "UNKNOWN INDEX");
+        assertNull(result);
     }
 
     @Test

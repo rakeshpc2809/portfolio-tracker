@@ -23,7 +23,6 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class RebalanceEngine {
 
-    private final SystemicRiskMonitorService systemicRiskMonitor;
     private final PositionSizingService positionSizingService;
 
     private static final double DRIFT_TOLERANCE     = 2.5;   
@@ -39,23 +38,15 @@ public class RebalanceEngine {
 
     private static final int LTCG_WAIT_THRESHOLD_DAYS = 90;
 
-    private double getEffectiveDriftTolerance(String hmmState) {
-        return switch (hmmState != null ? hmmState : "STRESSED_NEUTRAL") {
-            case "VOLATILE_BEAR"   -> 1.5;   // Trim faster in bear markets
-            case "CALM_BULL"       -> 4.0;   // Let winners run in bull markets
-            default                -> DRIFT_TOLERANCE;   // 2.5 baseline
-        };
-    }
-
     /**
      * Graduated trim: avoids correcting the full drift in one transaction.
      */
     private double computeGraduatedSellAmount(
-            double overweightPct, double effectiveTolerance, double totalPortfolioValue) {
+            double overweightPct, double totalPortfolioValue) {
         double excess = (overweightPct / 100.0) * totalPortfolioValue;
         if (excess <= 0) return 0;
-        double span = Math.max(10.0 - effectiveTolerance, 1.0);
-        double f = Math.min(1.0, Math.max(0.0, (overweightPct - effectiveTolerance) / span));
+        double span = Math.max(10.0 - DRIFT_TOLERANCE, 1.0);
+        double f = Math.min(1.0, Math.max(0.0, (overweightPct - DRIFT_TOLERANCE) / span));
         double trimFraction = 0.40 + 0.60 * f;
         return excess * trimFraction;
     }
@@ -69,19 +60,14 @@ public class RebalanceEngine {
             List<AggregatedHolding> allHoldings,
             Map<String, String> nameToAmfiMap,
             double            originalSheetPct,
-            double            fyLtcgAlreadyRealized) {
+            double            fyLtcgAlreadyRealized,
+            TailRiskLevel     tailRisk) {
 
-        TailRiskLevel tailRisk = systemicRiskMonitor.assessTailRisk(
-            allHoldings, Map.of(amfiCode, metrics), nameToAmfiMap);
-
-        double effectiveTolerance = getEffectiveDriftTolerance(metrics.hmmState());
-
+        List<String> justifications = new ArrayList<>();
         if (tailRisk == TailRiskLevel.CRITICAL) {
-            List<String> justifications = new ArrayList<>();
-            justifications.add("🚨 Tail Risk Alert: Portfolio CVaR has breached critical danger threshold. New buys suspended.");
-            ReasoningMetadata meta = buildCriticalReviewMetadata(holding, metrics.rollingZScore252(), metrics.hurstExponent(), metrics.hurstRegime(), metrics.historicalRarityPct(), target.targetPortfolioPct() - (totalPortfolioValue > 0 ? (holding.getCurrentValue() / totalPortfolioValue * 100.0) : 0), metrics);
-            return buildSignal(holding, amfiCode, SignalType.WATCH, 0.0, target.targetPortfolioPct(), 
-                (totalPortfolioValue > 0 ? (holding.getCurrentValue() / totalPortfolioValue * 100.0) : 0), target.sipPct(), FundStatus.ACTIVE, metrics, justifications, meta);
+            justifications.add("🚨 Systemic Risk Warning: Portfolio CVaR is critical. Position sizes should be monitored.");
+        } else if (tailRisk == TailRiskLevel.ELEVATED) {
+            justifications.add("⚠️ Elevated Risk: Portfolio tail risk is rising.");
         }
 
         double targetPct = target.targetPortfolioPct();
@@ -103,12 +89,9 @@ public class RebalanceEngine {
         }
 
         SignalType action = SignalType.HOLD;
-        List<String> justifications = new ArrayList<>();
-        
-        if (tailRisk == TailRiskLevel.ELEVATED) justifications.add("⚠️ Elevated tail risk detected. Monitor closely.");
 
         // --- REBALANCING ONLY: SELL LOGIC ---
-        if (actualPct > targetPct + effectiveTolerance) {
+        if (actualPct > targetPct + DRIFT_TOLERANCE) {
             // Alpha Capture (Wave Rider) for active funds
             if (H > 0.62 && z < Z_SELL_MILD) {
                 justifications.add(String.format(
@@ -118,9 +101,8 @@ public class RebalanceEngine {
                 return buildSignal(holding, amfiCode, SignalType.HOLD, 0, targetPct, actualPct, sipPct, status, metrics, justifications, meta);
             }
             
-            double harvestAmount = computeGraduatedSellAmount(overweightPct, effectiveTolerance, totalPortfolioValue);
-            double sellThreshold = metrics.ouValid() ? metrics.ouSellThreshold() : Z_SELL_STRONG;
-            if ("CALM_BULL".equals(metrics.hmmState()) && metrics.hmmBullProb() > 0.65) sellThreshold += 0.5;
+            double harvestAmount = computeGraduatedSellAmount(overweightPct, totalPortfolioValue);
+            double sellThreshold = Z_SELL_STRONG;
             
             if (z >= sellThreshold) {
                 justifications.add("Volatility Harvest triggered: Asset is statistically expensive.");
@@ -135,7 +117,7 @@ public class RebalanceEngine {
         }
 
         // --- REBALANCING ONLY: BUY LOGIC ---
-        if (actualPct < targetPct - effectiveTolerance) {
+        if (actualPct < targetPct - DRIFT_TOLERANCE) {
             double deficit = targetPct - actualPct;
             
             if (status == FundStatus.NEW_ENTRY) {
@@ -157,7 +139,7 @@ public class RebalanceEngine {
                 return buildSignal(holding, amfiCode, SignalType.WATCH, 0, targetPct, actualPct, sipPct, status, metrics, justifications, meta);
             }
             
-            double buyThreshold = metrics.ouValid() ? metrics.ouBuyThreshold() : Z_BUY_STRONG;
+            double buyThreshold = Z_BUY_STRONG;
             if (H < H_MEAN_REVERTING && z <= buyThreshold) {
                 action = SignalType.BUY;
                 justifications.add("Rubber Band: Mean reversion trigger at statistical low.");
@@ -177,8 +159,8 @@ public class RebalanceEngine {
 
             ReasoningMetadata meta = buildRubberBandMetadata(holding, z, H, regime, rarity, deficit, action, metrics);
             double diffAmount = (targetPct / 100.0) * totalPortfolioValue - holding.getCurrentValue();
-            double kellyAmount = positionSizingService.calculateAdjustedBuySize(Math.abs(diffAmount), metrics);
-            return buildSignal(holding, amfiCode, action, kellyAmount, targetPct, actualPct, sipPct, status, metrics, justifications, meta);
+            double buyAmount = positionSizingService.calculateAdjustedBuySize(Math.abs(diffAmount), deficit);
+            return buildSignal(holding, amfiCode, action, buyAmount, targetPct, actualPct, sipPct, status, metrics, justifications, meta);
         }
 
         ReasoningMetadata meta = ReasoningMetadata.neutral(holding.getSchemeName());
@@ -305,8 +287,38 @@ public class RebalanceEngine {
         if (m.lastBuyDate() != null) enrichedJusts.add("Informative: Last buy recorded on " + m.lastBuyDate());
         if (m.lastSellDate() != null) enrichedJusts.add("Informative: Last sell recorded on " + m.lastSellDate());
         
-        return new TacticalSignal(h.getSchemeName(), CommonUtils.NORMALIZE_NAME.apply(h.getSchemeName()), amfi, action, String.format(Locale.US, "%.2f", Math.abs(amount)), round(targetPct), round(actualPct), round(sipPct), status, m.convictionScore(), m.sortinoRatio(), m.maxDrawdown(), m.navPercentile1yr(), m.navPercentile3yr(), m.drawdownFromAth(), m.returnZScore(), m.lastBuyDate(), enrichedJusts, meta, m.hurst20d(), m.hurst60d(), m.multiScaleRegime(), m.ouHalfLife(), m.ouValid(), m.ouBuyThreshold(), m.ouSellThreshold(), false);
-
+        return TacticalSignal.builder()
+            .schemeName(h.getSchemeName())
+            .simpleName(CommonUtils.NORMALIZE_NAME.apply(h.getSchemeName()))
+            .amfiCode(amfi)
+            .action(action)
+            .amount(String.format(Locale.US, "%.2f", Math.abs(amount)))
+            .plannedPercentage(round(targetPct))
+            .actualPercentage(round(actualPct))
+            .sipPercentage(round(sipPct))
+            .fundStatus(status)
+            .convictionScore(m.convictionScore())
+            .sortinoRatio(m.sortinoRatio())
+            .maxDrawdown(m.maxDrawdown())
+            .navPercentile1yr(m.navPercentile1yr())
+            .navPercentile3yr(m.navPercentile3yr())
+            .drawdownFromAth(m.drawdownFromAth())
+            .returnZScore(m.returnZScore())
+            .lastBuyDate(m.lastBuyDate())
+            .justifications(enrichedJusts)
+            .reasoningMetadata(meta)
+            .yieldScore(m.yieldScore())
+            .riskScore(m.riskScore())
+            .valueScore(m.valueScore())
+            .painScore(m.painScore())
+            .regimeScore(m.regimeScore())
+            .frictionScore(m.frictionScore())
+            .expenseScore(m.expenseScore())
+            .expenseRatio(m.expenseRatio())
+            .aumCr(m.aumCr())
+            .ouHalfLife(m.ouHalfLife())
+            .ouValid(m.ouValid())
+            .build();
     }
 
     private double round(double v) { return Math.round(v * 100.0) / 100.0; }

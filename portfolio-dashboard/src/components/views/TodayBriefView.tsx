@@ -33,7 +33,6 @@ export default function TodayBriefView({
   onFundClick: (schemeName: string) => void;
   isPrivate: boolean;
 }) {
-  const dateStr = new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
   const payload = portfolioData.tacticalPayload || { 
     sipPlan: [], 
     opportunisticSignals: [], 
@@ -129,9 +128,21 @@ export default function TodayBriefView({
               <CurrencyValue isPrivate={isPrivate} value={portfolioData.currentInvestedAmount} />
             </p>
           </div>
-          <div>
-            <p className="text-[9px] font-black uppercase tracking-widest text-muted mb-1 opacity-60">Last Briefing</p>
-            <p className="text-xl font-black tabular-nums text-secondary">{dateStr}</p>
+          <div className="group cursor-help relative">
+            <div className="flex justify-between items-center mb-1">
+              <p className="text-[9px] font-black uppercase tracking-widest text-muted opacity-60 group-hover:text-harvest transition-colors">LTCG Headroom</p>
+              <span className="text-[8px] font-black text-harvest/60">₹1.25L Limit</span>
+            </div>
+            <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden border border-white/5">
+              <motion.div 
+                initial={{ width: 0 }}
+                animate={{ width: `${Math.min(100, (portfolioData.fyLtcgAlreadyRealized / 125000) * 100)}%` }}
+                className="h-full bg-harvest shadow-[0_0_8px_rgba(180,190,254,0.4)]"
+              />
+            </div>
+            <p className="text-[10px] font-black text-harvest mt-1.5 tabular-nums">
+              {isPrivate ? '••••' : formatCurrency(125000 - portfolioData.fyLtcgAlreadyRealized)} <span className="text-[8px] opacity-40">LEFT</span>
+            </p>
           </div>
         </div>
       </motion.div>

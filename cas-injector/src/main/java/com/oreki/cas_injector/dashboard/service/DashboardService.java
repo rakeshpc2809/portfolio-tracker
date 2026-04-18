@@ -196,7 +196,7 @@ public class DashboardService {
                 else if (amfiCategory.contains("EQUITY") || amfiCategory.contains("INDEX") || amfiCategory.contains("GROWTH")) bucket = "AGGRESSIVE_GROWTH";
                 else if (amfiCategory.contains("DEBT") || amfiCategory.contains("LIQUID")) bucket = "DEBT_SLAB_TAXED";
 
-                double benchXirr = benchmarkService.getBenchmarkReturn(bucket, amfiCategory, info.getSchemeName());
+                Double benchXirr = benchmarkService.getBenchmarkReturn(bucket, amfiCategory, info.getSchemeName());
                 MarketMetrics m = metricsMap.getOrDefault(code, MarketMetrics.fromLegacy(50, 0, 0, 0, 0, 0.5, 0, 0, LocalDate.of(1970, 1, 1)));
 
                 return SchemePerformanceDTO.builder()

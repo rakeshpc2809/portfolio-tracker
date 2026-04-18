@@ -31,20 +31,24 @@ public class RebalanceController {
      * Endpoint to fetch the daily tactical signals for a specific investor.
      * Example URL: GET /api/portfolio/ABCDE1234F/tactical-signals
      */
- @GetMapping("/{pan}/tactical-signals")
+    @GetMapping("/{pan}/tactical-signals")
     public ResponseEntity<List<TacticalSignal>> getTacticalSignals(
             @PathVariable("pan") String investorPan,
             @RequestParam(value = "monthlySip", defaultValue = "75000") double monthlySip,
             @RequestParam(value = "lumpsum", defaultValue = "0") double lumpsum) {
         
-        // Pass the new dynamic capital variables into your upgraded Orchestrator
-        List<TacticalSignal> signals = orchestrator.generateDailySignals(investorPan, monthlySip, lumpsum);
+        UnifiedTacticalPayload payload = orchestrator.generateUnifiedPayload(investorPan, monthlySip, lumpsum);
         
-        if (signals.isEmpty()) {
+        java.util.List<TacticalSignal> combined = new java.util.ArrayList<>();
+        combined.addAll(payload.getOpportunisticSignals());
+        combined.addAll(payload.getActiveSellSignals());
+        combined.addAll(payload.getExitQueue());
+
+        if (combined.isEmpty()) {
             return ResponseEntity.noContent().build();
         }
         
-        return ResponseEntity.ok(signals);
+        return ResponseEntity.ok(combined);
     }
 
     @GetMapping("/{pan}/tax-loss-harvesting")
@@ -58,25 +62,7 @@ public class RebalanceController {
             @RequestParam(defaultValue = "75000") double monthlySip,
             @RequestParam(defaultValue = "0") double lumpsum) {
         
-        List<SipLineItem> sip         = orchestrator.computeSipPlan(pan, monthlySip);
-        List<TacticalSignal> oppBuys  = orchestrator.computeOpportunisticSignals(pan, lumpsum);
-        List<TacticalSignal> sellsigs = orchestrator.computeActiveSellSignals(pan);   
-        List<TacticalSignal> exits    = orchestrator.computeExitQueue(pan);
-        List<TlhOpportunity> harvest  = taxLossHarvestingService.scanForOpportunities(pan);
-        
-        double totalExit    = exits.stream().mapToDouble(s -> parseAmount(s.amount())).sum();
-        double totalHarvest = harvest.stream().mapToDouble(TlhOpportunity::harvestableAmount).sum();
-        
-        return ResponseEntity.ok(UnifiedTacticalPayload.builder()
-            .sipPlan(sip)
-            .opportunisticSignals(oppBuys)
-            .activeSellSignals(sellsigs)
-            .exitQueue(exits)
-            .harvestOpportunities(harvest)
-            .totalExitValue(totalExit)
-            .totalHarvestValue(totalHarvest)
-            .droppedFundsCount(exits.size())
-            .build());
+        return ResponseEntity.ok(orchestrator.generateUnifiedPayload(pan, monthlySip, lumpsum));
     }
 
     private double parseAmount(String amt) {

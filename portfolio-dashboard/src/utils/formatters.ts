@@ -53,9 +53,9 @@ export const convictionColor = (score: number): string => {
 };
 
 export const buildPlainEnglishReason = (signal: any): string => {
-  const pct = signal.navPercentile3yr != null
-    ? `At ${Math.round(signal.navPercentile3yr * 100)}% of its 3-year NAV range.`
-    : '';
+  const pct = signal.navPercentile1yr != null
+    ? `At ${Math.round(signal.navPercentile1yr * 100)}% of its 1-year NAV range.`
+    : null;
   const deviation = signal.actualPercentage - signal.plannedPercentage;
   const drift = deviation != null
     ? `${Math.abs(deviation).toFixed(1)}% ${deviation < 0 ? 'underweight' : 'overweight'} target.`

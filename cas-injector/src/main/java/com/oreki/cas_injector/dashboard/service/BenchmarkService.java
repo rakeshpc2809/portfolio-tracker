@@ -16,7 +16,7 @@ public class BenchmarkService {
      * Fetches actual 1-year annualized return from index_fundamentals if available.
      * Uses a robust CTE approach to find the price exactly 365 days ago.
      */
-    public double getBenchmarkReturn(String bucket, String category, String benchmarkIndex) {
+    public Double getBenchmarkReturn(String bucket, String category, String benchmarkIndex) {
         String targetIndex = (benchmarkIndex != null && !benchmarkIndex.isEmpty()) 
             ? benchmarkIndex.trim().toUpperCase() 
             : CommonUtils.DETERMINE_BENCHMARK.apply(bucket, category);
@@ -41,8 +41,7 @@ public class BenchmarkService {
                 SELECT (latest.closing_price / NULLIF(year_ago.closing_price, 0) - 1) * 100
                 FROM latest, year_ago
                 """;
-            Double result = jdbcTemplate.queryForObject(sql, Double.class, targetIndex, targetIndex);
-            if (result != null) return result;
+            return jdbcTemplate.queryForObject(sql, Double.class, targetIndex, targetIndex);
         } catch (Exception e) {
             // Fallback to constants if data is missing or query fails
         }
@@ -54,7 +53,7 @@ public class BenchmarkService {
         if (cat.contains("GOLD")) return 14.0;
         if (cat.contains("ARBITRAGE")) return 8.5;
         
-        return 14.8; 
+        return null; 
     }
 
     public com.oreki.cas_injector.dashboard.dto.PeriodReturns getBenchmarkReturnsForAllPeriods(String benchmarkIndex) {
@@ -86,7 +85,7 @@ public class BenchmarkService {
         } catch (Exception e) {
             return 0.0;
         }
-    }
+        }
 
     private double computeReturnForPeriod(String index, int days) {
         try {
@@ -106,5 +105,5 @@ public class BenchmarkService {
         } catch (Exception e) {
             return 0.0;
         }
-    }
+        }
 }

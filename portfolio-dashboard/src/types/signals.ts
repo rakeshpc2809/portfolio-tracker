@@ -43,13 +43,23 @@ export interface TacticalSignal {
   convictionScore:     number;
   sortinoRatio:        number;
   maxDrawdown:         number;
-  navPercentile3yr:    number;
+  navPercentile1yr:    number;
   drawdownFromAth:     number;
   returnZScore:        number;
   lastBuyDate:         string | null;
   justifications:      string[];
   reasoningMetadata:   ReasoningMetadata | null; // null = legacy signal, render fallback
   
+  // Conviction Sub-scores
+  yieldScore?:         number;
+  riskScore?:          number;
+  valueScore?:         number;
+  painScore?:          number;
+  regimeScore?:        number;
+  frictionScore?:      number;
+  expenseScore?:       number;
+  convictionHistory?:  number[];
+
   // Advanced Quantitative Metrics (from SchemePerformanceDTO)
   rollingZScore252:    number;
   historicalRarityPct: number;
@@ -60,14 +70,8 @@ export interface TacticalSignal {
   hmmBullProb:         number;
   hmmBearProb:         number;
 
-  hurst20d:            number;
-  hurst60d:            number;
-  multiScaleRegime:    string;
   ouHalfLife:          number;
   ouValid:             boolean;
-  ouBuyThreshold:      number;
-  ouSellThreshold:     number;
-  hrpOverrideActive:   boolean;
 }
 
 export interface RebalancingTrade {
