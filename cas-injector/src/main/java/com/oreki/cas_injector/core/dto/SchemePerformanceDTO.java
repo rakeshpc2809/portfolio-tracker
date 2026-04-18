@@ -50,6 +50,8 @@ public class SchemePerformanceDTO {
     private String amc;
 
     private String benchmarkIndex;
+    private boolean isSlabRateFund;
+    private double slabRateGain;
 
     // Conviction & Risk Metrics (Updated for NAV Signals)
     private int convictionScore;

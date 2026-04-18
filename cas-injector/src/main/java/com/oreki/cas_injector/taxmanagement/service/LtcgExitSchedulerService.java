@@ -24,6 +24,7 @@ public class LtcgExitSchedulerService {
 
     private final TaxLotRepository taxLotRepository;
     private final NavService navService;
+    private final org.springframework.jdbc.core.JdbcTemplate jdbcTemplate;
     private static final double LTCG_ANNUAL_EXEMPTION = 125000.0;
 
     public record ExitScheduleItem(
@@ -45,7 +46,10 @@ public class LtcgExitSchedulerService {
             List<String> droppedIsins) {
 
         double remainingThisFY = Math.max(0, LTCG_ANNUAL_EXEMPTION - fyLtcgAlreadyRealized);
-        double capacityNextFY  = LTCG_ANNUAL_EXEMPTION; // Resets on April 1
+        double capacityNextFY  = LTCG_ANNUAL_EXEMPTION; 
+
+        Double slab = jdbcTemplate.queryForObject("SELECT tax_slab FROM investor WHERE pan = ?", Double.class, pan);
+        double slabRate = (slab != null) ? slab : 0.30;
 
         List<ExitScheduleItem> schedule = new ArrayList<>();
 
@@ -63,65 +67,82 @@ public class LtcgExitSchedulerService {
             String name = entry.getKey();
             List<TaxLot> fundLots = entry.getValue();
 
-            double currentNav = navService.getLatestSchemeDetails(
-                fundLots.get(0).getScheme().getAmfiCode()).getNav().doubleValue();
+            String amfiCode = fundLots.get(0).getScheme().getAmfiCode();
+            var details = navService.getLatestSchemeDetails(amfiCode);
+            double currentNav = details.getNav().doubleValue();
+            String category = (details.getCategory() != null) ? details.getCategory().toUpperCase() : "OTHER";
 
-            double ltcgG = 0, stcgG = 0, totalVal = 0;
+            double ltcgG = 0, stcgG = 0, slabG = 0, totalVal = 0;
             int minDays = 365;
-            boolean hasStcg = false;
+            boolean hasEquityStcg = false;
+            boolean isSlabFund = false;
 
             for (TaxLot lot : fundLots) {
                 double units = lot.getRemainingUnits().doubleValue();
                 double cost  = lot.getCostBasisPerUnit().doubleValue() * units;
                 double val   = units * currentNav;
-                double gain  = val - cost;
-                long   age   = ChronoUnit.DAYS.between(lot.getBuyDate(), LocalDate.now());
+                double gain  = Math.max(0, val - cost);
                 totalVal += val;
-                if (age >= 365) {
-                    ltcgG += Math.max(0, gain);
+
+                String taxCat = com.oreki.cas_injector.core.utils.CommonUtils.DETERMINE_TAX_CATEGORY.apply(lot.getBuyDate(), LocalDate.now(), category);
+                if (taxCat.contains("LTCG")) {
+                    ltcgG += gain;
+                } else if (taxCat.equals("SLAB_RATE_TAX")) {
+                    slabG += gain;
+                    isSlabFund = true;
                 } else {
-                    stcgG += Math.max(0, gain);
+                    stcgG += gain;
+                    long age = ChronoUnit.DAYS.between(lot.getBuyDate(), LocalDate.now());
                     int daysLeft = (int)(365 - age);
                     if (daysLeft < minDays) minDays = daysLeft;
-                    hasStcg = true;
+                    hasEquityStcg = true;
                 }
             }
 
-            // Tax this FY
-            double taxableLtcgThisFY = Math.max(0, ltcgG - remainingThisFY);
-            double taxThisFY = taxableLtcgThisFY * 0.125 + stcgG * 0.20;
-
-            // Tax next FY (assume STCG converts to LTCG if we wait minDays)
+            double taxThisFY;
             double taxNextFY;
-            if (hasStcg && minDays < 120) {
-                // All gains become LTCG next FY
-                double totalLtcgNextFY = ltcgG + stcgG;
-                double taxableNextFY = Math.max(0, totalLtcgNextFY - capacityNextFY);
-                taxNextFY = taxableNextFY * 0.125;
+
+            if (isSlabFund) {
+                // Slab funds: simple multiplication, no exemption
+                taxThisFY = (ltcgG + stcgG + slabG) * slabRate;
+                taxNextFY = taxThisFY; // Assume slab rate stays same
             } else {
-                double taxableNextFY = Math.max(0, ltcgG - capacityNextFY);
-                taxNextFY = taxableNextFY * 0.125 + stcgG * 0.20;
+                // LTCG eligible funds
+                double taxableLtcgThisFY = Math.max(0, ltcgG - remainingThisFY);
+                taxThisFY = taxableLtcgThisFY * 0.125 + stcgG * 0.20;
+
+                if (hasEquityStcg && minDays < 120) {
+                    double totalLtcgNextFY = ltcgG + stcgG;
+                    double taxableNextFY = Math.max(0, totalLtcgNextFY - capacityNextFY);
+                    taxNextFY = taxableNextFY * 0.125;
+                } else {
+                    double taxableNextFY = Math.max(0, ltcgG - capacityNextFY);
+                    taxNextFY = taxableNextFY * 0.125 + stcgG * 0.20;
+                }
             }
 
             String suggested = taxNextFY < taxThisFY - 500 ? "NEXT_FY" : "CURRENT_FY";
             double saving = Math.max(0, taxThisFY - taxNextFY);
 
-            String reason = switch (suggested) {
-                case "NEXT_FY" -> String.format(
-                    "Deferring to next FY saves ₹%.0f. LTCG budget resets April 1.", saving);
-                default -> ltcgG <= remainingThisFY
-                    ? "Exit this FY — gains fit within remaining ₹" + Math.round(remainingThisFY) + " exemption."
-                    : "Exit this FY — deferral saves less than ₹500.";
-            };
+            String reason;
+            if (isSlabFund) {
+                reason = "Debt fund: Taxed at slab rate. Exit whenever liquidity is needed.";
+            } else {
+                reason = switch (suggested) {
+                    case "NEXT_FY" -> String.format("Deferring to next FY saves ₹%.0f. LTCG budget resets April 1.", saving);
+                    default -> ltcgG <= remainingThisFY
+                        ? "Exit this FY — gains fit within remaining ₹" + Math.round(remainingThisFY) + " exemption."
+                        : "Exit this FY — deferral saves less than ₹500.";
+                };
+            }
 
             schedule.add(new ExitScheduleItem(
-                name, totalVal, ltcgG, stcgG,
-                hasStcg ? minDays : 0,
+                name, totalVal, ltcgG, stcgG + slabG,
+                !isSlabFund && hasEquityStcg ? minDays : 0,
                 suggested, taxThisFY, taxNextFY, saving, reason
             ));
 
-            // Consume exemption budget if exiting this FY
-            if ("CURRENT_FY".equals(suggested)) {
+            if ("CURRENT_FY".equals(suggested) && !isSlabFund) {
                 remainingThisFY = Math.max(0, remainingThisFY - ltcgG);
             }
         }

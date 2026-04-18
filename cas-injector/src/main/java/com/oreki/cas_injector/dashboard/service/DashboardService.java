@@ -142,27 +142,29 @@ public class DashboardService {
 
                 // Tax calculations (Simplified for dashboard)
                 String amfiCategory = (schemeDetails.getCategory() != null) ? schemeDetails.getCategory().toUpperCase() : "OTHER";
-                double ltcgUnrealized = openLots.stream()
-                    .mapToDouble(lot -> {
-                        String taxCat = CommonUtils.DETERMINE_TAX_CATEGORY.apply(lot.getBuyDate(), LocalDate.now(), amfiCategory);
-                        if (taxCat.contains("LTCG")) {
-                            double val = lot.getRemainingUnits().doubleValue() * currentNav.doubleValue();
-                            double cost = lot.getRemainingUnits().doubleValue() * lot.getCostBasisPerUnit().doubleValue();
-                            return Math.max(0, val - cost);
-                        }
-                        return 0.0;
-                    }).sum();
+                openLots = taxLotRepo.findByStatusAndSchemeAmfiCodeAndSchemeFolioInvestorPan("OPEN", code, pan);
+                double ltcgUnrealized = 0;
+                double stcgUnrealized = 0;
+                double slabRateUnrealized = 0;
+                boolean hasSlabRateLots = false;
 
-                double stcgUnrealized = openLots.stream()
-                    .mapToDouble(lot -> {
-                        String taxCat = CommonUtils.DETERMINE_TAX_CATEGORY.apply(lot.getBuyDate(), LocalDate.now(), amfiCategory);
-                        if (!taxCat.contains("LTCG")) {
-                            double val = lot.getRemainingUnits().doubleValue() * currentNav.doubleValue();
-                            double cost = lot.getRemainingUnits().doubleValue() * lot.getCostBasisPerUnit().doubleValue();
-                            return Math.max(0, val - cost);
-                        }
-                        return 0.0;
-                    }).sum();
+                for (TaxLot lot : openLots) {
+                    double lotVal = lot.getRemainingUnits().doubleValue() * currentNav.doubleValue();
+                    double lotCost = lot.getRemainingUnits().doubleValue() * lot.getCostBasisPerUnit().doubleValue();
+                    double lotGain = Math.max(0, lotVal - lotCost);
+
+                    String taxCat = CommonUtils.DETERMINE_TAX_CATEGORY.apply(lot.getBuyDate(), LocalDate.now(), amfiCategory);
+                    if (taxCat.contains("LTCG")) {
+                        ltcgUnrealized += lotGain;
+                    } else if (taxCat.equals("SLAB_RATE_TAX")) {
+                        slabRateUnrealized += lotGain;
+                        hasSlabRateLots = true;
+                    } else {
+                        stcgUnrealized += lotGain;
+                    }
+                }
+
+                BigDecimal unrealizedGainObj = BigDecimal.valueOf(ltcgUnrealized + stcgUnrealized + slabRateUnrealized);
 
                 // Cash flows for XIRR
                 List<TransactionDTO> cashFlows = txs.stream()
@@ -208,9 +210,11 @@ public class DashboardService {
                     .currentInvested(currentInvested)
                     .currentValue(currentValue)
                     .realizedGain(realizedGain)
-                    .unrealizedGain(unrealizedGain)
+                    .unrealizedGain(unrealizedGainObj)
                     .ltcgUnrealizedGain(ltcgUnrealized)
                     .stcgUnrealizedGain(stcgUnrealized)
+                    .slabRateGain(slabRateUnrealized)
+                    .isSlabRateFund(hasSlabRateLots)
                     .transactionCount(txs.size())
                     .xirr(displayXirr)
                     .benchmarkXirr(benchXirr)
@@ -240,10 +244,10 @@ public class DashboardService {
             })
             .collect(Collectors.toList());
 
-        BigDecimal aggregateCurrentInvested = breakdown.stream().map(SchemePerformanceDTO::getCurrentInvested).reduce(BigDecimal.ZERO, BigDecimal::add);
-        BigDecimal aggregateCurrentValue = breakdown.stream().map(SchemePerformanceDTO::getCurrentValue).reduce(BigDecimal.ZERO, BigDecimal::add);
-        BigDecimal aggregateTotalInvested = breakdown.stream().map(SchemePerformanceDTO::getTotalInvested).reduce(BigDecimal.ZERO, BigDecimal::add);
-        BigDecimal aggregateRealizedGain = breakdown.stream().map(SchemePerformanceDTO::getRealizedGain).reduce(BigDecimal.ZERO, BigDecimal::add);
+        BigDecimal aggregateCurrentInvested = breakdown.stream().map(s -> s.getCurrentInvested()).reduce(BigDecimal.ZERO, BigDecimal::add);
+        BigDecimal aggregateCurrentValue = breakdown.stream().map(s -> s.getCurrentValue()).reduce(BigDecimal.ZERO, BigDecimal::add);
+        BigDecimal aggregateTotalInvested = breakdown.stream().map(s -> s.getTotalInvested()).reduce(BigDecimal.ZERO, BigDecimal::add);
+        BigDecimal aggregateRealizedGain = breakdown.stream().map(s -> s.getRealizedGain()).reduce(BigDecimal.ZERO, BigDecimal::add);
         BigDecimal aggregateUnrealizedGain = aggregateCurrentValue.subtract(aggregateCurrentInvested);
 
         // STCG for current FY
@@ -261,6 +265,9 @@ public class DashboardService {
         totalCashFlow.sort(Comparator.comparing(TransactionDTO::getDate));
         BigDecimal totalXirr = CommonUtils.SOLVE_XIRR.apply(totalCashFlow);
 
+        Double investorSlab = jdbcTemplate.queryForObject("SELECT tax_slab FROM investor WHERE pan = ?", Double.class, pan);
+        double slabRate = (investorSlab != null) ? investorSlab : 0.30;
+
         return DashboardSummaryDTO.builder()
             .investorName(investorName)
             .totalFolios((int) summaryData.stream().map(PortfolioSummary::getFolioId).distinct().count())
@@ -275,6 +282,7 @@ public class DashboardService {
             .overallReturn(CommonUtils.SCALE_MONEY.apply(portfolioPerformance) + "%")
             .overallXirr(CommonUtils.SCALE_MONEY.apply(totalXirr) + "%")
             .totalSTCG(realizedStcg)
+            .taxSlab(slabRate)
             .schemeBreakdown(breakdown)
             .build();
     }

@@ -23,18 +23,25 @@ export default function TaxView({
   const ltcgLimit = 125000;
   const realizedLTCG = parseFloat(portfolioData.totalLTCG || 0);
   const realizedSTCG = parseFloat(portfolioData.totalSTCG || 0);
+  const investorSlab = portfolioData.taxSlab || 0.30;
   const ltcgPercent = Math.min(100, (realizedLTCG / ltcgLimit) * 100);
   
   const stcgFunds = (portfolioData.schemeBreakdown || [])
-    .filter((s: any) => (s.stcgUnrealizedGain || 0) > 0)
-    .map((s: any) => ({
-      name: s.schemeName,
-      stcgValue: s.stcgUnrealizedGain,
-      stcgGain: s.stcgUnrealizedGain || 0,
-      tax: (s.stcgUnrealizedGain || 0) * 0.20,
-      days: s.daysToNextLtcg || 0,
-      saving: (s.stcgUnrealizedGain || 0) * (0.20 - 0.125),
-    }));
+    .filter((s: any) => (s.stcgUnrealizedGain || 0) > 0 || (s.slabRateGain || 0) > 0)
+    .map((s: any) => {
+      const isSlab = s.isSlabRateFund;
+      const gain = (s.stcgUnrealizedGain || 0) + (s.slabRateGain || 0);
+      const taxRate = isSlab ? investorSlab : 0.20;
+      return {
+        name: s.schemeName,
+        stcgValue: gain,
+        stcgGain: gain,
+        tax: gain * taxRate,
+        days: isSlab ? 0 : (s.daysToNextLtcg || 0),
+        saving: isSlab ? 0 : gain * (0.20 - 0.125),
+        isSlab
+      };
+    });
 
   useEffect(() => {
     fetchTlhOpportunities(pan)
@@ -45,11 +52,10 @@ export default function TaxView({
   const circumference = 2 * Math.PI * 36; // r=36
   const strokeDashoffset = circumference * (1 - ltcgPercent / 100);
 
-  const estTaxPaid = realizedSTCG * 0.20 + Math.max(0, realizedLTCG - ltcgLimit) * 0.125;
-
   // PROJECTED TAX (If exit everything today)
   const totalUnrealizedLTCG = (portfolioData.schemeBreakdown || []).reduce((a: number, s: any) => a + (s.ltcgUnrealizedGain || 0), 0);
   const totalUnrealizedSTCG = (portfolioData.schemeBreakdown || []).reduce((a: number, s: any) => a + (s.stcgUnrealizedGain || 0), 0);
+  const totalSlabRateGain = (portfolioData.schemeBreakdown || []).reduce((a: number, s: any) => a + (s.slabRateGain || 0), 0);
 
   const taxBarData = useMemo(() => [
     {
@@ -58,15 +64,23 @@ export default function TaxView({
       'Unrealized': totalUnrealizedLTCG,
     },
     {
-      category: 'STCG',
+      category: 'STCG (20%)',
       'Realized': realizedSTCG,
       'Unrealized': totalUnrealizedSTCG,
+    },
+    {
+      category: 'Slab (Debt)',
+      'Realized': 0, // Realized slab-rate not separately tracked in root yet
+      'Unrealized': totalSlabRateGain,
     }
-  ], [realizedLTCG, totalUnrealizedLTCG, realizedSTCG, totalUnrealizedSTCG]);
+  ], [realizedLTCG, totalUnrealizedLTCG, realizedSTCG, totalUnrealizedSTCG, totalSlabRateGain]);
 
   const projectedLtcgTax = Math.max(0, totalUnrealizedLTCG - (ltcgLimit - realizedLTCG)) * 0.125;
-  const projectedStcgTax = totalUnrealizedSTCG * 0.20;
+  const projectedStcgTax = totalUnrealizedSTCG * 0.20 + totalSlabRateGain * investorSlab;
   const totalProjectedTax = projectedLtcgTax + projectedStcgTax;
+
+  const estTaxPaid = realizedSTCG * 0.20 + Math.max(0, realizedLTCG - ltcgLimit) * 0.125;
+
 
   return (
     <div className="space-y-10 pb-32">

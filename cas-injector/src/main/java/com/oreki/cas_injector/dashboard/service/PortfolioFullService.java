@@ -203,37 +203,54 @@ public class PortfolioFullService {
         DashboardSummaryDTO summary = getBasePortfolioCached(pan);
         List<DroppedFundSummary> result = new ArrayList<>();
         
-        // Get strategy to identify dropped funds
+        Double slab = jdbcTemplate.queryForObject("SELECT tax_slab FROM investor WHERE pan = ?", Double.class, pan);
+        double slabRate = (slab != null) ? slab : 0.30;
+
+        // Get strategy to identify dropped funds and their exit philosophy
         List<StrategyTarget> targets = orchestrator.getStrategyService().fetchLatestStrategy();
-        Set<String> strategyIsins = targets.stream()
-            .filter(t -> !"DROPPED".equalsIgnoreCase(t.status()) && !"EXIT".equalsIgnoreCase(t.status()))
+        Map<String, String> isinToStatus = targets.stream()
+            .collect(Collectors.toMap(StrategyTarget::isin, StrategyTarget::status, (a, b) -> a));
+        
+        Set<String> activeIsins = targets.stream()
+            .filter(t -> "ACTIVE".equalsIgnoreCase(t.status()) || "ACCUMULATOR".equalsIgnoreCase(t.status()) || "REBALANCER".equalsIgnoreCase(t.status()) || "NEW_ENTRY".equalsIgnoreCase(t.status()))
             .map(StrategyTarget::isin)
             .collect(Collectors.toSet());
 
         summary.getSchemeBreakdown().stream()
-            .filter(s -> !strategyIsins.contains(s.getIsin()) && s.getCurrentValue().doubleValue() > 0)
+            .filter(s -> !activeIsins.contains(s.getIsin()) && s.getCurrentValue().doubleValue() > 0)
             .forEach(s -> {
+                String philStatus = isinToStatus.getOrDefault(s.getIsin(), "DROPPED").toUpperCase();
                 double ltcg = s.getLtcgUnrealizedGain();
                 double stcg = s.getStcgUnrealizedGain();
+                double slabGain = s.getSlabRateGain();
                 int days = s.getDaysToNextLtcg();
                 double currentValue = s.getCurrentValue().doubleValue();
                 
-                // Fetch volatility tax for the scheme from orchestrator/metrics
-                // For simplicity, we can use a default or fetch if available
-                double vt = s.getVolatilityTax() > 0 ? s.getVolatilityTax() : 0.05; // 5% default VT if missing
+                double vt = s.getVolatilityTax() > 0 ? s.getVolatilityTax() : 0.05; 
                 
-                double taxIfExitNow = (ltcg > 125000 ? (ltcg - 125000) * 0.125 : 0) + (stcg * 0.20);
+                double taxIfExitNow;
+                String recommendedAction;
+                double taxIfWaitForLtcg;
+
+                if (s.isSlabRateFund()) {
+                    taxIfExitNow = (ltcg + stcg + slabGain) * slabRate;
+                    recommendedAction = (ltcg + stcg + slabGain < 1000) ? "EXIT_NOW_TAX_FREE" : "EXIT_NOW_SLAB_RATE";
+                    taxIfWaitForLtcg = taxIfExitNow; // No LTCG benefit for slab funds
+                } else {
+                    taxIfExitNow = (ltcg > 125000 ? (ltcg - 125000) * 0.125 : 0) + (stcg * 0.20);
+                    double taxSavingIfWait = stcg * (0.20 - 0.125);
+                    double driftCostOfWaiting = currentValue * vt * (days / 252.0);
+                    taxIfWaitForLtcg = (ltcg + stcg > 125000 ? (ltcg + stcg - 125000) * 0.125 : 0);
+                    
+                    if ("EXIT".equals(philStatus)) {
+                        recommendedAction = (ltcg + stcg < 1000) ? "EXIT_NOW_TAX_FREE" : "EXIT_NOW";
+                    } else {
+                        recommendedAction = "EXIT_NOW";
+                        if (ltcg + stcg < 1000) recommendedAction = "EXIT_NOW_TAX_FREE";
+                        else if (taxSavingIfWait > driftCostOfWaiting && days > 0) recommendedAction = "WAIT_FOR_LTCG";
+                    }
+                }
                 
-                double taxSavingIfWait = stcg * (0.20 - 0.125);
-                double driftCostOfWaiting = currentValue * vt * (days / 252.0);
-                
-                double taxIfWaitForLtcg = (ltcg + stcg > 125000 ? (ltcg + stcg - 125000) * 0.125 : 0);
-                
-                String recommendedAction = "EXIT_NOW";
-                if (ltcg + stcg < 1000) recommendedAction = "EXIT_NOW_TAX_FREE";
-                else if (taxSavingIfWait > driftCostOfWaiting && days > 0) recommendedAction = "WAIT_FOR_LTCG";
-                
-                // Hurst override from metrics
                 if (s.getHurstExponent() > 0.62 && s.getReturnZScore() < 0 && s.getAllocationPercentage() < 5.0) {
                     recommendedAction = "HOLD_WAVE_RIDER";
                 }
@@ -243,11 +260,11 @@ public class PortfolioFullService {
                     s.getAmfiCode(),
                     currentValue,
                     ltcg,
-                    stcg,
+                    stcg + slabGain,
                     days,
                     taxIfExitNow,
                     taxIfWaitForLtcg,
-                    taxSavingByWaiting(stcg, days, vt, currentValue),
+                    "EXIT".equals(philStatus) ? 0 : taxSavingByWaiting(stcg, days, vt, currentValue),
                     recommendedAction,
                     LocalDate.now().plusDays(days).toString(),
                     "Strategic assessment based on tax and momentum."

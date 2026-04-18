@@ -25,6 +25,7 @@ public class DashboardSummaryDTO {
     private String overallReturn;
     private String overallXirr;
     private double fyLtcgAlreadyRealized;
+    private double taxSlab;
     private List<SchemePerformanceDTO> schemeBreakdown;
     private UnifiedTacticalPayload tacticalPayload; // 🚀 ADD THIS
 }

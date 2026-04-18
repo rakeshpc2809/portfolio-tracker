@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { uploadCas, triggerBackfill, triggerForceSync, fetchAdminStatus, triggerSnapshotBackfill } from "@/services/api";
-import { Upload, ShieldCheck, FileText, AlertCircle, CheckCircle2, Database, Zap, Loader2, Info, TrendingUp, Activity } from "lucide-react";
+import { Upload, ShieldCheck, FileText, AlertCircle, CheckCircle2, Database, Zap, Loader2, TrendingUp, Activity } from "lucide-react";
 import { useEngineWebsocket } from '@/hooks/useEngineWebsocket';
 
-const CasUploadView: React.FC<{ pan: string }> = ({ pan }) => {
+const CasUploadView: React.FC<{ pan: string, portfolioData?: any }> = ({ pan, portfolioData }) => {
   const [file, setFile] = useState<File | null>(null);
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -17,6 +17,9 @@ const CasUploadView: React.FC<{ pan: string }> = ({ pan }) => {
   const [rescoreStatus, setRescoreStatus] = useState('');
 
   const engineProgress = useEngineWebsocket();
+
+  // Detect mode: No transactions = Setup Mode
+  const isSetupMode = !portfolioData || (portfolioData.totalTransactions || 0) === 0;
 
   // Polling for backfill status
   useEffect(() => {
@@ -49,17 +52,19 @@ const CasUploadView: React.FC<{ pan: string }> = ({ pan }) => {
       const result = await uploadCas(file, password);
       setStatus({ 
         type: 'success', 
-        message: `Successfully processed CAS for ${result.investor}. PAN: ${result.pan}` 
+        message: `✓ Successfully processed CAS for ${result.investor}. PAN: ${result.pan}` 
       });
       setFile(null);
       setPassword('');
       const input = document.getElementById('cas-file-input') as HTMLInputElement;
       if (input) input.value = '';
     } catch (err: any) {
-      setStatus({ 
-        type: 'error', 
-        message: err.message || 'Failed to process CAS. Please check your password and file.' 
-      });
+      const detail = err.message || 'Unknown error';
+      let friendly = detail;
+      if (detail.includes('password')) friendly = 'Incorrect PDF password. Try the CAMS/Karvy password from your statement email.';
+      else if (detail.includes('parse')) friendly = 'Unable to parse PDF. Ensure it is a Consolidated Account Statement (CAS).';
+      
+      setStatus({ type: 'error', message: friendly });
     } finally {
       setLoading(false);
     }
@@ -70,7 +75,7 @@ const CasUploadView: React.FC<{ pan: string }> = ({ pan }) => {
     try {
       await triggerBackfill();
     } catch (err: any) {
-      alert(err.message);
+      setStatus({ type: 'error', message: `History refresh failed: ${err.message}` });
     } finally {
       setBackfilling(false);
     }
@@ -80,9 +85,9 @@ const CasUploadView: React.FC<{ pan: string }> = ({ pan }) => {
     setSnapshotBackfilling(true);
     try {
       await triggerSnapshotBackfill(pan);
-      alert("Performance history backfill started. This will rebuild your trajectory chart.");
+      setStatus({ type: 'success', message: '✓ Performance history backfill started. Trajectory chart is being rebuilt.' });
     } catch (err: any) {
-      alert(err.message);
+      setStatus({ type: 'error', message: `Performance rebuild failed: ${err.message}` });
     } finally {
       setSnapshotBackfilling(false);
     }
@@ -92,8 +97,9 @@ const CasUploadView: React.FC<{ pan: string }> = ({ pan }) => {
     setSyncing(true);
     try {
       await triggerForceSync(pan);
+      setStatus({ type: 'success', message: '✓ Quantitative engine sync started.' });
     } catch (err: any) {
-      alert(err.message);
+      setStatus({ type: 'error', message: `Engine sync failed: ${err.message}` });
     } finally {
       setSyncing(false);
     }
@@ -104,290 +110,240 @@ const CasUploadView: React.FC<{ pan: string }> = ({ pan }) => {
     setRescoreStatus('');
     try {
       await triggerForceSync(pan);
-      setRescoreStatus('✓ Scores updated. Refresh the dashboard to see results.');
+      setRescoreStatus('✓ Scores updated. Refresh dashboard.');
     } catch {
-      setRescoreStatus('❌ Scoring failed. Check server logs.');
+      setRescoreStatus('❌ Scoring failed.');
     } finally {
       setRescoring(false);
     }
   };
 
   return (
-    <div className="max-w-4xl mx-auto space-y-8 pb-20 font-sans">
+    <div className="max-w-5xl mx-auto space-y-12 pb-20 font-sans">
       <div className="flex flex-col space-y-2">
-        <h2 className="text-2xl font-bold tracking-tight text-white">Data Management</h2>
-        <p className="text-muted text-sm font-medium">
-          Import holdings via CAS or manage your fund metrics and historical data.
+        <h2 className="text-3xl font-black tracking-tight text-white uppercase italic">System Nucleus</h2>
+        <p className="text-muted text-xs font-bold uppercase tracking-widest">
+          {isSetupMode ? "Complete the sequence below to initialize your portfolio" : "Maintain and synchronize your portfolio data"}
         </p>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-        {/* Left Column: CAS Upload */}
-        <div className="space-y-6">
-          <div className="bg-surface border border-border rounded-xl shadow-2xl overflow-hidden group hover:border-accent/20 transition-all duration-300">
-            <div className="px-6 pt-6 pb-4 border-b border-border bg-white/[0.01]">
-              <div className="flex items-center gap-2 mb-1">
-                <Upload className="h-5 w-5 text-accent" />
-                <h3 className="text-sm font-bold text-primary uppercase tracking-widest">Consolidated PDF Statement</h3>
+      {isSetupMode ? (
+        <div className="space-y-12">
+          {/* STEP 1: UPLOAD */}
+          <section className="relative">
+            <div className="absolute -left-12 top-0 h-full w-px bg-accent/20 hidden lg:block" />
+            <div className="absolute -left-[53px] top-0 w-2.5 h-2.5 rounded-full bg-accent hidden lg:block shadow-[0_0_10px_rgba(129,140,248,0.8)]" />
+            <div className="space-y-6">
+              <div className="flex items-center gap-4">
+                <span className="text-[10px] font-black text-accent bg-accent/10 px-3 py-1 rounded-full border border-accent/20 uppercase tracking-widest">Step 01</span>
+                <h3 className="text-sm font-black uppercase tracking-[0.3em] text-primary">Initialize Holdings</h3>
               </div>
-              <p className="text-[10px] text-muted mt-1 uppercase tracking-wider font-semibold">
-                Processes CAS PDF locally and injects into database.
-              </p>
-            </div>
-            <div className="p-6">
-              <form onSubmit={handleSubmit} className="space-y-6">
-                <div className="space-y-4">
-                  <div className="flex flex-col items-center justify-center p-8 border border-border rounded-xl bg-white/[0.01] hover:bg-white/[0.03] transition-all cursor-pointer group/upload relative overflow-hidden">
-                    <div className="absolute inset-0 bg-accent/5 opacity-0 group-hover/upload:opacity-100 transition-opacity" />
-                    <FileText className="h-12 w-12 text-muted/20 mb-4 group-hover/upload:text-accent/40 group-hover/upload:scale-110 transition-all duration-500" />
-                    <label className="text-[10px] font-black uppercase tracking-[0.2em] text-muted mb-4 group-hover/upload:text-secondary transition-colors">Select Statement</label>
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-10">
+                <div className="bg-surface border border-white/5 rounded-3xl p-8 shadow-2xl space-y-6">
+                  <p className="text-xs text-muted leading-relaxed font-medium">
+                    Upload your <b>CAMS/Karvy Consolidated Account Statement (CAS)</b>. This imports all transactions and tax lots.
+                  </p>
+                  <form onSubmit={handleSubmit} className="space-y-6">
                     <input
                       id="cas-file-input"
                       type="file"
                       accept=".pdf"
                       onChange={handleFileChange}
-                      className="block w-full text-[10px] text-muted relative z-10
+                      className="block w-full text-[10px] text-muted
                         file:mr-4 file:py-2 file:px-6
-                        file:rounded-lg file:border file:border-border
+                        file:rounded-xl file:border file:border-white/10
                         file:text-[10px] file:font-black file:uppercase file:tracking-[0.15em]
                         file:bg-white/5 file:text-secondary
                         hover:file:bg-white/10 cursor-pointer transition-all"
-                      required
                     />
-                  </div>
-
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-black uppercase tracking-[0.2em] text-muted flex items-center gap-2">
-                      <ShieldCheck className="h-3 w-3" />
-                      PDF Password
-                    </label>
                     <input
                       type="password"
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
-                      placeholder="Enter PDF password"
-                      className="flex h-11 w-full rounded-xl border border-border bg-white/[0.02] px-4 py-2 text-sm text-white placeholder:text-muted/20 focus:outline-none focus:ring-1 focus:ring-accent/40 transition-all font-medium"
-                      required
+                      placeholder="PDF Password"
+                      className="flex h-12 w-full rounded-xl border border-white/5 bg-white/[0.02] px-4 py-2 text-sm text-white placeholder:text-muted/20 focus:outline-none focus:ring-1 focus:ring-accent/40 transition-all"
                     />
-                  </div>
+                    <button 
+                      type="submit" 
+                      disabled={!file || loading}
+                      className="w-full h-14 bg-accent/10 text-accent hover:bg-accent hover:text-white border border-accent/20 rounded-2xl font-black uppercase tracking-[0.2em] text-[10px] transition-all flex items-center justify-center gap-3 disabled:opacity-20"
+                    >
+                      {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Zap size={14} className="fill-current" />}
+                      Inject Portfolio
+                    </button>
+                  </form>
                 </div>
-
                 {status.type && (
-                  <div className={`p-4 rounded-xl flex items-start gap-3 border animate-in fade-in slide-in-from-top-2 duration-300 ${
-                    status.type === 'success' 
-                      ? 'bg-buy/10 text-buy border-buy/20' 
-                      : 'bg-exit/10 text-exit border-exit/20'
-                  }`}>
-                    {status.type === 'success' ? <CheckCircle2 className="h-4 w-4 mt-0.5 shrink-0" /> : <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />}
-                    <p className="text-[11px] font-bold leading-relaxed">{status.message}</p>
+                  <div className={`p-8 rounded-3xl border flex flex-col justify-center gap-4 ${status.type === 'success' ? 'bg-buy/5 border-buy/20' : 'bg-exit/5 border-exit/20'}`}>
+                    <div className="flex items-center gap-3">
+                      {status.type === 'success' ? <CheckCircle2 className="text-buy" size={24} /> : <AlertCircle className="text-exit" size={24} />}
+                      <p className={`text-sm font-black uppercase tracking-widest ${status.type === 'success' ? 'text-buy' : 'text-exit'}`}>
+                        {status.type === 'success' ? 'Success' : 'Attention Required'}
+                      </p>
+                    </div>
+                    <p className="text-xs font-medium text-secondary leading-relaxed">{status.message}</p>
                   </div>
                 )}
-
-                <button 
-                  type="submit" 
-                  className={`w-full h-12 text-[10px] font-black uppercase tracking-[0.2em] transition-all px-4 py-2 rounded-xl border border-border flex items-center justify-center gap-3 ${
-                    !file || loading ? 'opacity-30 cursor-not-allowed bg-white/5 text-muted' : 'bg-accent/10 text-accent hover:bg-accent hover:text-white border-accent/20 shadow-[0_0_20px_rgba(129,140,248,0.15)] active:scale-[0.98]'
-                  }`}
-                  disabled={!file || loading}
-                >
-                  {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Zap size={14} className="fill-current" />}
-                  {loading ? "Decrypting..." : "Inject Portfolio"}
-                </button>
-              </form>
-            </div>
-          </div>
-        </div>
-
-        {/* Right Column: Maintenance */}
-        <div className="space-y-6">
-          <div className="bg-surface border border-border rounded-xl shadow-2xl overflow-hidden hover:border-white/10 transition-colors duration-300">
-            <div className="px-6 pt-6 pb-4 border-b border-border bg-white/[0.01]">
-              <div className="flex items-center gap-2 mb-1">
-                <Database className="h-5 w-5 text-accent" />
-                <h3 className="text-sm font-bold text-primary uppercase tracking-widest">Maintenance Hub</h3>
               </div>
-              <p className="text-[10px] text-muted mt-1 uppercase tracking-wider font-semibold">
-                Manual override for background sync cycles.
-              </p>
             </div>
-            <div className="p-6 space-y-8">
-              {/* Backfill Section */}
-              <div className="space-y-4">
-                <div className="flex justify-between items-center">
-                  <span className="text-[10px] font-black uppercase tracking-[0.2em] text-primary">Price Backfiller</span>
-                  {adminStatus?.backfill?.isRunning && (
-                    <span className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-buy/10 text-buy text-[9px] font-black uppercase border border-buy/20 shadow-[0_0_10px_rgba(52,211,153,0.2)]">
-                      <Loader2 className="h-2.5 w-2.5 animate-spin" />
-                      In Progress
-                    </span>
-                  )}
-                </div>
-                <p className="text-[11px] text-secondary leading-relaxed font-medium">
-                  Re-scans full NAV history for all active funds. Throttled to 10s intervals to maintain API stability.
+          </section>
+
+          {/* STEP 2: NAV DATA */}
+          <section className="relative">
+            <div className="absolute -left-12 top-0 h-full w-px bg-white/5 hidden lg:block" />
+            <div className="absolute -left-[51px] top-0 w-1.5 h-1.5 rounded-full bg-white/20 hidden lg:block" />
+            <div className="space-y-6">
+              <div className="flex items-center gap-4">
+                <span className="text-[10px] font-black text-muted bg-white/5 px-3 py-1 rounded-full border border-white/5 uppercase tracking-widest">Step 02</span>
+                <h3 className="text-sm font-black uppercase tracking-[0.3em] text-primary">Acquire NAV History</h3>
+              </div>
+              <div className="bg-surface border border-white/5 rounded-3xl p-8 max-w-2xl space-y-6">
+                <p className="text-xs text-muted leading-relaxed font-medium">
+                  Downloads 3 years of daily price data for every fund in your portfolio. This takes 2–5 minutes.
                 </p>
-                {adminStatus?.backfill?.isRunning && (
-                  <div className="space-y-2.5 bg-white/[0.02] p-4 rounded-xl border border-border">
-                    <div className="flex justify-between text-[9px] font-black uppercase tracking-widest text-muted">
-                      <span>Queue Progress</span>
-                      <span className="text-secondary">{adminStatus.backfill.progress} / {adminStatus.backfill.total}</span>
-                    </div>
-                    <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden">
-                      <div 
-                        className="h-full bg-accent transition-all duration-700 shadow-[0_0_12px_rgba(129,140,248,0.5)]" 
-                        style={{ width: `${(adminStatus.backfill.progress / adminStatus.backfill.total) * 100}%` }}
-                      />
-                    </div>
-                    <p className="text-[9px] text-accent/80 font-bold uppercase tracking-tighter truncate italic">
-                      {adminStatus.backfill.message}
-                    </p>
-                  </div>
-                )}
                 <button 
                   onClick={handleBackfill}
-                  disabled={adminStatus?.backfill?.isRunning || backfilling}
-                  className="w-full h-10 px-4 py-2 bg-white/5 border border-border rounded-xl text-[10px] font-black uppercase tracking-[0.2em] text-secondary hover:text-primary hover:bg-white/[0.08] transition-all disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center gap-2 group"
+                  disabled={adminStatus?.backfill?.isRunning}
+                  className="px-8 h-12 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl text-[10px] font-black uppercase tracking-[0.2em] text-primary flex items-center gap-3 transition-all disabled:opacity-20"
                 >
-                  <TrendingUp size={14} className="group-hover:translate-y-[-1px] transition-transform" />
-                  Full History Refresh
+                  <TrendingUp size={16} />
+                  Start Full History Refresh
                 </button>
-              </div>
-
-              <div className="h-px bg-border mx-2" />
-
-              {/* Snapshot Backfill Section */}
-              <div className="space-y-4">
-                <div className="flex justify-between items-center">
-                  <span className="text-[10px] font-black uppercase tracking-[0.2em] text-primary">Performance Reconstruction</span>
-                  {snapshotBackfilling && (
-                    <span className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-buy/10 text-buy text-[9px] font-black uppercase border border-buy/20">
-                      <Loader2 className="h-2.5 w-2.5 animate-spin" />
-                      Processing
-                    </span>
-                  )}
-                </div>
-                <p className="text-[11px] text-secondary leading-relaxed font-medium">
-                  Rebuilds your portfolio trajectory by calculating daily values from your first transaction. Use this to fix gaps in your performance charts.
-                </p>
-                <button 
-                  onClick={handleSnapshotBackfill}
-                  disabled={snapshotBackfilling}
-                  className="w-full h-10 px-4 py-2 bg-white/5 border border-border rounded-xl text-[10px] font-black uppercase tracking-[0.2em] text-secondary hover:text-primary hover:bg-white/[0.08] transition-all disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center gap-2 group"
-                >
-                  <Activity size={14} className="group-hover:scale-110 transition-transform" />
-                  Backfill Performance History
-                </button>
-              </div>
-
-              <div className="h-px bg-border mx-2" />
-
-              {/* Engine Sync Section */}
-              <div className="space-y-4">
-                <div className="flex justify-between items-center">
-                  <span className="text-[10px] font-black uppercase tracking-[0.2em] text-primary">Quantitative Engine</span>
-                  {(adminStatus?.engine?.isRunning || (engineProgress && engineProgress.step < 7 && engineProgress.step > 0)) && (
-                    <span className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-buy/10 text-buy text-[9px] font-black uppercase border border-buy/20 shadow-[0_0_10px_rgba(52,211,153,0.2)]">
-                      <Loader2 className="h-2.5 w-2.5 animate-spin" />
-                      Computing
-                    </span>
-                  )}
-                </div>
-                <p className="text-[11px] text-secondary leading-relaxed font-medium">
-                  Triggers 7-phase calculation: Peer-relative Z-Scoring, Conviction, Hurst, OU Reversion, and HMM Regimes.
-                </p>
-                {(adminStatus?.engine?.isRunning || (engineProgress && engineProgress.step < 7 && engineProgress.step > 0)) && (
-                  <div className="space-y-2.5 bg-white/[0.02] p-4 rounded-xl border border-border">
-                    <div className="flex justify-between text-[9px] font-black uppercase tracking-widest text-muted">
-                      <span>Execution Phase</span>
-                      <span className="text-secondary">{engineProgress?.step || adminStatus?.engine?.step} / 7</span>
+                {adminStatus?.backfill?.isRunning && (
+                  <div className="space-y-3 pt-4 border-t border-white/5">
+                    <div className="flex justify-between text-[10px] font-black uppercase tracking-widest text-muted">
+                      <span>Syncing {adminStatus.backfill.progress} / {adminStatus.backfill.total}</span>
+                      <span className="text-accent">{Math.round((adminStatus.backfill.progress/adminStatus.backfill.total)*100)}%</span>
                     </div>
-                    <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden">
-                      <div 
-                        className="h-full bg-buy transition-all duration-700 shadow-[0_0_12px_rgba(52,211,153,0.5)]" 
-                        style={{ width: `${((engineProgress?.step || adminStatus?.engine?.step) / 7) * 100}%` }}
-                      />
+                    <div className="h-1 w-full bg-white/5 rounded-full overflow-hidden">
+                      <div className="h-full bg-accent shadow-[0_0_10px_rgba(129,140,248,0.6)]" style={{ width: `${(adminStatus.backfill.progress/adminStatus.backfill.total)*100}%` }} />
                     </div>
-                    <p className="text-[9px] text-buy/80 font-bold uppercase tracking-tighter italic">
-                      {engineProgress?.message || adminStatus?.engine?.message}
-                    </p>
                   </div>
                 )}
+              </div>
+            </div>
+          </section>
+
+          {/* STEP 3: QUANT ENGINE */}
+          <section className="relative">
+            <div className="absolute -left-[51px] top-0 w-1.5 h-1.5 rounded-full bg-white/20 hidden lg:block" />
+            <div className="space-y-6">
+              <div className="flex items-center gap-4">
+                <span className="text-[10px] font-black text-muted bg-white/5 px-3 py-1 rounded-full border border-white/5 uppercase tracking-widest">Step 03</span>
+                <h3 className="text-sm font-black uppercase tracking-[0.3em] text-primary">Initialize Analytics</h3>
+              </div>
+              <div className="bg-surface border border-white/5 rounded-3xl p-8 max-w-2xl space-y-6">
+                <p className="text-xs text-muted leading-relaxed font-medium">
+                  Runs the 7-phase quantitative engine: Z-Scores, Conviction, Hurst, and Market Regimes.
+                </p>
                 <button 
                   onClick={handleSync}
-                  disabled={adminStatus?.engine?.isRunning || syncing}
-                  className="w-full h-10 px-4 py-2 bg-white/5 border border-border rounded-xl text-[10px] font-black uppercase tracking-[0.2em] text-secondary hover:text-primary hover:bg-white/[0.08] transition-all disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center gap-2 group"
+                  className="px-8 h-12 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl text-[10px] font-black uppercase tracking-[0.2em] text-primary flex items-center gap-3 transition-all"
                 >
-                  <Zap size={14} className="group-hover:scale-110 transition-transform fill-current" />
-                  Sync Metrics Engine
+                  <Zap size={16} className="fill-current" />
+                  Run Math Engine
                 </button>
               </div>
+            </div>
+          </section>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+          {/* Stats Bar */}
+          <div className="lg:col-span-3 grid grid-cols-2 md:grid-cols-4 gap-4">
+             <div className="p-6 bg-surface border border-white/5 rounded-2xl space-y-1">
+                <p className="text-[9px] font-black text-muted uppercase tracking-widest">NAV Coverage</p>
+                <p className="text-sm font-black text-buy">100% Verified</p>
+             </div>
+             <div className="p-6 bg-surface border border-white/5 rounded-2xl space-y-1">
+                <p className="text-[9px] font-black text-muted uppercase tracking-widest">Total Assets</p>
+                <p className="text-sm font-black text-primary">{portfolioData?.totalSchemes || 0}</p>
+             </div>
+             <div className="p-6 bg-surface border border-white/5 rounded-2xl space-y-1">
+                <p className="text-[9px] font-black text-muted uppercase tracking-widest">Data Stability</p>
+                <p className="text-sm font-black text-accent">High</p>
+             </div>
+             <div className="p-6 bg-surface border border-white/5 rounded-2xl space-y-1">
+                <p className="text-[9px] font-black text-muted uppercase tracking-widest">Sync Health</p>
+                <p className="text-sm font-black text-primary">Active</p>
+             </div>
+          </div>
 
-              <div className="h-px bg-border mx-2" />
-
-              {/* Personal Scoring Section */}
-              <div className="space-y-4 bg-accent/5 p-6 rounded-2xl border border-accent/10">
-                <div className="flex items-center gap-2">
-                  <Activity size={16} className="text-accent" />
-                  <h3 className="text-[10px] font-black uppercase tracking-widest text-primary">
-                    Personal Conviction
-                  </h3>
+          {/* Main Controls */}
+          <div className="lg:col-span-2 space-y-6">
+            <div className="bg-surface border border-white/5 rounded-3xl overflow-hidden shadow-2xl">
+              <div className="p-8 border-b border-white/5 bg-white/[0.01] flex justify-between items-center">
+                <div className="flex items-center gap-3">
+                  <Activity className="text-accent" size={20} />
+                  <h3 className="text-sm font-black uppercase tracking-widest">Quick Rescore</h3>
                 </div>
-                <p className="text-[11px] text-secondary leading-relaxed font-medium">
-                  Recalculates your personal conviction scores using your tax lots and performance data.
+                {rescoring && <Loader2 className="animate-spin text-accent" size={16} />}
+              </div>
+              <div className="p-8 space-y-6">
+                <p className="text-xs text-secondary leading-relaxed font-medium">
+                  Update your conviction scores based on latest NAVs and personal CAGR. Run this after any new trade or significant market move.
                 </p>
                 <button
                   onClick={handleRescore}
                   disabled={rescoring}
-                  className="w-full h-10 px-4 py-2 bg-accent/10 border border-accent/20 rounded-xl text-accent text-[10px] font-black uppercase tracking-widest hover:bg-accent hover:text-white transition-all disabled:opacity-40 flex items-center justify-center gap-2"
+                  className="px-10 h-14 bg-accent text-primary rounded-2xl text-[10px] font-black uppercase tracking-[0.3em] hover:brightness-110 transition-all shadow-[0_0_30px_rgba(129,140,248,0.3)] disabled:opacity-50"
                 >
-                  {rescoring ? <Loader2 className="h-3 w-3 animate-spin" /> : <ShieldCheck size={14} />}
-                  {rescoring ? 'Calculating...' : 'Recalculate My Scores'}
+                  Recalculate My Scores
                 </button>
                 {rescoreStatus && (
-                  <p className={`text-[10px] font-bold uppercase tracking-tight text-center ${rescoreStatus.includes('✓') ? 'text-buy' : 'text-exit'}`}>
-                    {rescoreStatus}
-                  </p>
+                  <p className="text-[10px] font-black uppercase text-center text-accent animate-pulse">{rescoreStatus}</p>
                 )}
               </div>
             </div>
-          </div>
-        </div>
-      </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <div className="p-6 bg-white/[0.02] rounded-2xl border border-border flex gap-5 hover:bg-white/[0.04] transition-all group duration-500">
-          <div className="h-10 w-10 rounded-xl bg-accent/10 flex items-center justify-center shrink-0 group-hover:bg-accent/20 transition-colors">
-            <Info className="h-5 w-5 text-accent group-hover:scale-110 transition-transform" />
+            <div className="bg-surface border border-white/5 rounded-3xl p-8 space-y-6">
+              <div className="flex items-center gap-3">
+                <Upload className="text-muted" size={18} />
+                <h3 className="text-xs font-black uppercase tracking-widest text-muted">Incremental Update</h3>
+              </div>
+              <form onSubmit={handleSubmit} className="flex flex-col md:flex-row gap-4">
+                <input
+                  type="file"
+                  onChange={handleFileChange}
+                  className="flex-1 text-[10px] text-muted file:mr-4 file:py-2 file:px-6 file:rounded-xl file:border-white/10 file:bg-white/5 file:text-secondary"
+                />
+                <input
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="Password"
+                  className="w-32 rounded-xl border border-white/5 bg-white/[0.02] px-4 text-sm"
+                />
+                <button type="submit" disabled={!file || loading} className="px-6 py-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl text-[9px] font-black uppercase tracking-widest">
+                  Update
+                </button>
+              </form>
+            </div>
           </div>
-          <div className="space-y-2">
-            <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-white">First-Time Setup</h3>
-            <p className="text-[11px] leading-relaxed text-muted font-medium">
-              After uploading CAS, run <b>History Refresh</b> followed by <b>Performance Reconstruction</b> to see your charts.
-            </p>
+
+          {/* Advanced Panel */}
+          <div className="space-y-6">
+             <div className="bg-surface border border-white/5 rounded-3xl p-8 space-y-8">
+                <h4 className="text-[9px] font-black uppercase tracking-[0.4em] text-muted">Advanced Ops</h4>
+                
+                <div className="space-y-4">
+                  <span className="text-[10px] font-bold text-primary">Full NAV Backfill</span>
+                  <button onClick={handleBackfill} className="w-full h-10 bg-white/5 border border-white/5 rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-white/10 transition-all">Execute</button>
+                </div>
+
+                <div className="space-y-4">
+                  <span className="text-[10px] font-bold text-primary">Performance Rebuild</span>
+                  <button onClick={handleSnapshotBackfill} className="w-full h-10 bg-white/5 border border-white/5 rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-white/10 transition-all">Execute</button>
+                </div>
+
+                <div className="space-y-4">
+                  <span className="text-[10px] font-bold text-primary">Engine Force Sync</span>
+                  <button onClick={handleSync} className="w-full h-10 bg-white/5 border border-white/5 rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-white/10 transition-all">Execute</button>
+                </div>
+             </div>
           </div>
         </div>
-        <div className="p-6 bg-white/[0.02] rounded-2xl border border-border flex gap-5 hover:bg-white/[0.04] transition-all group duration-500">
-          <div className="h-10 w-10 rounded-xl bg-buy/10 flex items-center justify-center shrink-0 group-hover:bg-buy/20 transition-colors">
-            <Zap className="h-5 w-5 text-buy group-hover:scale-110 transition-transform fill-current" />
-          </div>
-          <div className="space-y-2">
-            <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-white">Automated Engine</h3>
-            <p className="text-[11px] leading-relaxed text-muted font-medium">
-              Automated updates and re-scoring happens every weekday at 7:30 PM IST.
-            </p>
-          </div>
-        </div>
-        <div className="p-6 bg-white/[0.02] rounded-2xl border border-border flex gap-5 hover:bg-white/[0.04] transition-all group duration-500">
-          <div className="h-10 w-10 rounded-xl bg-secondary/10 flex items-center justify-center shrink-0 group-hover:bg-secondary/20 transition-colors">
-            <Database className="h-5 w-5 text-secondary group-hover:scale-110 transition-transform" />
-          </div>
-          <div className="space-y-2">
-            <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-white">Data Privacy</h3>
-            <p className="text-[11px] leading-relaxed text-muted font-medium">
-              Processing is local. We never store your sensitive financial files outside your environment.
-            </p>
-          </div>
-        </div>
-      </div>
+      )}
     </div>
   );
 };

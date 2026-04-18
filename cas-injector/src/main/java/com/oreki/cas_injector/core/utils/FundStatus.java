@@ -6,6 +6,7 @@ public enum FundStatus {
     DROPPED,
     EXIT,
     ACCUMULATOR,
+    REBALANCER,
     WATCH,
     NEW_ENTRY
 }

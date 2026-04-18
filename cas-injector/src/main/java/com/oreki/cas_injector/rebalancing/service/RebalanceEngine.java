@@ -83,6 +83,20 @@ public class RebalanceEngine {
 
         FundStatus status = resolveStatus(targetPct, sipPct, actualPct, originalSheetPct);
         
+        // --- GUARD: Core SIP safety ---
+        if (sipPct > 0 && (status == FundStatus.DROPPED || status == FundStatus.EXIT)) {
+            status = FundStatus.ACTIVE;
+        }
+
+        // --- ASSET CLASS ROUTING ---
+        if (status == FundStatus.REBALANCER) {
+            return buildSignal(holding, amfiCode, SignalType.HOLD, 0, targetPct, actualPct, sipPct, status, metrics, List.of("Rebalancer: Liquidity parking vehicle for rebalancing proceeds. No tactical signals."), ReasoningMetadata.neutral(holding.getSchemeName()));
+        }
+
+        if (status == FundStatus.ACCUMULATOR) {
+            return evaluateCommodityAccumulator(holding, target, metrics, totalPortfolioValue, amfiCode);
+        }
+
         // --- DROPPED FUND RULE ---
         if (status == FundStatus.DROPPED || status == FundStatus.EXIT) {
             return handleDroppedFundExit(holding, target, metrics, totalPortfolioValue, amfiCode, status, fyLtcgAlreadyRealized);
@@ -165,6 +179,30 @@ public class RebalanceEngine {
 
         ReasoningMetadata meta = ReasoningMetadata.neutral(holding.getSchemeName());
         return buildSignal(holding, amfiCode, SignalType.HOLD, 0, targetPct, actualPct, sipPct, status, metrics, justifications, meta);
+    }
+
+    private TacticalSignal evaluateCommodityAccumulator(
+            AggregatedHolding holding, StrategyTarget target, MarketMetrics metrics,
+            double totalPortfolioValue, String amfiCode) {
+        double z = metrics.rollingZScore252();
+        double navPctile = metrics.navPercentile1yr();
+        double targetPct = target.targetPortfolioPct();
+        double actualPct = totalPortfolioValue > 0 ? (holding.getCurrentValue() / totalPortfolioValue) * 100.0 : 0.0;
+        
+        if (z <= -1.5 && navPctile < 0.25) {
+            return buildSignal(holding, amfiCode, SignalType.BUY, 0,
+                targetPct, actualPct, 0, FundStatus.ACCUMULATOR,
+                metrics, List.of("Tactical Accumulator: Gold/Silver at 1yr low. Accumulate on dip."), 
+                ReasoningMetadata.neutral(holding.getSchemeName()));
+        }
+        if (actualPct > targetPct * 2.0 && z > 1.5) {
+            return buildSignal(holding, amfiCode, SignalType.SELL, 
+                holding.getCurrentValue() * 0.25, // Trim 25%
+                targetPct, actualPct, 0, FundStatus.ACCUMULATOR,
+                metrics, List.of("Tactical Accumulator: Massively overweight and expensive. Harvesting partial gains."),
+                ReasoningMetadata.neutral(holding.getSchemeName()));
+        }
+        return buildSignal(holding, amfiCode, SignalType.HOLD, 0, targetPct, actualPct, 0, FundStatus.ACCUMULATOR, metrics, List.of("Commodity: Within normal tactical range."), ReasoningMetadata.neutral(holding.getSchemeName()));
     }
 
     private TacticalSignal handleDroppedFundExit(

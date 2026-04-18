@@ -12,7 +12,9 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.oreki.cas_injector.backfill.service.NavService;
 import com.oreki.cas_injector.convictionmetrics.repository.ConvictionMetricsRepository;
+import com.oreki.cas_injector.core.GoogleSheetService;
 import com.oreki.cas_injector.core.utils.CommonUtils;
+import com.oreki.cas_injector.rebalancing.dto.StrategyTarget;
 import com.oreki.cas_injector.taxmanagement.dto.TaxSimulationResult;
 import com.oreki.cas_injector.taxmanagement.service.TaxSimulatorService;
 import com.oreki.cas_injector.transactions.model.TaxLot;
@@ -30,6 +32,7 @@ public class ConvictionScoringService {
     private final TaxLotRepository taxLotRepository;
     private final NavService navService;
     private final TaxSimulatorService taxSimulator;
+    private final GoogleSheetService strategyService;
 
     // 🔬 REVISED 7-FACTOR INSTITUTIONAL WEIGHTS
     private static final double WEIGHT_YIELD = 0.18;      
@@ -54,6 +57,16 @@ public class ConvictionScoringService {
         Map<String, List<TaxLot>> lotsByAmfi = allLots.stream()
                 .collect(Collectors.groupingBy(lot -> CommonUtils.SANITIZE_AMFI.apply(lot.getScheme().getAmfiCode())));
 
+        // Fetch latest strategy for philosophy-driven scoring
+        List<StrategyTarget> strategy = strategyService.fetchLatestStrategy();
+        Map<String, String> amfiToStatus = strategy.stream()
+            .collect(Collectors.toMap(
+                s -> CommonUtils.SANITIZE_AMFI.apply(s.isin()), // Strategy uses ISIN but we need AMFI for metrics matching? Wait, metrics has amfi.
+                StrategyTarget::status, (a, b) -> a));
+        // Actually strategy sheet uses ISIN, we need to map ISIN -> AMFI first or just use a lookup
+        Map<String, String> isinToStatus = strategy.stream()
+            .collect(Collectors.toMap(s -> s.isin(), StrategyTarget::status, (a, b) -> a));
+
         List<Map<String, Object>> metrics = convictionMetricsRepository.findMetricsForInvestor(investorPan);
         log.info("📊 [2/3] Found {} funds in fund_conviction_metrics to score.", metrics.size());
 
@@ -69,6 +82,9 @@ public class ConvictionScoringService {
             String amfi = CommonUtils.SANITIZE_AMFI.apply((String) fund.get("amfi_code"));
             List<TaxLot> fundLots = lotsByAmfi.get(amfi);
             if (fundLots == null || fundLots.isEmpty()) continue;
+
+            String isin = fundLots.get(0).getScheme().getIsin();
+            String philStatus = isinToStatus.getOrDefault(isin, "ACTIVE").toUpperCase();
 
             // 1. YIELD SCORE (Personal CAGR relative to portfolio max)
             double cagr = calculatePersonalCagr(fundLots);
@@ -86,16 +102,15 @@ public class ConvictionScoringService {
             // 4. PAIN + RECOVERY (MDD blended with OU Half-life)
             double mdd = Math.abs(safeDouble(fund.get("max_drawdown")));
             double painScore = Math.max(0, 100 - (mdd * 2.5));
-            
+
             double recoveryScore = 0;
-            if (safeDouble(fund.get("ou_valid")) > 0) {
+            if (safeBoolean(fund.get("ou_valid"))) {
                 double halfLife = safeDouble(fund.get("ou_half_life"));
                 recoveryScore = Math.max(0, Math.min(100, 100 * Math.exp(-halfLife / 30.0)));
             } else {
                 recoveryScore = painScore; // Fallback if OU not valid
             }
             double painRecoveryScore = (painScore * 0.6) + (recoveryScore * 0.4);
-
             // 5. REGIME SCORE (HMM Bear Prob)
             // bear_prob 0 -> 100, bear_prob 1.0 -> 0
             double bearProb = safeDouble(fund.get("hmm_bear_prob"));
@@ -103,7 +118,9 @@ public class ConvictionScoringService {
 
             // 6. FRICTION SCORE (Tax Efficiency)
             String amfiCode = CommonUtils.SANITIZE_AMFI.apply((String) fund.get("amfi_code"));
-            String category = navService.getLatestSchemeDetails(amfiCode).getCategory();
+            var schemeDetails = navService.getLatestSchemeDetails(amfiCode);
+            String category = (schemeDetails.getCategory() != null) ? schemeDetails.getCategory().toUpperCase() : "OTHER";
+            
             TaxSimulationResult taxResult = taxSimulator.simulateHifoExit(fundLots, category, slabRate);
             double taxPctOfValue = (taxResult.sellAmount() > 0) ? (taxResult.estimatedTax() / taxResult.sellAmount()) * 100 : 0;
             // 100/20 = 5.0 multiplier for 20% ceiling
@@ -117,14 +134,28 @@ public class ConvictionScoringService {
             double aumScore = (aumCr < 100) ? (aumCr / 100.0) * 50 : (aumCr > 50000) ? Math.max(50, 100 - (aumCr - 50000) / 5000.0) : 100;
             double combinedExpAum = (expenseDragScore * 0.7) + (aumScore * 0.3);
 
-            // --- FINAL CALCULATION ---
-            double finalScore = (yieldScore * WEIGHT_YIELD) +
-                               (riskScore * WEIGHT_RISK) +
-                               (valueScore * WEIGHT_VALUE) +
-                               (painRecoveryScore * WEIGHT_PAIN_RECOVERY) +
-                               (regimeScore * WEIGHT_REGIME) +
-                               (frictionScore * WEIGHT_FRICTION) +
-                               (combinedExpAum * WEIGHT_EXPENSE);
+            // --- FINAL CALCULATION (Philosophy Driven) ---
+            double finalScore;
+            
+            if ("REBALANCER".equals(philStatus)) {
+                finalScore = 65.0; // Fixed neutral-positive for parking vehicle
+            } else if ("ACCUMULATOR".equals(philStatus)) {
+                // Accumulator: Range (50%) + Low Drawdown (30%) + Expense (20%)
+                double navRangeScore = safeDouble(fund.get("nav_percentile_1yr")) * 100;
+                finalScore = (navRangeScore * 0.50) + (painScore * 0.30) + (expenseDragScore * 0.20);
+            } else if (category.contains("DEBT") || category.contains("LIQUID")) {
+                // Debt: Risk (40%) + Friction (35%) + Expense (25%)
+                finalScore = (riskScore * 0.40) + (frictionScore * 0.35) + (expenseDragScore * 0.25);
+            } else {
+                // Standard Equity 7-factor model
+                finalScore = (yieldScore * WEIGHT_YIELD) +
+                            (riskScore * WEIGHT_RISK) +
+                            (valueScore * WEIGHT_VALUE) +
+                            (painRecoveryScore * WEIGHT_PAIN_RECOVERY) +
+                            (regimeScore * WEIGHT_REGIME) +
+                            (frictionScore * WEIGHT_FRICTION) +
+                            (combinedExpAum * WEIGHT_EXPENSE);
+            }
 
             convictionMetricsRepository.updateConvictionBreakdown(
                 (int) finalScore, yieldScore, riskScore, valueScore, painRecoveryScore, regimeScore, frictionScore, combinedExpAum, amfi
@@ -164,5 +195,12 @@ public class ConvictionScoringService {
     private double safeDouble(Object o) {
         if (o == null) return 0.0;
         return ((Number) o).doubleValue();
+    }
+
+    private boolean safeBoolean(Object o) {
+        if (o == null) return false;
+        if (o instanceof Boolean b) return b;
+        if (o instanceof Number n) return n.doubleValue() > 0;
+        return "true".equalsIgnoreCase(String.valueOf(o));
     }
 }
