@@ -365,7 +365,7 @@ export default function FundsListView({
                   <MiniStat label="Value" value={isPrivate ? '••••' : `₹${((fund.currentValue ?? 0) / 1000).toFixed(0)}k`} />
                   <MiniStat label="XIRR" value={`${xirr >= 0 ? '+' : ''}${xirr.toFixed(1)}%`} color={xirrColor} term="XIRR" />
                   <MiniStat label="Risk-Adj" value={riskAdjReturn} term="SORTINO" />
-                  <MiniStat label="Win Rate" value={fund.winRate > 0 ? `${(fund.winRate * 100).toFixed(0)}%` : '—'} color={fund.winRate > 0.55 ? 'text-buy' : fund.winRate > 0.45 ? 'text-secondary' : 'text-exit'} term="WIN_RATE" />
+                  <MiniStat label="Win Rate" value={fund.winRate > 0 ? `${fund.winRate.toFixed(0)}%` : '—'} color={fund.winRate > 55 ? 'text-buy' : fund.winRate > 45 ? 'text-secondary' : 'text-exit'} term="WIN_RATE" />
                   <MiniStat label="Max DD" value={mdd > 0 ? `-${mdd.toFixed(1)}%` : '—'} color={mdd > 25 ? 'text-exit' : mdd > 10 ? 'text-warning' : 'text-secondary'} />
                 </div>
 

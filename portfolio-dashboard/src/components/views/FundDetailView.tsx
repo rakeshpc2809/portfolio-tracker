@@ -209,7 +209,7 @@ export default function FundDetailView({
                 <div className="flex items-center gap-8">
                   <div className="text-right">
                     <p className="text-[10px] font-black uppercase tracking-[0.3em] text-muted mb-1 opacity-40">Win Rate</p>
-                    <p className="text-xl font-black text-buy">{(fund.winRate * 100).toFixed(0)}%</p>
+                    <p className="text-xl font-black text-buy">{fund.winRate > 0 ? `${fund.winRate.toFixed(0)}%` : '—'}</p>
                   </div>
                   <div className="text-right">
                     <p className="text-[10px] font-black uppercase tracking-[0.3em] text-muted mb-1 opacity-40">Tail Loss</p>

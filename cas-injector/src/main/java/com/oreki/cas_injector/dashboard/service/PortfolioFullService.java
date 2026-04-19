@@ -328,7 +328,7 @@ public class PortfolioFullService {
     private void enrichWithMetricsAndTax(DashboardSummaryDTO summary, String pan) {
         // 1. Fetch Metrics
         String metricsSql = "SELECT m.amfi_code, m.conviction_score, m.sortino_ratio, m.max_drawdown, " +
-                           "m.cvar_5, m.nav_percentile_1yr, m.nav_percentile_3yr, m.drawdown_from_ath, m.return_z_score, " +
+                           "m.cvar_5, m.win_rate, m.nav_percentile_1yr, m.nav_percentile_3yr, m.drawdown_from_ath, m.return_z_score, " +
                            "m.yield_score, m.risk_score, m.value_score, m.pain_score, m.friction_score, " +
                            "m.regime_score, m.expense_score, fm.expense_ratio, fm.aum_cr " +
                            "FROM fund_conviction_metrics m " +
@@ -373,6 +373,7 @@ public class PortfolioFullService {
                 scheme.setSortinoRatio(getSafeDouble(fundMetrics.get("sortino_ratio")));
                 scheme.setMaxDrawdown(getSafeDouble(fundMetrics.get("max_drawdown")));
                 scheme.setCvar5(getSafeDouble(fundMetrics.get("cvar_5")));
+                scheme.setWinRate(getSafeDouble(fundMetrics.get("win_rate")));
                 scheme.setNavPercentile1yr(getSafeDouble(fundMetrics.get("nav_percentile_1yr")));
                 scheme.setNavPercentile3yr(getSafeDouble(fundMetrics.get("nav_percentile_3yr")));
                 scheme.setDrawdownFromAth(getSafeDouble(fundMetrics.get("drawdown_from_ath")));
