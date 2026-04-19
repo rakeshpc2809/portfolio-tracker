@@ -22,6 +22,13 @@ from opentelemetry.sdk.trace.export import BatchSpanProcessor
 from opentelemetry.exporter.zipkin.json import ZipkinExporter
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
 # Kafka Configuration
 KAFKA_BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
 KAFKA_TOPIC = "cas.parsed.events"
@@ -36,13 +43,6 @@ try:
 except Exception as e:
     logger.error(f"❌ Failed to initialize Kafka Producer: {e}")
     producer = None
-
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
 
 # OTel Configuration
 ZIPKIN_ENDPOINT = os.getenv("ZIPKIN_URL", "http://localhost:9411/api/v2/spans")
@@ -325,6 +325,12 @@ async def parse_cas(
     try:
         content = await file.read()
         data = casparser.read_cas_pdf(io.BytesIO(content), password)
+        
+        # Convert to dict if it's a Pydantic model (casparser 0.8+)
+        if hasattr(data, "model_dump"):
+            data = data.model_dump()
+        elif hasattr(data, "dict"):
+            data = data.dict()
         
         # Structure the data for the Java backend
         payload = {

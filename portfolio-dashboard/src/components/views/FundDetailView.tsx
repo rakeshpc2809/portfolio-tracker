@@ -62,14 +62,14 @@ export default function FundDetailView({
     if (fData.length < 2) return { normalizedHistory: [], needsBackfill: false };
 
     const oldestFundNav = fData[0].nav;
-    const oldestBenchPrice = bData.length > 0 ? bData[0].closingPrice : 1;
+    const oldestBenchPrice = (bData.length > 0) ? bData[0].closingPrice : 1;
 
     const series = [
       {
         id: "Fund",
-        color: "#cba6f7", // Mauve
+        color: "#cba6f7",
         data: fData.map((d: any) => ({
-          x: d.navDate,
+          x: new Date(d.navDate),
           y: parseFloat(((d.nav / oldestFundNav) * 100).toFixed(2))
         }))
       }
@@ -78,9 +78,9 @@ export default function FundDetailView({
     if (bData.length >= 2) {
       series.push({
         id: "Benchmark",
-        color: "rgba(166, 227, 161, 0.3)", // Green-ish dim
+        color: "#a6e3a1",
         data: bData.map((d: any) => ({
-          x: d.date,
+          x: new Date(d.date),
           y: parseFloat(((d.closingPrice / oldestBenchPrice) * 100).toFixed(2))
         }))
       });
@@ -193,8 +193,8 @@ export default function FundDetailView({
                       </span>
                     </Dialog.Description>
                     <span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-[0.2em] shadow-lg border ${
-                      fund.action === 'BUY' ? 'text-buy bg-buy/10 border-buy/20 glow-buy' : 
-                      fund.action === 'EXIT' || fund.action === 'SELL' ? 'text-exit bg-exit/10 border-exit/20 glow-exit' : 'text-hold bg-hold/10 border-hold/20'
+                      fund.action === 'BUY' ? 'text-buy bg-buy/10 border-buy/20' : 
+                      fund.action === 'EXIT' || fund.action === 'SELL' ? 'text-exit bg-exit/10 border-exit/20' : 'text-hold bg-hold/10 border-hold/20'
                     }`}>
                       {fund.action} Decision
                     </span>
@@ -217,7 +217,29 @@ export default function FundDetailView({
                   </div>
                   <div className="text-right">
                     <p className="text-[10px] font-black uppercase tracking-[0.3em] text-muted mb-1 opacity-40">Logic Confidence</p>
-                    <p className="text-4xl font-black tabular-nums text-primary glow-accent">{fund.convictionScore}<span className="text-sm text-muted font-light ml-1">/100</span></p>
+                    <p className="text-4xl font-black tabular-nums text-primary" style={{ textShadow: '0 0 20px rgba(203,166,247,0.4)' }}>{fund.convictionScore}<span className="text-sm text-muted font-light ml-1">/100</span></p>
+                    {fund.convictionHistory && fund.convictionHistory.length > 1 && (
+                      <div className="mt-1 h-4 w-16 ml-auto">
+                        <svg viewBox="0 0 100 100" className="w-full h-full overflow-visible" preserveAspectRatio="none">
+                          <motion.path
+                            d={(() => {
+                              const h = fund.convictionHistory.slice(-30);
+                              const mn = Math.min(...h), mx = Math.max(...h);
+                              const rng = mx - mn || 1;
+                              const pts = h.map((v: number, i: number) => ({ x: (i / (h.length - 1)) * 100, y: 100 - ((v - mn) / rng) * 100 }));
+                              return `M ${pts.map((p: {x:number,y:number}) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' L ')}`;
+                            })()}
+                            fill="none"
+                            stroke={fund.convictionScore >= 60 ? '#a6e3a1' : fund.convictionScore >= 40 ? '#b4befe' : '#f38ba8'}
+                            strokeWidth="12"
+                            strokeLinecap="round"
+                            initial={{ pathLength: 0 }}
+                            animate={{ pathLength: 1 }}
+                            transition={{ duration: 1, ease: 'easeOut' }}
+                          />
+                        </svg>
+                      </div>
+                    )}
                   </div>
                   <Dialog.Close asChild>
                     <button className="p-3 bg-white/5 hover:bg-white/10 rounded-2xl transition-all text-muted hover:text-primary cursor-pointer active:scale-90 border border-white/5">
@@ -379,7 +401,7 @@ export default function FundDetailView({
               <section className="bg-surface-elevated border border-white/5 p-8 rounded-[2.5rem] space-y-8 shadow-inner group hover:border-white/10 transition-all">
                 <div className="flex items-center justify-between">
                   <h3 className="text-primary text-[10px] font-black uppercase tracking-[0.2em]">Contextual Positioning</h3>
-                  <span className="text-muted text-[9px] font-black uppercase tracking-widest opacity-40">1-Year History · Indexed to 100</span>
+                  <span className="text-muted text-[9px] font-black uppercase tracking-widest opacity-40">History normalized to 100</span>
                 </div>
                 
                 {/* Historical Performance Line Chart */}
@@ -396,33 +418,34 @@ export default function FundDetailView({
                       <p className="text-amber-400 text-xs font-black uppercase tracking-widest">
                         Historical data not yet loaded
                       </p>
-                      <p className="text-muted text-[11px] max-w-xs leading-relaxed">
-                        This chart needs historical NAV data. Go to the{' '}
-                        <span className="text-accent">Data tab</span> and click{' '}
-                        <span className="text-accent">"Full History Refresh"</span> to load
-                        3 years of NAV data for all your funds. This takes 2-5 minutes.
-                      </p>
                     </div>
                   ) : normalizedHistory.length > 0 ? (
                     <ResponsiveLine
                       data={normalizedHistory}
-                      margin={{ top: 20, right: 20, bottom: 20, left: 45 }}
-                      xScale={{ type: 'point' }}
+                      margin={{ top: 20, right: 20, bottom: 40, left: 45 }}
+                      xScale={{ type: 'time', format: 'native' }}
+                      xFormat="time:%Y-%m-%d"
                       yScale={{ type: 'linear', min: 'auto', max: 'auto' }}
                       axisTop={null}
                       axisRight={null}
-                      axisBottom={null}
+                      axisBottom={{
+                        format: '%b %Y',
+                        tickValues: 4,
+                        tickSize: 0,
+                        tickPadding: 10,
+                        tickRotation: 0,
+                      }}
                       axisLeft={{
                         tickSize: 0,
                         tickPadding: 10,
                         tickRotation: 0,
-                        legend: 'Value',
+                        legend: 'Rel Value',
                         legendOffset: -35,
                         legendPosition: 'middle'
                       }}
                       enableGridX={false}
                       enableGridY={true}
-                      colors={d => (d as any).seriesColor as string}
+                      colors={d => d.color}
                       lineWidth={2}
                       enablePoints={false}
                       useMesh={true}

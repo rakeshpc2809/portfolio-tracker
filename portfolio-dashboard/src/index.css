@@ -133,7 +133,7 @@ body {
 .chip-watch { @apply bg-watch/10 text-watch border border-watch/20; }
 .chip-harvest { @apply bg-harvest/10 text-harvest border border-harvest/20; }
 
-.glow-buy { @apply shadow-[0_0_15px_rgba(166,227,161,0.2)]; }
-.glow-exit { @apply shadow-[0_0_15px_rgba(243,139,168,0.2)]; }
-.glow-harvest { @apply shadow-[0_0_15px_rgba(180,190,254,0.2)]; }
-.glow-accent { @apply shadow-[0_0_15px_rgba(203,166,247,0.2)]; }
+.box-glow-buy { @apply shadow-[0_0_15px_rgba(166,227,161,0.2)]; }
+.box-glow-exit { @apply shadow-[0_0_15px_rgba(243,139,168,0.2)]; }
+.box-glow-harvest { @apply shadow-[0_0_15px_rgba(180,190,254,0.2)]; }
+.box-glow-accent { @apply shadow-[0_0_15px_rgba(203,166,247,0.2)]; }

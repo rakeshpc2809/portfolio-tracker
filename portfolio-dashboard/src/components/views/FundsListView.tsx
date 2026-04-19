@@ -72,12 +72,12 @@ function MiniStat({ label, value, color, term }: { label: string; value: string;
 
 function ActionPill({ action }: { action: string }) {
   const map: Record<string, string> = {
-    BUY: 'chip-buy glow-buy',
-    SELL: 'chip-exit glow-exit',
-    EXIT: 'chip-exit glow-exit',
-    HOLD: 'chip-hold glow-accent',
+    BUY: 'chip-buy',
+    SELL: 'chip-exit',
+    EXIT: 'chip-exit',
+    HOLD: 'chip-hold',
     WATCH: 'chip-watch',
-    HARVEST: 'chip-harvest glow-harvest',
+    HARVEST: 'chip-harvest',
   };
   return (
     <span className={`chip h-5 px-2.5 ${map[action] || 'chip-hold'}`}>
@@ -361,10 +361,11 @@ export default function FundsListView({
                 <ZScoreBar zScore={fund.rollingZScore252} rarityPct={fund.historicalRarityPct ?? 50} />
 
                 {/* ── Performance Matrix ── */}
-                <div className="grid grid-cols-4 gap-2 py-2">
+                <div className="grid grid-cols-5 gap-2 py-2">
                   <MiniStat label="Value" value={isPrivate ? '••••' : `₹${((fund.currentValue ?? 0) / 1000).toFixed(0)}k`} />
                   <MiniStat label="XIRR" value={`${xirr >= 0 ? '+' : ''}${xirr.toFixed(1)}%`} color={xirrColor} term="XIRR" />
                   <MiniStat label="Risk-Adj" value={riskAdjReturn} term="SORTINO" />
+                  <MiniStat label="Win Rate" value={fund.winRate > 0 ? `${(fund.winRate * 100).toFixed(0)}%` : '—'} color={fund.winRate > 0.55 ? 'text-buy' : fund.winRate > 0.45 ? 'text-secondary' : 'text-exit'} term="WIN_RATE" />
                   <MiniStat label="Max DD" value={mdd > 0 ? `-${mdd.toFixed(1)}%` : '—'} color={mdd > 25 ? 'text-exit' : mdd > 10 ? 'text-warning' : 'text-secondary'} />
                 </div>
 
@@ -383,7 +384,7 @@ export default function FundsListView({
                     <div className="flex gap-5">
                       <div className="flex flex-col gap-0.5">
                         <span className="text-[8px] text-muted uppercase font-black tracking-widest opacity-50">Sortino</span>
-                        <span className={`text-xs font-black tabular-nums ${sortino > 1.5 ? 'text-buy glow-buy' : sortino > 0.8 ? 'text-secondary' : 'text-exit'}`}>
+                        <span className={`text-xs font-black tabular-nums ${sortino > 1.5 ? 'text-buy' : sortino > 0.8 ? 'text-secondary' : 'text-exit'}`}>
                           {sortino > 0 ? sortino.toFixed(2) : '—'}
                         </span>
                       </div>

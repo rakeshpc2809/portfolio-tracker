@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { uploadCas, triggerBackfill, triggerForceSync, fetchAdminStatus, triggerSnapshotBackfill } from "@/services/api";
-import { Upload, ShieldCheck, FileText, AlertCircle, CheckCircle2, Database, Zap, Loader2, TrendingUp, Activity } from "lucide-react";
+import { Upload, AlertCircle, CheckCircle2, Zap, Loader2, TrendingUp, Activity } from "lucide-react";
+import { motion } from "framer-motion";
 import { useEngineWebsocket } from '@/hooks/useEngineWebsocket';
 
 const CasUploadView: React.FC<{ pan: string, portfolioData?: any }> = ({ pan, portfolioData }) => {
@@ -10,13 +11,9 @@ const CasUploadView: React.FC<{ pan: string, portfolioData?: any }> = ({ pan, po
   const [status, setStatus] = useState<{ type: 'success' | 'error' | null, message: string }>({ type: null, message: '' });
   
   const [adminStatus, setAdminStatus] = useState<any>(null);
-  const [syncing, setSyncing] = useState(false);
-  const [backfilling, setBackfilling] = useState(false);
-  const [snapshotBackfilling, setSnapshotBackfilling] = useState(false);
-  const [rescoring, setRescoring] = useState(false);
   const [rescoreStatus, setRescoreStatus] = useState('');
 
-  const engineProgress = useEngineWebsocket();
+  useEngineWebsocket();
 
   // Detect mode: No transactions = Setup Mode
   const isSetupMode = !portfolioData || (portfolioData.totalTransactions || 0) === 0;
@@ -71,50 +68,38 @@ const CasUploadView: React.FC<{ pan: string, portfolioData?: any }> = ({ pan, po
   };
 
   const handleBackfill = async () => {
-    setBackfilling(true);
     try {
       await triggerBackfill();
     } catch (err: any) {
       setStatus({ type: 'error', message: `History refresh failed: ${err.message}` });
-    } finally {
-      setBackfilling(false);
     }
   };
 
   const handleSnapshotBackfill = async () => {
-    setSnapshotBackfilling(true);
     try {
       await triggerSnapshotBackfill(pan);
       setStatus({ type: 'success', message: '✓ Performance history backfill started. Trajectory chart is being rebuilt.' });
     } catch (err: any) {
       setStatus({ type: 'error', message: `Performance rebuild failed: ${err.message}` });
-    } finally {
-      setSnapshotBackfilling(false);
     }
   };
 
   const handleSync = async () => {
-    setSyncing(true);
     try {
       await triggerForceSync(pan);
       setStatus({ type: 'success', message: '✓ Quantitative engine sync started.' });
     } catch (err: any) {
       setStatus({ type: 'error', message: `Engine sync failed: ${err.message}` });
-    } finally {
-      setSyncing(false);
     }
   };
 
   const handleRescore = async () => {
-    setRescoring(true);
     setRescoreStatus('');
     try {
       await triggerForceSync(pan);
       setRescoreStatus('✓ Scores updated. Refresh dashboard.');
     } catch {
       setRescoreStatus('❌ Scoring failed.');
-    } finally {
-      setRescoring(false);
     }
   };
 
@@ -238,11 +223,34 @@ const CasUploadView: React.FC<{ pan: string, portfolioData?: any }> = ({ pan, po
                 </p>
                 <button 
                   onClick={handleSync}
-                  className="px-8 h-12 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl text-[10px] font-black uppercase tracking-[0.2em] text-primary flex items-center gap-3 transition-all"
+                  disabled={adminStatus?.engine?.isRunning}
+                  className="px-8 h-12 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl text-[10px] font-black uppercase tracking-[0.2em] text-primary flex items-center gap-3 transition-all disabled:opacity-50"
                 >
-                  <Zap size={16} className="fill-current" />
-                  Run Math Engine
+                  {adminStatus?.engine?.isRunning ? <Loader2 size={16} className="animate-spin" /> : <Zap size={16} className="fill-current" />}
+                  {adminStatus?.engine?.isRunning ? 'Engine Running...' : 'Run Math Engine'}
                 </button>
+
+                {adminStatus?.engine?.isRunning && (
+                  <div className="space-y-3 pt-4">
+                    <div className="flex justify-between text-[10px] font-black uppercase tracking-widest">
+                      <span className="text-muted">{adminStatus.engine.message}</span>
+                      <span className="text-accent">{Math.round((adminStatus.engine.step / 7) * 100)}%</span>
+                    </div>
+                    <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden border border-white/5">
+                      <motion.div 
+                        initial={{ width: 0 }}
+                        animate={{ width: `${(adminStatus.engine.step / 7) * 100}%` }}
+                        className="h-full bg-buy shadow-[0_0_15px_rgba(166,227,161,0.5)]" 
+                      />
+                    </div>
+                  </div>
+                )}
+                
+                {!adminStatus?.engine?.isRunning && adminStatus?.engine?.step === 7 && (
+                   <p className="text-[10px] font-black uppercase text-buy flex items-center gap-2">
+                     <CheckCircle2 size={14} /> Analytics synchronized successfully
+                   </p>
+                )}
               </div>
             </div>
           </section>
@@ -277,15 +285,13 @@ const CasUploadView: React.FC<{ pan: string, portfolioData?: any }> = ({ pan, po
                   <Activity className="text-accent" size={20} />
                   <h3 className="text-sm font-black uppercase tracking-widest">Quick Rescore</h3>
                 </div>
-                {rescoring && <Loader2 className="animate-spin text-accent" size={16} />}
-              </div>
+               </div>
               <div className="p-8 space-y-6">
                 <p className="text-xs text-secondary leading-relaxed font-medium">
                   Update your conviction scores based on latest NAVs and personal CAGR. Run this after any new trade or significant market move.
                 </p>
                 <button
                   onClick={handleRescore}
-                  disabled={rescoring}
                   className="px-10 h-14 bg-accent text-primary rounded-2xl text-[10px] font-black uppercase tracking-[0.3em] hover:brightness-110 transition-all shadow-[0_0_30px_rgba(129,140,248,0.3)] disabled:opacity-50"
                 >
                   Recalculate My Scores

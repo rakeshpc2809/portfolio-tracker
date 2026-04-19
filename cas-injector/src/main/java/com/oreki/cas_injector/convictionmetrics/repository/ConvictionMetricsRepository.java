@@ -445,7 +445,7 @@ public class ConvictionMetricsRepository {
                         THEN (log_return - rolling_mean_252) / rolling_std_252
                         ELSE 0
                     END AS z_score_252,
-                    2 * (rolling_var_252 * 252) AS volatility_tax_annual
+                    0.5 * (rolling_var_252 * 252) AS volatility_tax_annual
                 FROM rolling_stats
                 ORDER BY amfi_code, nav_date DESC
             )

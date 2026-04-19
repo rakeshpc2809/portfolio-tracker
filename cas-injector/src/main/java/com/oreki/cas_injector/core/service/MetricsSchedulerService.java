@@ -74,7 +74,7 @@ public class MetricsSchedulerService {
             CROSS JOIN LATERAL (
                 SELECT s.amfi_code,
                        SUM(t.units) as total_units,
-                       SUM(CASE WHEN t.units > 0 THEN t.amount ELSE 0 END) as total_invested_at_cost
+                       SUM(t.units) * (SUM(CASE WHEN t.units > 0 THEN t.amount ELSE 0 END) / NULLIF(SUM(CASE WHEN t.units > 0 THEN t.units ELSE 0 END), 0)) as total_invested_at_cost
                 FROM \"transaction\" t
                 JOIN scheme s ON t.scheme_id = s.id
                 JOIN folio f ON s.folio_id = f.id

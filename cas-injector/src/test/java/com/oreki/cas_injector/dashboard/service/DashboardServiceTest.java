@@ -18,16 +18,21 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
-
 import com.oreki.cas_injector.backfill.repository.HistoricalNavRepository;
 import com.oreki.cas_injector.backfill.service.NavService;
 import com.oreki.cas_injector.convictionmetrics.repository.ConvictionMetricsRepository;
 import com.oreki.cas_injector.core.repository.InvestorRepository;
 import com.oreki.cas_injector.dashboard.dto.DashboardSummaryDTO;
 import com.oreki.cas_injector.dashboard.model.PortfolioSummary;
+import com.oreki.cas_injector.dashboard.repository.PortfolioDashboardReadModelRepository;
 import com.oreki.cas_injector.transactions.repository.CapitalGainAuditRepository;
 import com.oreki.cas_injector.transactions.repository.TaxLotRepository;
 import com.oreki.cas_injector.transactions.repository.TransactionRepository;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import java.util.Optional;
+import java.math.BigDecimal;
+import java.time.LocalDate;
+import java.util.ArrayList;
 
 @ExtendWith(MockitoExtension.class)
 public class DashboardServiceTest {
@@ -41,6 +46,8 @@ public class DashboardServiceTest {
     @Mock private BenchmarkService benchmarkService;
     @Mock private ConvictionMetricsRepository metricsRepo;
     @Mock private JdbcTemplate jdbcTemplate;
+    @Mock private PortfolioDashboardReadModelRepository summaryRepo;
+    @Mock private ObjectMapper objectMapper;
 
     @InjectMocks
     private DashboardService dashboardService;
@@ -48,6 +55,7 @@ public class DashboardServiceTest {
     @Test
     @SuppressWarnings("unchecked")
     public void testGetInvestorSummary_EmptyInvestor() {
+        when(summaryRepo.findById(anyString())).thenReturn(Optional.empty());
         when(jdbcTemplate.query(anyString(), any(RowMapper.class), anyString()))
             .thenReturn(Collections.emptyList());
 
@@ -72,6 +80,7 @@ public class DashboardServiceTest {
         mockSummary.setAmount(new java.math.BigDecimal("1000"));
         mockSummary.setUnits(new java.math.BigDecimal("10"));
 
+        when(summaryRepo.findById(eq("PAN123"))).thenReturn(Optional.empty());
         when(jdbcTemplate.query(anyString(), any(RowMapper.class), eq("PAN123")))
             .thenReturn(List.of(mockSummary));
         

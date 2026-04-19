@@ -21,6 +21,7 @@ public class UnifiedTacticalPayload {
     private List<TacticalSignal> opportunisticSignals;
     private List<TacticalSignal> activeSellSignals;    // NEW: Gate B
     private List<TacticalSignal> exitQueue;            // Dropped funds
+    private List<TacticalSignal> allSignals;           // NEW: Every signal from engine
     private List<TlhOpportunity> harvestOpportunities; // TLH integrated
     private List<RebalancingTrade> rebalancingTrades;
     private List<DroppedFundSummary> droppedFundSummaries;

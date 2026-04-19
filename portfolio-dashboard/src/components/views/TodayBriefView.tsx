@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import CurrencyValue from '../ui/CurrencyValue';
 import { RecommendationDetailCard } from '../ui/RecommendationDetailCard';
+import { Progress } from '../ui/progress';
 import { resolveReasoningMetadata, formatCurrency } from '../../utils/formatters';
 import type { TacticalSignal } from '../../types/signals';
 
@@ -64,6 +65,15 @@ export default function TodayBriefView({
     (payload.sipPlan || []).filter((s: any) => s.amount > 0 && s.mode === "SIP_ADDITIONAL"),
     [payload.sipPlan]
   );
+
+  const schemeBreakdown = portfolioData.schemeBreakdown || [];
+  const bearCount = schemeBreakdown.filter((s: any) => s.hmmState === 'VOLATILE_BEAR').length;
+  const bullCount = schemeBreakdown.filter((s: any) => s.hmmState === 'CALM_BULL').length;
+  const neutralCount = schemeBreakdown.filter((s: any) => s.hmmState === 'STRESSED_NEUTRAL').length;
+
+  const hasDeepBuys = payload.opportunisticSignals?.some((s: any) => s.action === 'BUY' && (s.returnZScore ?? 0) <= -2.0);
+  const arbitrageFund = schemeBreakdown.find((s: any) => s.category?.toUpperCase() === 'ARBITRAGE');
+  const canDeployArbitrage = hasDeepBuys && arbitrageFund && parseFloat(arbitrageFund.currentValue) > 1000;
 
   const container: Variants = {
     hidden: { opacity: 0 },
@@ -120,7 +130,7 @@ export default function TodayBriefView({
               <motion.span 
                 initial={{ opacity: 0, x: -10 }}
                 animate={{ opacity: 1, x: 0 }}
-                className={`text-sm font-black tracking-widest uppercase px-3 py-1 rounded-lg bg-black/20 border border-white/5 ${parseFloat(portfolioData.overallReturn) >= 0 ? 'text-buy glow-buy' : 'text-exit glow-exit'}`}>
+                className={`text-sm font-black tracking-widest uppercase px-3 py-1 rounded-lg bg-black/20 border border-white/5 ${parseFloat(portfolioData.overallReturn) >= 0 ? 'text-buy' : 'text-exit'}`}>
                 {portfolioData.overallReturn}
               </motion.span>
             </div>
@@ -145,13 +155,11 @@ export default function TodayBriefView({
               <p className="text-[9px] font-black uppercase tracking-widest text-muted/40 group-hover:text-harvest transition-colors">Tax Headroom</p>
               <span className="text-[8px] font-black text-harvest/60 tabular-nums">₹1.25L Cap</span>
             </div>
-            <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden border border-white/5">
-              <motion.div 
-                initial={{ width: 0 }}
-                animate={{ width: `${Math.min(100, (portfolioData.fyLtcgAlreadyRealized / 125000) * 100)}%` }}
-                className="h-full bg-gradient-to-r from-harvest to-accent shadow-[0_0_12px_rgba(180,190,254,0.3)]"
-              />
-            </div>
+            <Progress 
+              value={Math.min(100, (portfolioData.fyLtcgAlreadyRealized / 125000) * 100)} 
+              className="h-1.5 bg-white/5 border border-white/5" 
+              indicatorClassName="bg-gradient-to-r from-harvest to-accent shadow-[0_0_8px_rgba(180,190,254,0.3)]" 
+            />
             <div className="flex justify-between items-baseline">
                <p className="text-[10px] font-black text-harvest tabular-nums">
                 {isPrivate ? '••••' : formatCurrency(125000 - portfolioData.fyLtcgAlreadyRealized)} <span className="text-[8px] opacity-40">LEFT</span>
@@ -185,11 +193,26 @@ export default function TodayBriefView({
             </div>
           ))}
         </div>
-        <div className="pt-6 border-t border-white/5 mt-6">
+        <div className="pt-6 border-t border-white/5 mt-6 space-y-4">
           <div className="flex items-center gap-3 text-muted">
             <Activity size={12} className="animate-pulse text-buy" />
             <span className="text-[9px] font-bold uppercase tracking-[0.2em]">Engine Pulse Nominal</span>
           </div>
+          {schemeBreakdown.length > 0 && (
+            <div className="bg-black/20 border border-white/5 rounded-xl p-4">
+              <p className="text-[8px] font-black uppercase tracking-[0.2em] text-muted mb-3">Portfolio Regime Consensus</p>
+              <div className="flex w-full h-2 rounded-full overflow-hidden mb-2">
+                <div style={{ width: `${(bullCount / schemeBreakdown.length) * 100}%` }} className="bg-buy" />
+                <div style={{ width: `${(neutralCount / schemeBreakdown.length) * 100}%` }} className="bg-warning/50" />
+                <div style={{ width: `${(bearCount / schemeBreakdown.length) * 100}%` }} className="bg-exit" />
+              </div>
+              <div className="flex justify-between text-[8px] font-black uppercase tracking-widest text-muted/60">
+                <span>{bullCount} Bull</span>
+                <span>{neutralCount} Neutral</span>
+                <span>{bearCount} Bear</span>
+              </div>
+            </div>
+          )}
         </div>
       </motion.div>
 
@@ -248,7 +271,7 @@ export default function TodayBriefView({
                 className="flex flex-col justify-between p-8 bg-surface/60 border border-white/5 rounded-[2rem] hover:border-accent/30 cursor-pointer transition-all group shadow-xl relative overflow-hidden"
               >
                 <div className="flex justify-between items-start mb-6">
-                  <div className={`w-3 h-3 rounded-full shadow-lg ${s.deployFlag === 'DEPLOY' ? 'bg-buy animate-pulse glow-buy' : 'bg-warning'}`} />
+                  <div className={`w-3 h-3 rounded-full shadow-lg ${s.deployFlag === 'DEPLOY' ? 'bg-buy animate-pulse' : 'bg-warning'}`} />
                   <div className={`text-[8px] font-black uppercase tracking-[0.2em] px-3 py-1 rounded-full border ${
                     s.deployFlag === 'DEPLOY' ? 'bg-buy/10 text-buy border-buy/20' : 'bg-warning/10 text-warning border-warning/20'
                   }`}>
@@ -317,6 +340,17 @@ export default function TodayBriefView({
           <h3 className="text-muted text-[10px] font-black uppercase tracking-[0.3em]">Optional Top-ups</h3>
         </div>
         <div className="space-y-4">
+          {canDeployArbitrage && (
+            <div className="flex items-center justify-between p-6 bg-accent/5 border border-accent/20 rounded-[2rem] hover:border-accent/40 cursor-pointer transition-all shadow-xl">
+               <div className="min-w-0">
+                  <div className="flex items-center gap-2 mb-1">
+                    <Zap size={14} className="text-accent fill-accent" />
+                    <p className="text-[11px] font-black text-primary tracking-tight">Deploy Arbitrage Capital</p>
+                  </div>
+                  <p className="text-[9px] font-bold text-muted mt-1 leading-relaxed">Deep BUY signals detected in equities. Consider deploying from <span className="text-primary font-black">{arbitrageFund.simpleName || arbitrageFund.schemeName}</span> (Value: <span className="text-accent font-black"><CurrencyValue isPrivate={isPrivate} value={parseFloat(arbitrageFund.currentValue)} /></span>).</p>
+                </div>
+            </div>
+          )}
           {additionalSips.map((s: any) => (
             <div key={s.isin} className="flex items-center justify-between p-6 bg-surface/40 border border-white/5 rounded-[2rem] hover:border-accent/30 cursor-pointer transition-all group shadow-xl">
                <div className="min-w-0">

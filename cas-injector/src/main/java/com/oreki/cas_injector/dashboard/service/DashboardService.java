@@ -21,6 +21,7 @@ import com.oreki.cas_injector.core.utils.CommonUtils;
 import com.oreki.cas_injector.core.utils.FundStatus;
 import com.oreki.cas_injector.dashboard.dto.DashboardSummaryDTO;
 import com.oreki.cas_injector.dashboard.model.PortfolioSummary;
+import com.oreki.cas_injector.dashboard.repository.PortfolioDashboardReadModelRepository;
 import com.oreki.cas_injector.transactions.dto.TransactionDTO;
 import com.oreki.cas_injector.transactions.model.CapitalGainAudit;
 import com.oreki.cas_injector.transactions.model.TaxLot;
@@ -51,7 +52,7 @@ public class DashboardService {
     private final HistoricalNavRepository historicalNavRepo;
     private final BenchmarkService benchmarkService;
     private final JdbcTemplate jdbcTemplate;
-    private final PortfolioSummaryRepository summaryRepo;
+    private final PortfolioDashboardReadModelRepository summaryRepo;
     private final com.fasterxml.jackson.databind.ObjectMapper objectMapper;
 
     @Transactional(readOnly = true)

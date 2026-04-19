@@ -167,9 +167,9 @@ public class PortfolioFullService {
 
         // Map tactical signals onto the breakdown for UI consistency
         Map<String, TacticalSignal> signalByAmfi = new HashMap<>();
-        tactical.getOpportunisticSignals().forEach(s -> signalByAmfi.put(s.amfiCode(), s));
-        tactical.getExitQueue().forEach(s -> signalByAmfi.put(s.amfiCode(), s));
-        tactical.getActiveSellSignals().forEach(s -> signalByAmfi.put(s.amfiCode(), s));
+        if (tactical.getAllSignals() != null) {
+            tactical.getAllSignals().forEach(s -> signalByAmfi.put(s.amfiCode(), s));
+        }
 
         summary.getSchemeBreakdown().forEach(scheme -> {
             String isin = scheme.getIsin();
@@ -193,6 +193,18 @@ public class PortfolioFullService {
                 scheme.setJustifications(sig.justifications());
                 scheme.setLastBuyDate(sig.lastBuyDate());
                 scheme.setSignalType(sig.fundStatus().name());
+                
+                // NEW: Map conviction metrics
+                scheme.setConvictionScore(sig.convictionScore());
+                scheme.setWinRate(sig.winRate());
+                scheme.setCvar5(sig.cvar5());
+                scheme.setYieldScore(sig.yieldScore());
+                scheme.setRiskScore(sig.riskScore());
+                scheme.setValueScore(sig.valueScore());
+                scheme.setPainScore(sig.painScore());
+                scheme.setRegimeScore(sig.regimeScore());
+                scheme.setFrictionScore(sig.frictionScore());
+                scheme.setExpenseScore(sig.expenseScore());
             }
         });
 
@@ -212,7 +224,7 @@ public class PortfolioFullService {
             .collect(Collectors.toMap(StrategyTarget::isin, StrategyTarget::status, (a, b) -> a));
         
         Set<String> activeIsins = targets.stream()
-            .filter(t -> "ACTIVE".equalsIgnoreCase(t.status()) || "ACCUMULATOR".equalsIgnoreCase(t.status()) || "REBALANCER".equalsIgnoreCase(t.status()) || "NEW_ENTRY".equalsIgnoreCase(t.status()))
+            .filter(t -> !"DROPPED".equalsIgnoreCase(t.status()) && !"EXIT".equalsIgnoreCase(t.status()))
             .map(StrategyTarget::isin)
             .collect(Collectors.toSet());
 
@@ -271,6 +283,7 @@ public class PortfolioFullService {
                 ));
             });
             
+        result.sort((a, b) -> Double.compare(b.taxSavingByWaiting(), a.taxSavingByWaiting()));
         return result;
     }
 

@@ -203,6 +203,7 @@ public class PortfolioOrchestrator {
             .opportunisticSignals(opportunistic)
             .activeSellSignals(activeSells)
             .exitQueue(exitQueue)
+            .allSignals(all) // Capture all signals including HOLDS
             .harvestOpportunities(harvest)
             .rebalancingTrades(rebalancingTrades)
             .totalExitValue(totalExitValue)
@@ -302,7 +303,9 @@ public class PortfolioOrchestrator {
 
         List<PythonQuantClient.PythonAggregatedHolding> pyHoldings = holdings.stream()
             .map(h -> new PythonQuantClient.PythonAggregatedHolding(
-                h.getIsin(), h.getSchemeName(), h.getCurrentValue(), h.getLtcgAmount(), h.getStcgAmount(), h.getDaysToNextLtcg(), h.getNav()))
+                h.getIsin(), h.getSchemeName(), h.getCurrentValue(), 
+                h.getLtcgValue(), h.getLtcgAmount(), h.getStcgValue(), h.getStcgAmount(), 
+                h.getDaysToNextLtcg(), h.getNav()))
             .toList();
             
         List<PythonQuantClient.PythonStrategyTarget> pyTargets = targets.stream()
@@ -336,7 +339,7 @@ public class PortfolioOrchestrator {
                 .plannedPercentage(ps.planned_percentage())
                 .actualPercentage(ps.actual_percentage())
                 .sipPercentage(0) 
-                .fundStatus(FundStatus.valueOf(ps.fund_status()))
+                .fundStatus(FundStatus.fromString(ps.fund_status()))
                 .convictionScore(m.convictionScore())
                 .sortinoRatio(m.sortinoRatio())
                 .maxDrawdown(m.maxDrawdown())
@@ -344,6 +347,8 @@ public class PortfolioOrchestrator {
                 .navPercentile3yr(m.navPercentile3yr())
                 .drawdownFromAth(m.drawdownFromAth())
                 .returnZScore(m.returnZScore())
+                .winRate(m.winRate())
+                .cvar5(m.cvar5())
                 .lastBuyDate(m.lastBuyDate())
                 .justifications(ps.justifications())
                 .reasoningMetadata(com.oreki.cas_injector.rebalancing.dto.ReasoningMetadata.neutral(ps.scheme_name()))

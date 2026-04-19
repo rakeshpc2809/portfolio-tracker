@@ -8,5 +8,16 @@ public enum FundStatus {
     ACCUMULATOR,
     REBALANCER,
     WATCH,
-    NEW_ENTRY
+    NEW_ENTRY,
+    CORE,
+    SATELLITE;
+
+    public static FundStatus fromString(String val) {
+        if (val == null) return ACTIVE;
+        try {
+            return FundStatus.valueOf(val.toUpperCase());
+        } catch (Exception e) {
+            return ACTIVE;
+        }
+    }
 }

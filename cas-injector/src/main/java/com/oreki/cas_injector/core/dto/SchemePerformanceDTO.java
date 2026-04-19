@@ -58,6 +58,7 @@ public class SchemePerformanceDTO {
     private double sortinoRatio;
     private double maxDrawdown;
     private double cvar5; // Added for Bug 1
+    private double winRate; // NEW
     private double allocationPercentage;
     private double plannedPercentage;
     private double navPercentile1yr;

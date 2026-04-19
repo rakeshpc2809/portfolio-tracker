@@ -157,6 +157,10 @@ public class QuantitativeEngineService {
             FROM fund_history
             WHERE amfi_code IN (
                 SELECT amfi_code FROM fund_history 
+                WHERE amfi_code IN (
+                    SELECT LTRIM(s.amfi_code, '0') FROM scheme s
+                    JOIN folio f ON s.folio_id = f.id
+                )
                 GROUP BY amfi_code HAVING COUNT(*) >= ?
             )
             AND nav_date >= CURRENT_DATE - INTERVAL '400 days'

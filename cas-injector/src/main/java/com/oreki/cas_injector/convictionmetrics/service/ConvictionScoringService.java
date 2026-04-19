@@ -63,6 +63,7 @@ public class ConvictionScoringService {
             }).max().orElse(35.0);
         
         if (maxCagrFound <= 5.0) maxCagrFound = 35.0;
+        if (maxCagrFound > 150.0) maxCagrFound = 150.0;
 
         for (Map<String, Object> fund : metrics) {
             String amfi = CommonUtils.SANITIZE_AMFI.apply((String) fund.get("amfi_code"));

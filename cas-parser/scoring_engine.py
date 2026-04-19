@@ -54,7 +54,7 @@ def compute_conviction_score(req: ScoringRequest) -> ScoringResponse:
     
     # 4. PAIN + RECOVERY (MDD blended with OU Half-life)
     mdd = abs(req.max_drawdown)
-    pain_score = max(0.0, 100.0 - (mdd * 2.5))
+    pain_score = max(0.0, 100.0 - (mdd * 1.5))
     
     recovery_score = pain_score
     if req.ou_valid:
@@ -87,7 +87,7 @@ def compute_conviction_score(req: ScoringRequest) -> ScoringResponse:
     if phil_status == "REBALANCER":
         final_score = 65.0
     elif phil_status == "ACCUMULATOR":
-        nav_range_score = req.nav_percentile_1yr * 100.0
+        nav_range_score = (1.0 - req.nav_percentile_1yr) * 100.0
         final_score = (nav_range_score * 0.50) + (pain_score * 0.30) + (expense_drag_score * 0.20)
     elif "DEBT" in category or "LIQUID" in category:
         final_score = (risk_score * 0.40) + (friction_score * 0.35) + (expense_drag_score * 0.25)

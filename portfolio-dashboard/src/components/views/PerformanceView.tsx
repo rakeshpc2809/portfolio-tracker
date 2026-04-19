@@ -23,28 +23,24 @@ export default function PerformanceView({
 
   const lineData = useMemo(() => {
     if (!perf || !perf.history || perf.history.length === 0) return [];
-
-    const firstValue = perf.history[0].value || 1;
-
-    const portfolioSeries = {
-      id: "Portfolio",
-      color: "#cba6f7",
-      data: perf.history.map((p: any) => ({
-        x: p.date,
-        y: parseFloat(((p.value / firstValue) * 100).toFixed(2))
-      }))
-    };
-
-    const benchmarkSeries = {
-      id: "Nifty 50",
-      color: "rgba(166, 227, 161, 0.4)",
-      data: (perf.niftyHistory || []).map((b: any) => ({
-        x: b.date,
-        y: parseFloat(b.normalizedValue.toFixed(2))
-      }))
-    };
-
-    return [portfolioSeries, benchmarkSeries];
+    return [
+      {
+        id: "Portfolio",
+        color: "#cba6f7",
+        data: perf.history.map((p: any) => ({ 
+          x: new Date(p.date), 
+          y: parseFloat(((p.value / (p.invested || 1)) * 100).toFixed(2)) 
+        }))
+      },
+      {
+        id: "Nifty 50",
+        color: "rgba(166, 227, 161, 0.4)",
+        data: (perf.niftyHistory || []).map((b: any) => ({ 
+          x: new Date(b.date), 
+          y: parseFloat(b.normalizedValue.toFixed(2)) 
+        }))
+      }
+    ];
   }, [perf]);
 
   // Goal Projector Computation
@@ -123,17 +119,17 @@ export default function PerformanceView({
           <ResponsiveLine
             data={lineData}
             margin={{ top: 20, right: 20, bottom: 50, left: 50 }}
-            xScale={{ type: 'point' }}
+            xScale={{ type: 'time', format: 'native' }}
+            xFormat="time:%Y-%m-%d"
             yScale={{ type: 'linear', min: 'auto', max: 'auto', stacked: false, reverse: false }}
             axisTop={null}
             axisRight={null}
             axisBottom={{
+              format: '%b %Y',
+              tickValues: 'every 3 months',
               tickSize: 5,
               tickPadding: 5,
               tickRotation: -45,
-              legend: '',
-              legendOffset: 36,
-              legendPosition: 'middle'
             }}
             axisLeft={{
               tickSize: 5,

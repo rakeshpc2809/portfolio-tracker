@@ -47,8 +47,9 @@ public class PythonQuantClient {
     public record BatchAnalyzeResponse(List<QuantAnalyzeResponse> results) {
     }
 
-    public record PythonAggregatedHolding(String isin, String scheme_name, double current_value, double ltcg_amount,
-            double stcg_amount, int days_to_next_ltcg, double nav) {
+    public record PythonAggregatedHolding(String isin, String scheme_name, double current_value, 
+            double ltcg_value, double ltcg_amount, double stcg_value, double stcg_amount, 
+            int days_to_next_ltcg, double nav) {
     }
 
     public record PythonStrategyTarget(String isin, String scheme_name, double target_portfolio_pct, double sip_pct,

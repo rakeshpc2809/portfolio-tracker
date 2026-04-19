@@ -28,7 +28,9 @@ class AggregatedHolding(BaseModel):
     isin: str
     scheme_name: str
     current_value: float
+    ltcg_value: float
     ltcg_amount: float
+    stcg_value: float
     stcg_amount: float
     days_to_next_ltcg: int
     nav: float = 0.0
@@ -68,6 +70,9 @@ class RebalanceContext:
             self.status = "DROPPED"
         elif self.target_pct > 0.0 and self.actual_pct == 0.0:
             self.status = "NEW_ENTRY"
+            
+        if self.target.sip_pct > 0.0 and self.status == "DROPPED":
+            self.status = "ACTIVE"
 
     def create_signal(self, action: str, amount: float, justifications: List[str]) -> TacticalSignal:
         return TacticalSignal(
@@ -111,8 +116,13 @@ class TaxFreeExitStrategy(RebalanceStrategy):
 class StcgShieldExitStrategy(RebalanceStrategy):
     def can_handle(self, ctx: RebalanceContext) -> bool:
         if not (ctx.status == "DROPPED" or ctx.status == "EXIT"): return False
-        return 0 < ctx.holding.days_to_next_ltcg <= 90 and ctx.holding.stcg_amount > 1000
+        return 0 < ctx.holding.days_to_next_ltcg <= 90 and ctx.holding.stcg_value > 1000
     def evaluate(self, ctx: RebalanceContext) -> TacticalSignal:
+        if ctx.holding.ltcg_value > 1000:
+            return ctx.create_signal("EXIT", ctx.holding.ltcg_value, [
+                f"Partial Strategic Exit: Selling LTCG portion (₹{ctx.holding.ltcg_value:,.0f}).",
+                f"STCG Shield: Holding remaining ₹{ctx.holding.stcg_value:,.0f} for {ctx.holding.days_to_next_ltcg} days to avoid 20% tax penalty."
+            ])
         return ctx.create_signal("HOLD", 0.0, [f"STCG Shield: {ctx.holding.days_to_next_ltcg} days to LTCG conversion. Holding to avoid 20% STCG penalty."])
 
 class StandardExitStrategy(RebalanceStrategy):
@@ -123,16 +133,30 @@ class StandardExitStrategy(RebalanceStrategy):
 
 class OverweightStcgShieldStrategy(RebalanceStrategy):
     def can_handle(self, ctx: RebalanceContext) -> bool:
-        return ctx.drift > 2.5 and ctx.holding.stcg_amount > 5000 and ctx.drift < 10.0
+        if ctx.status == "ACCUMULATOR": return False
+        if ctx.drift <= 2.5: return False
+        return 0 < ctx.holding.days_to_next_ltcg <= 90 and ctx.holding.stcg_value > 1000
     def evaluate(self, ctx: RebalanceContext) -> TacticalSignal:
-        return ctx.create_signal("HOLD", 0.0, [f"STCG Shield: Fund is overweight by {ctx.drift:.1f}%, but suppressing SELL to avoid STCG penalty on ₹{ctx.holding.stcg_amount:.0f} gains."])
+        overweight_val = (ctx.drift / 100.0) * ctx.req.total_portfolio_value
+        if ctx.holding.ltcg_value > 1000:
+            trim_amt = min(overweight_val, ctx.holding.ltcg_value)
+            return ctx.create_signal("SELL", trim_amt, [
+                f"Strategic Trim: Reducing overweight position by selling LTCG portion (₹{trim_amt:,.0f}).",
+                f"STCG Shield: Protecting ₹{ctx.holding.stcg_value:,.0f} from STCG tax for {ctx.holding.days_to_next_ltcg} days."
+            ])
+        return ctx.create_signal("HOLD", 0.0, [f"Overweight Shield: Fund is overweight by {ctx.drift:.1f}%, but holding to avoid STCG tax on recent lots."])
 
 class TrimOverweightStrategy(RebalanceStrategy):
     def can_handle(self, ctx: RebalanceContext) -> bool:
+        if ctx.status == "ACCUMULATOR": return False
         return ctx.drift > 2.5
     def evaluate(self, ctx: RebalanceContext) -> TacticalSignal:
         overweight_val = (ctx.drift / 100.0) * ctx.req.total_portfolio_value
-        return ctx.create_signal("SELL", overweight_val, [f"Rebalance: Fund is overweight by {ctx.drift:.1f}%. Trimming excess."])
+        return ctx.create_signal("SELL", overweight_val, [
+            f"Strategic Trim: Fund is overweight by {ctx.drift:.1f}%.",
+            f"Target: {ctx.target_pct:.1f}% | Actual: {ctx.actual_pct:.1f}%",
+            f"Suggested sell: ₹{overweight_val:,.0f} to reach target allocation."
+        ])
 
 class UnderweightBearMarketStrategy(RebalanceStrategy):
     def can_handle(self, ctx: RebalanceContext) -> bool:
@@ -145,7 +169,11 @@ class FillUnderweightStrategy(RebalanceStrategy):
         return ctx.drift < -2.5
     def evaluate(self, ctx: RebalanceContext) -> TacticalSignal:
         deficit_val = abs(ctx.drift / 100.0) * ctx.req.total_portfolio_value
-        return ctx.create_signal("BUY", deficit_val, [f"Rebalance: Fund is underweight by {abs(ctx.drift):.1f}%. Buying deficit."])
+        return ctx.create_signal("BUY", deficit_val, [
+            f"Strategic Realignment: Fund is underweight by {abs(ctx.drift):.1f}%.",
+            f"Target: {ctx.target_pct:.1f}% | Actual: {ctx.actual_pct:.1f}%",
+            f"Suggested buy: ₹{deficit_val:,.0f} to reach target allocation."
+        ])
 
 class WashSaleStrategy(RebalanceStrategy):
     def can_handle(self, ctx: RebalanceContext) -> bool:
