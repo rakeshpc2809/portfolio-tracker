@@ -84,7 +84,9 @@ export default function Dashboard({
     : 'after:bg-exit/[0.02]';
 
   return (
-    <div className="min-h-screen bg-background text-primary font-sans selection:bg-accent/30">
+    <div className="min-h-screen bg-background text-primary font-sans selection:bg-accent/30 overflow-x-hidden">
+      <div className="noise-overlay" />
+      
       <div className="fixed inset-0 pointer-events-none opacity-40" 
            style={{ background: 'radial-gradient(ellipse 70% 40% at 15% 0%, rgba(129,140,248,0.07) 0%, transparent 55%), radial-gradient(ellipse 50% 30% at 85% 100%, rgba(52,211,153,0.04) 0%, transparent 50%)' }} 
       />

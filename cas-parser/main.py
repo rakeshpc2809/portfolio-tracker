@@ -13,6 +13,29 @@ import casparser
 import numpy as np
 import pandas as pd
 import yfinance as yf
+from rebalance_engine import RebalanceRequest, TacticalSignal, compute_signals
+from scoring_engine import ScoringRequest, ScoringResponse, compute_conviction_score
+from confluent_kafka import Producer
+from opentelemetry import trace
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import BatchSpanProcessor
+from opentelemetry.exporter.zipkin.json import ZipkinExporter
+from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+
+# Kafka Configuration
+KAFKA_BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
+KAFKA_TOPIC = "cas.parsed.events"
+
+try:
+    producer_config = {
+        'bootstrap.servers': KAFKA_BOOTSTRAP_SERVERS,
+        'client.id': 'cas-parser-producer'
+    }
+    producer = Producer(producer_config)
+    logger.info(f"✅ Kafka Producer initialized for {KAFKA_BOOTSTRAP_SERVERS}")
+except Exception as e:
+    logger.error(f"❌ Failed to initialize Kafka Producer: {e}")
+    producer = None
 
 # Configure logging
 logging.basicConfig(
@@ -21,9 +44,17 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="Mutual Fund CAS Parser & Quant Service")
+# OTel Configuration
+ZIPKIN_ENDPOINT = os.getenv("ZIPKIN_URL", "http://localhost:9411/api/v2/spans")
+trace.set_tracer_provider(TracerProvider())
+zipkin_exporter = ZipkinExporter(endpoint=ZIPKIN_ENDPOINT)
+span_processor = BatchSpanProcessor(zipkin_exporter)
+trace.get_tracer_provider().add_span_processor(span_processor)
+tracer = trace.get_tracer("cas-parser")
 
-JAVA_BACKEND_URL = os.getenv("JAVA_BACKEND_URL", "http://java-backend:8080/api/cas/inject")
+app = FastAPI(title="Mutual Fund CAS Parser & Quant Service")
+FastAPIInstrumentor.instrument_app(app)
+
 JAVA_MARKET_URL = os.getenv("JAVA_MARKET_URL", "http://java-backend:8080/api/market/index-history")
 API_KEY = os.getenv("PORTFOLIO_API_KEY", "dev-secret-key")
 
@@ -158,6 +189,23 @@ def decimal_default(obj):
     raise TypeError
 
 # --- 4. ROUTES ---
+
+@app.post("/api/v1/quant/rebalance", response_model=List[TacticalSignal])
+async def rebalance_portfolio(req: RebalanceRequest):
+    try:
+        signals = compute_signals(req)
+        return signals
+    except Exception as e:
+        logger.error(f"Rebalance computation failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/v1/quant/score", response_model=ScoringResponse)
+async def score_fund(req: ScoringRequest):
+    try:
+        return compute_conviction_score(req)
+    except Exception as e:
+        logger.error(f"Scoring computation failed for {req.amfi_code}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/v1/quant/analyze", response_model=QuantAnalyzeResponse)
 async def analyze_quant(req: QuantAnalyzeRequest):
@@ -309,20 +357,22 @@ async def parse_cas(
                     })
                 f_data["schemes"].append(s_data)
             payload["folios"].append(f_data)
+        
+        json_payload = json.dumps(payload, default=decimal_default)
 
-        # Forward to Java Backend
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                JAVA_BACKEND_URL,
-                json=json.loads(json.dumps(payload, default=decimal_default)),
-                headers={"X-API-KEY": API_KEY},
-                timeout=60.0
-            )
-            
-            if response.status_code != 200:
-                raise Exception(f"Java Backend error: {response.text}")
-
-            return response.json()
+        # Asynchronously forward to Kafka
+        if producer:
+            try:
+                producer.produce(KAFKA_TOPIC, value=json_payload, callback=lambda err, msg: logger.info(f"Kafka message delivered") if err is None else logger.error(f"Kafka delivery failed: {err}"))
+                producer.flush()
+                return {"status": "accepted", "message": "CAS data is being processed asynchronously"}
+            except Exception as e:
+                logger.error(f"Failed to push to Kafka: {e}")
+                # Fallback to sync REST if producer fails? 
+                # For now, let's just fail if Kafka is the primary
+                raise HTTPException(status_code=500, detail=f"Failed to push to Kafka: {str(e)}")
+        else:
+            raise HTTPException(status_code=503, detail="Kafka producer not initialized")
 
     except Exception as e:
         logger.error(f"CAS Parsing failed: {str(e)}")
@@ -330,4 +380,4 @@ async def parse_cas(
 
 @app.get("/health")
 async def health_check():
-    return {"status": "healthy", "target": JAVA_BACKEND_URL}
+    return {"status": "healthy"}

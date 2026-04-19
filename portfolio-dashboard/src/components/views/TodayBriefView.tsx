@@ -97,52 +97,67 @@ export default function TodayBriefView({
       {/* 1. PORTFOLIO HERO CARD (4x2 or similar) */}
       <motion.div 
         variants={bentoItem}
-        className="md:col-span-8 bg-surface/40 backdrop-blur-2xl border border-white/[0.04] rounded-[2.5rem] p-10 flex flex-col justify-between shadow-2xl relative overflow-hidden group min-h-[320px]"
+        className="md:col-span-8 glass-card-premium p-10 flex flex-col justify-between relative overflow-hidden group min-h-[360px]"
       >
-        <div className="absolute top-0 right-0 p-8 opacity-10 group-hover:opacity-20 transition-opacity">
-          <TrendingUp size={120} />
+        <div className="absolute top-0 right-0 p-8 opacity-5 group-hover:opacity-10 transition-opacity">
+          <TrendingUp size={160} />
         </div>
-        <div className="space-y-2 relative z-10">
-          <h2 className="text-accent text-[10px] font-black uppercase tracking-[0.4em] mb-4">Portfolio Orbit</h2>
+        
+        {/* Abstract Gradient Orbs for Hero */}
+        <div className="absolute -top-24 -left-24 w-64 h-64 bg-accent/10 rounded-full blur-[100px] pointer-events-none" />
+        <div className="absolute -bottom-24 -right-24 w-64 h-64 bg-buy/5 rounded-full blur-[100px] pointer-events-none" />
+
+        <div className="space-y-4 relative z-10">
+          <div className="flex items-center gap-3">
+             <div className="h-px w-8 bg-accent/40" />
+             <h2 className="text-accent text-[10px] font-black uppercase tracking-[0.4em]">Portfolio Orbit</h2>
+          </div>
+          
           <div className="space-y-1">
-            <p className="text-[11px] font-black uppercase tracking-widest text-muted">Current Value</p>
-            <div className="text-5xl font-black text-primary tracking-tighter tabular-nums flex items-baseline gap-2">
+            <p className="text-[11px] font-black uppercase tracking-widest text-muted/60">Current Liquidity Value</p>
+            <div className="text-6xl font-black text-primary tracking-tighter tabular-nums flex items-baseline gap-4">
               <CurrencyValue isPrivate={isPrivate} value={portfolioData.currentValueAmount} />
-              <span className={`text-sm font-black tracking-widest uppercase ${parseFloat(portfolioData.overallReturn) >= 0 ? 'text-buy' : 'text-exit'}`}>
+              <motion.span 
+                initial={{ opacity: 0, x: -10 }}
+                animate={{ opacity: 1, x: 0 }}
+                className={`text-sm font-black tracking-widest uppercase px-3 py-1 rounded-lg bg-black/20 border border-white/5 ${parseFloat(portfolioData.overallReturn) >= 0 ? 'text-buy glow-buy' : 'text-exit glow-exit'}`}>
                 {portfolioData.overallReturn}
-              </span>
+              </motion.span>
             </div>
           </div>
         </div>
 
-        <div className="grid grid-cols-3 gap-8 pt-8 border-t border-white/5 relative z-10">
-          <div>
-            <p className="text-[9px] font-black uppercase tracking-widest text-muted mb-1 opacity-60">Overall XIRR</p>
-            <p className={`text-xl font-black tabular-nums ${parseFloat(portfolioData.overallXirr) >= 0 ? 'text-buy glow-buy' : 'text-exit glow-exit'}`}>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-8 pt-10 border-t border-white/5 relative z-10">
+          <div className="space-y-1">
+            <p className="text-[9px] font-black uppercase tracking-widest text-muted/40 mb-1">Overall XIRR</p>
+            <p className={`text-2xl font-black tabular-nums tracking-tight ${parseFloat(portfolioData.overallXirr) >= 0 ? 'text-buy' : 'text-exit'}`}>
               {portfolioData.overallXirr}
             </p>
           </div>
-          <div>
-            <p className="text-[9px] font-black uppercase tracking-widest text-muted mb-1 opacity-60">Invested</p>
-            <p className="text-xl font-black tabular-nums text-primary">
+          <div className="space-y-1">
+            <p className="text-[9px] font-black uppercase tracking-widest text-muted/40 mb-1">Capital Invested</p>
+            <p className="text-2xl font-black tabular-nums text-primary tracking-tight">
               <CurrencyValue isPrivate={isPrivate} value={portfolioData.currentInvestedAmount} />
             </p>
           </div>
-          <div className="group cursor-help relative">
-            <div className="flex justify-between items-center mb-1">
-              <p className="text-[9px] font-black uppercase tracking-widest text-muted opacity-60 group-hover:text-harvest transition-colors">LTCG Headroom</p>
-              <span className="text-[8px] font-black text-harvest/60">₹1.25L Limit</span>
+          <div className="group cursor-help relative space-y-2">
+            <div className="flex justify-between items-center">
+              <p className="text-[9px] font-black uppercase tracking-widest text-muted/40 group-hover:text-harvest transition-colors">Tax Headroom</p>
+              <span className="text-[8px] font-black text-harvest/60 tabular-nums">₹1.25L Cap</span>
             </div>
             <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden border border-white/5">
               <motion.div 
                 initial={{ width: 0 }}
                 animate={{ width: `${Math.min(100, (portfolioData.fyLtcgAlreadyRealized / 125000) * 100)}%` }}
-                className="h-full bg-harvest shadow-[0_0_8px_rgba(180,190,254,0.4)]"
+                className="h-full bg-gradient-to-r from-harvest to-accent shadow-[0_0_12px_rgba(180,190,254,0.3)]"
               />
             </div>
-            <p className="text-[10px] font-black text-harvest mt-1.5 tabular-nums">
-              {isPrivate ? '••••' : formatCurrency(125000 - portfolioData.fyLtcgAlreadyRealized)} <span className="text-[8px] opacity-40">LEFT</span>
-            </p>
+            <div className="flex justify-between items-baseline">
+               <p className="text-[10px] font-black text-harvest tabular-nums">
+                {isPrivate ? '••••' : formatCurrency(125000 - portfolioData.fyLtcgAlreadyRealized)} <span className="text-[8px] opacity-40">LEFT</span>
+              </p>
+              <span className="text-[8px] font-bold text-muted/30">FY 25-26</span>
+            </div>
           </div>
         </div>
       </motion.div>

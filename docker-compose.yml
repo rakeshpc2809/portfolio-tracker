@@ -38,11 +38,14 @@ services:
       - SPRING_DATASOURCE_PASSWORD=${DB_PASSWORD:-password}
       - GOOGLE_SHEET_URL=${GOOGLE_SHEET_URL:-https://docs.google.com/spreadsheets/d/e/2PACX-1vTq7bqtww_gsZv4FPXBWErHOSmuPSNrnL-82cno8rShNP9TsTOjJmkPBnocg_GqSWALUQo9YEI_dyto/pub?gid=412111003&single=true&output=csv}
       - PORTFOLIO_API_KEY=${PORTFOLIO_API_KEY:-dev-secret-key}
+      - SPRING_KAFKA_BOOTSTRAP_SERVERS=kafka:29092
     volumes:
       - ./logs:/app/logs
     depends_on:
       postgres:
         condition: service_healthy
+      kafka:
+        condition: service_started
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/api/actuator/health"]
       interval: 20s
@@ -59,9 +62,12 @@ services:
     environment:
       - JAVA_BACKEND_URL=http://java-backend:8080/api/cas/inject
       - PORTFOLIO_API_KEY=${PORTFOLIO_API_KEY:-dev-secret-key}
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
     depends_on:
       java-backend:
         condition: service_healthy
+      kafka:
+        condition: service_started
 
   # 4. The React Frontend
   react-frontend:
@@ -76,6 +82,36 @@ services:
       java-backend:
         condition: service_healthy
     restart: always
+
+  # 5. Infrastructure: Kafka & Zookeeper
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    container_name: cas_zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: cas_kafka
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+
+  # 6. Observability: Zipkin
+  zipkin:
+    image: openzipkin/zipkin:latest
+    container_name: cas_zipkin
+    ports:
+      - "9411:9411"
 
 volumes:
   postgres_data:
