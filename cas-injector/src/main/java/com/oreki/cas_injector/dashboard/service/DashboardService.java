@@ -51,12 +51,29 @@ public class DashboardService {
     private final HistoricalNavRepository historicalNavRepo;
     private final BenchmarkService benchmarkService;
     private final JdbcTemplate jdbcTemplate;
+    private final PortfolioSummaryRepository summaryRepo;
+    private final com.fasterxml.jackson.databind.ObjectMapper objectMapper;
 
     @Transactional(readOnly = true)
-    @Cacheable(value = "dashboardSummaryV3", key = "#rawPan")
     public DashboardSummaryDTO getInvestorSummary(String rawPan) {
         String pan = rawPan.trim().toUpperCase();
-        log.info("🔍 Generating Dashboard Summary (from MV via JDBC) for PAN: {}", pan);
+        log.info("🚀 [CQRS] Fetching Dashboard Summary from Read Model for PAN: {}", pan);
+        
+        return summaryRepo.findById(pan)
+            .map(summary -> {
+                try {
+                    return objectMapper.readValue(summary.getContent(), DashboardSummaryDTO.class);
+                } catch (Exception e) {
+                    log.error("🚨 Failed to deserialize dashboard summary for PAN: {}", pan, e);
+                    return null;
+                }
+            })
+            .orElseGet(() -> computeSummary(pan));
+    }
+
+    @Transactional(readOnly = true)
+    public DashboardSummaryDTO computeSummary(String pan) {
+        log.info("📊 [CQRS] Computing fresh Dashboard Summary (Write-Model query) for PAN: {}", pan);
         
         String sql = "SELECT * FROM mv_portfolio_summary WHERE investor_pan = ?";
         List<PortfolioSummary> summaryData;

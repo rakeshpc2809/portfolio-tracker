@@ -65,6 +65,7 @@ public class DashboardServiceTest {
         mockSummary.setInvestorName("Test Investor");
         mockSummary.setInvestorPan("PAN123");
         mockSummary.setSchemeId(1L);
+        mockSummary.setSchemeName("Test Fund");
         mockSummary.setAmfiCode("12345");
         mockSummary.setTransactionDate(java.time.LocalDate.now());
         mockSummary.setTransactionType("BUY");
@@ -78,6 +79,10 @@ public class DashboardServiceTest {
         when(auditRepo.findAllBySellTransactionSchemeFolioInvestorPan("PAN123")).thenReturn(Collections.emptyList());
         when(taxLotRepo.findByStatusAndSchemeFolioInvestorPan("OPEN", "PAN123")).thenReturn(Collections.emptyList());
         when(historicalNavRepo.findByAmfiCodeInAndNavDateIn(any(), any())).thenReturn(Collections.emptyList());
+        
+        com.oreki.cas_injector.core.dto.SchemeDetailsDTO mockDetails = new com.oreki.cas_injector.core.dto.SchemeDetailsDTO();
+        mockDetails.setNav(new java.math.BigDecimal("100.0"));
+        when(navService.getLatestSchemeDetails(anyString())).thenReturn(mockDetails);
 
         DashboardSummaryDTO summary = dashboardService.getInvestorSummary("PAN123");
 

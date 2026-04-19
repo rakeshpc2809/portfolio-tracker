@@ -26,7 +26,7 @@ import com.oreki.cas_injector.core.repository.FolioRepository;
 import com.oreki.cas_injector.core.repository.InvestorRepository;
 import com.oreki.cas_injector.core.repository.SchemeRepository;
 import com.oreki.cas_injector.core.utils.CommonUtils;
-import com.oreki.cas_injector.dashboard.repository.PortfolioSummaryRepository;
+import com.oreki.cas_injector.dashboard.repository.PortfolioDashboardReadModelRepository;
 import com.oreki.cas_injector.taxmanagement.service.FifoInventoryService;
 import com.oreki.cas_injector.transactions.model.Transaction;
 import com.oreki.cas_injector.transactions.repository.TransactionRepository;
@@ -56,7 +56,8 @@ public class CasProcessingService {
     private final QuantitativeEngineService quantitativeEngineService;
     private final ConvictionScoringService convictionScoringService;
     private final JdbcTemplate jdbcTemplate;
-    private final PortfolioSummaryRepository summaryRepo;
+    private final PortfolioDashboardReadModelRepository summaryRepo;
+    private final org.springframework.context.ApplicationEventPublisher eventPublisher;
 
     @Transactional
     public void processJson(JsonNode root) {
@@ -105,8 +106,8 @@ public class CasProcessingService {
             });
         }
 
-        // Refresh Materialized View
-        summaryRepo.refreshView();
+        // 3. Publish completion event for Read Model update
+        eventPublisher.publishEvent(new com.oreki.cas_injector.core.event.CasIngestionCompletedEvent(pan));
 
         // 4. Evict caches for this PAN
         if (cacheManager.getCache("portfolioCache") != null) {

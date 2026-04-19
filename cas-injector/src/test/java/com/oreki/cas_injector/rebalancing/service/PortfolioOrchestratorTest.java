@@ -59,7 +59,7 @@ public class PortfolioOrchestratorTest {
     @Mock private SystemicRiskMonitorService riskMonitor;
     @Mock private TaxLossHarvestingService tlhService;
     @Mock private TransactionRepository txnRepo;
-    @Mock private RebalanceEngine rebalanceEngine;
+    @Mock private com.oreki.cas_injector.convictionmetrics.service.PythonQuantClient pythonQuantClient;
 
     @InjectMocks
     private PortfolioOrchestrator orchestrator;
@@ -70,6 +70,7 @@ public class PortfolioOrchestratorTest {
         when(taxLotRepository.findByStatusAndSchemeFolioInvestorPan(anyString(), anyString())).thenReturn(Collections.emptyList());
         when(lotAggregationService.aggregate(anyList())).thenReturn(Collections.emptyList());
         when(metricsRepo.fetchLiveMetricsMap(anyString())).thenReturn(Collections.emptyMap());
+        when(metricsRepo.getJdbcTemplate()).thenReturn(jdbcTemplate);
         when(strategyService.fetchLatestStrategy()).thenReturn(List.of(
             new StrategyTarget("ISIN1", "Fund 1", 10.0, 5.0, "ACTIVE", "CORE")
         ));
@@ -77,16 +78,11 @@ public class PortfolioOrchestratorTest {
         when(riskMonitor.assessTailRisk(anyList(), anyMap(), anyMap())).thenReturn(SystemicRiskMonitorService.TailRiskLevel.NORMAL);
         when(schemeRepository.findByIsin(anyString())).thenReturn(Optional.of(Scheme.builder().amfiCode("AMFI1").build()));
 
-        TacticalSignal mockSignal = TacticalSignal.builder()
-            .schemeName("Fund 1")
-            .action(SignalType.BUY)
-            .amount("5000.00")
-            .returnZScore(-2.1)
-            .fundStatus(FundStatus.NEW_ENTRY)
-            .build();
+        com.oreki.cas_injector.convictionmetrics.service.PythonQuantClient.PythonTacticalSignal pySignal = new com.oreki.cas_injector.convictionmetrics.service.PythonQuantClient.PythonTacticalSignal(
+            "Fund 1", "AMFI1", "BUY", 5000.00, 10.0, 5.0, Collections.emptyList(), "NEW_ENTRY"
+        );
 
-        when(rebalanceEngine.evaluate(any(), any(), any(), anyDouble(), anyString(), anyList(), anyMap(), anyDouble(), anyDouble(), any()))
-            .thenReturn(mockSignal);
+        when(pythonQuantClient.rebalancePortfolio(any())).thenReturn(List.of(pySignal));
 
         UnifiedTacticalPayload payload = orchestrator.generateUnifiedPayload(pan, 75000.0, 0.0);
 

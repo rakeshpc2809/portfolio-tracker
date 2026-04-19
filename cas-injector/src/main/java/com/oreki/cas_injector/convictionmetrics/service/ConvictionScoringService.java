@@ -33,19 +33,11 @@ public class ConvictionScoringService {
     private final NavService navService;
     private final TaxSimulatorService taxSimulator;
     private final GoogleSheetService strategyService;
-
-    // 🔬 REVISED 7-FACTOR INSTITUTIONAL WEIGHTS
-    private static final double WEIGHT_YIELD = 0.18;      
-    private static final double WEIGHT_RISK = 0.20;       
-    private static final double WEIGHT_VALUE = 0.20;      
-    private static final double WEIGHT_PAIN_RECOVERY = 0.15; // Blended MDD + OU Half-life
-    private static final double WEIGHT_REGIME = 0.12;     // HMM Bear Probability
-    private static final double WEIGHT_FRICTION = 0.10;   // Updated for 20% STCG base
-    private static final double WEIGHT_EXPENSE = 0.05;    // Expense Ratio + AUM Band
+    private final PythonQuantClient pythonQuantClient;
 
     @Transactional
     public void calculateAndSaveFinalScores(String investorPan) {
-        log.info("🚀 [1/3] Starting Revised 7-Factor Conviction Scoring for PAN: {}", investorPan);
+        log.info("🚀 [1/3] Gathering Context for Python Conviction Scoring: {}", investorPan);
 
         Double slab = convictionMetricsRepository.getJdbcTemplate().queryForObject(
             "SELECT tax_slab FROM investor WHERE pan = ?", Double.class, investorPan);
@@ -57,18 +49,12 @@ public class ConvictionScoringService {
         Map<String, List<TaxLot>> lotsByAmfi = allLots.stream()
                 .collect(Collectors.groupingBy(lot -> CommonUtils.SANITIZE_AMFI.apply(lot.getScheme().getAmfiCode())));
 
-        // Fetch latest strategy for philosophy-driven scoring
         List<StrategyTarget> strategy = strategyService.fetchLatestStrategy();
-        Map<String, String> amfiToStatus = strategy.stream()
-            .collect(Collectors.toMap(
-                s -> CommonUtils.SANITIZE_AMFI.apply(s.isin()), // Strategy uses ISIN but we need AMFI for metrics matching? Wait, metrics has amfi.
-                StrategyTarget::status, (a, b) -> a));
-        // Actually strategy sheet uses ISIN, we need to map ISIN -> AMFI first or just use a lookup
         Map<String, String> isinToStatus = strategy.stream()
             .collect(Collectors.toMap(s -> s.isin(), StrategyTarget::status, (a, b) -> a));
 
         List<Map<String, Object>> metrics = convictionMetricsRepository.findMetricsForInvestor(investorPan);
-        log.info("📊 [2/3] Found {} funds in fund_conviction_metrics to score.", metrics.size());
+        log.info("📊 [2/3] Calling Python Scoring API for {} funds.", metrics.size());
 
         double maxCagrFound = metrics.stream()
             .mapToDouble(m -> {
@@ -86,82 +72,48 @@ public class ConvictionScoringService {
             String isin = fundLots.get(0).getScheme().getIsin();
             String philStatus = isinToStatus.getOrDefault(isin, "ACTIVE").toUpperCase();
 
-            // 1. YIELD SCORE (Personal CAGR relative to portfolio max)
-            double cagr = calculatePersonalCagr(fundLots);
-            double yieldScore = (cagr > 0) ? Math.min(100, (cagr / maxCagrFound) * 100) : 0;
+            double personalCagr = calculatePersonalCagr(fundLots);
             
-            // 2. RISK SCORE (Sortino Ratio - Continuous proposal)
-            // proposal: 50 + (sortino * 25), clamped [0, 100]
-            double sortino = safeDouble(fund.get("sortino_ratio"));
-            double riskScore = Math.max(0, Math.min(100, 50 + (sortino * 25)));
-
-            // 3. VALUE SCORE (Z-Score based cheapness)
-            double zScore = safeDouble(fund.get("rolling_z_score_252"));
-            double valueScore = Math.max(5, Math.min(95, 50 - (zScore * 22.5))); 
-
-            // 4. PAIN + RECOVERY (MDD blended with OU Half-life)
-            double mdd = Math.abs(safeDouble(fund.get("max_drawdown")));
-            double painScore = Math.max(0, 100 - (mdd * 2.5));
-
-            double recoveryScore = 0;
-            if (safeBoolean(fund.get("ou_valid"))) {
-                double halfLife = safeDouble(fund.get("ou_half_life"));
-                recoveryScore = Math.max(0, Math.min(100, 100 * Math.exp(-halfLife / 30.0)));
-            } else {
-                recoveryScore = painScore; // Fallback if OU not valid
-            }
-            double painRecoveryScore = (painScore * 0.6) + (recoveryScore * 0.4);
-            // 5. REGIME SCORE (HMM Bear Prob)
-            // bear_prob 0 -> 100, bear_prob 1.0 -> 0
-            double bearProb = safeDouble(fund.get("hmm_bear_prob"));
-            double regimeScore = Math.max(0, 100 - (bearProb * 100));
-
-            // 6. FRICTION SCORE (Tax Efficiency)
-            String amfiCode = CommonUtils.SANITIZE_AMFI.apply((String) fund.get("amfi_code"));
-            var schemeDetails = navService.getLatestSchemeDetails(amfiCode);
+            var schemeDetails = navService.getLatestSchemeDetails(amfi);
             String category = (schemeDetails.getCategory() != null) ? schemeDetails.getCategory().toUpperCase() : "OTHER";
-            
             TaxSimulationResult taxResult = taxSimulator.simulateHifoExit(fundLots, category, slabRate);
             double taxPctOfValue = (taxResult.sellAmount() > 0) ? (taxResult.estimatedTax() / taxResult.sellAmount()) * 100 : 0;
-            // 100/20 = 5.0 multiplier for 20% ceiling
-            double frictionScore = Math.max(0, 100 - (taxPctOfValue * 5.0));
 
-            // 7. EXPENSE + AUM BANDS
-            double expRatio = safeDouble(fund.get("expense_ratio"));
-            double expenseDragScore = Math.max(0, 100 - expRatio * 50);
-            
-            double aumCr = safeDouble(fund.get("aum_cr"));
-            double aumScore = (aumCr < 100) ? (aumCr / 100.0) * 50 : (aumCr > 50000) ? Math.max(50, 100 - (aumCr - 50000) / 5000.0) : 100;
-            double combinedExpAum = (expenseDragScore * 0.7) + (aumScore * 0.3);
-
-            // --- FINAL CALCULATION (Philosophy Driven) ---
-            double finalScore;
-            
-            if ("REBALANCER".equals(philStatus)) {
-                finalScore = 65.0; // Fixed neutral-positive for parking vehicle
-            } else if ("ACCUMULATOR".equals(philStatus)) {
-                // Accumulator: Range (50%) + Low Drawdown (30%) + Expense (20%)
-                double navRangeScore = safeDouble(fund.get("nav_percentile_1yr")) * 100;
-                finalScore = (navRangeScore * 0.50) + (painScore * 0.30) + (expenseDragScore * 0.20);
-            } else if (category.contains("DEBT") || category.contains("LIQUID")) {
-                // Debt: Risk (40%) + Friction (35%) + Expense (25%)
-                finalScore = (riskScore * 0.40) + (frictionScore * 0.35) + (expenseDragScore * 0.25);
-            } else {
-                // Standard Equity 7-factor model
-                finalScore = (yieldScore * WEIGHT_YIELD) +
-                            (riskScore * WEIGHT_RISK) +
-                            (valueScore * WEIGHT_VALUE) +
-                            (painRecoveryScore * WEIGHT_PAIN_RECOVERY) +
-                            (regimeScore * WEIGHT_REGIME) +
-                            (frictionScore * WEIGHT_FRICTION) +
-                            (combinedExpAum * WEIGHT_EXPENSE);
-            }
-
-            convictionMetricsRepository.updateConvictionBreakdown(
-                (int) finalScore, yieldScore, riskScore, valueScore, painRecoveryScore, regimeScore, frictionScore, combinedExpAum, amfi
+            PythonQuantClient.PythonScoringRequest req = new PythonQuantClient.PythonScoringRequest(
+                amfi,
+                personalCagr,
+                maxCagrFound,
+                taxPctOfValue,
+                category,
+                philStatus,
+                safeDouble(fund.get("sortino_ratio")),
+                safeDouble(fund.get("rolling_z_score_252")),
+                safeDouble(fund.get("max_drawdown")),
+                safeBoolean(fund.get("ou_valid")),
+                safeDouble(fund.get("ou_half_life")),
+                safeDouble(fund.get("hmm_bear_prob")),
+                safeDouble(fund.get("expense_ratio")),
+                safeDouble(fund.get("aum_cr")),
+                safeDouble(fund.get("nav_percentile_1yr"))
             );
+
+            PythonQuantClient.PythonScoringResponse response = pythonQuantClient.scoreFund(req);
+            
+            if (response != null) {
+                convictionMetricsRepository.updateConvictionBreakdown(
+                    (int) response.final_conviction_score(),
+                    response.yield_score(),
+                    response.risk_score(),
+                    response.value_score(),
+                    response.pain_recovery_score(),
+                    response.regime_score(),
+                    response.friction_score(),
+                    response.expense_score(),
+                    amfi
+                );
+            }
         }
-        log.info("🏁 [3/3] Revised 7-Factor Scoring completed.");
+        log.info("🏁 [3/3] Python Scoring API completed and saved.");
     }
 
     private double calculatePersonalCagr(List<TaxLot> lots) {

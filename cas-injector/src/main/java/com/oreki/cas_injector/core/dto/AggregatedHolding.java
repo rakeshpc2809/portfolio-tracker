@@ -20,4 +20,5 @@ public class AggregatedHolding {
     private String status;          // 12
     private String isin;            // 13 (Added for your Strategy check)
     private Double stcgTaxEstimate; // 14 (Added for Phase 1E)
+    private double nav;             // 15 (Added to preserve precision instead of dividing currentValue/units)
 }
