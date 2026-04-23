@@ -20,16 +20,15 @@ public class TaxSimulationDomainService {
         return calculate(openLots, unitsToSell, currentNav, slabRate, targetSellAmount);
     }
 
-    public TaxSimulationResult simulateHifoExit(List<TaxLotDomain> lots, String category, double slabRate) {
+    public TaxSimulationResult simulateHifoExit(List<TaxLotDomain> lots, String category, double slabRate, double currentNav) {
         if (lots == null || lots.isEmpty()) {
             return new TaxSimulationResult(0, 0, 0, 0, 0, false, false);
         }
 
-        double estimatedCurrentNav = lots.get(0).getPurchasePrice() * 1.10;
         double totalUnits = lots.stream().mapToDouble(TaxLotDomain::getRemainingUnits).sum();
-        double totalValue = totalUnits * estimatedCurrentNav;
+        double totalValue = totalUnits * currentNav;
 
-        return calculate(lots, totalUnits, estimatedCurrentNav, slabRate, totalValue);
+        return calculate(lots, totalUnits, currentNav, slabRate, totalValue);
     }
 
     private TaxSimulationResult calculate(List<TaxLotDomain> lots, double unitsToSell, double currentNav, double slabRate, double totalValue) {

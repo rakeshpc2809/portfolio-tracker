@@ -235,12 +235,14 @@ public class PortfolioOrchestrator {
             // Accurate Tax Calculation
             List<TaxLot> fundLots = taxLotRepository.findByStatusAndSchemeAmfiCodeAndSchemeFolioInvestorPan(
                 "OPEN", sell.amfiCode(), pan);
-            String category = amfiService.getLatestSchemeDetails(sell.amfiCode()).getCategory();
             
-            var taxRes = taxSimulator.simulateHifoExit(fundLots, category, slabRate);
+            var details = amfiService.getLatestSchemeDetails(sell.amfiCode());
+            String category = details.getCategory();
+            double currentNav = details.getNav().doubleValue();
             
-            double totalValue = fundLots.stream().mapToDouble(l -> l.getRemainingUnits().doubleValue() * 
-                amfiService.getLatestSchemeDetails(sell.amfiCode()).getNav().doubleValue()).sum();
+            var taxRes = taxSimulator.simulateHifoExit(fundLots, category, slabRate, currentNav);
+            
+            double totalValue = fundLots.stream().mapToDouble(l -> l.getRemainingUnits().doubleValue() * currentNav).sum();
             
             double sellRatio = (totalValue > 0) ? Math.min(1.0, sellAmt / totalValue) : 1.0;
             double taxCost  = taxRes.estimatedTax() * sellRatio; 

@@ -34,11 +34,11 @@ public class TaxSimulatorService {
         return domainService.calculateTaxFriction(openLots, targetSellAmount, currentNav, slabRate);
     }
 
-    public TaxSimulationResult simulateHifoExit(List<TaxLot> lots, String category, double slabRate) {
+    public TaxSimulationResult simulateHifoExit(List<TaxLot> lots, String category, double slabRate, double currentNav) {
         List<TaxLotDomain> domainLots = lots.stream()
             .map(this::toDomain)
             .toList();
-        return domainService.simulateHifoExit(domainLots, category, slabRate);
+        return domainService.simulateHifoExit(domainLots, category, slabRate, currentNav);
     }
 
     private TaxLotDomain toDomain(TaxLot lot) {

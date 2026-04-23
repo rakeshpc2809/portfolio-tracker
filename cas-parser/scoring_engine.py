@@ -101,6 +101,11 @@ def compute_conviction_score(req: ScoringRequest) -> ScoringResponse:
             (friction_score * WEIGHT_FRICTION) +
             (combined_exp_aum * WEIGHT_EXPENSE)
         )
+    
+    # DAMPENER: Structural penalty during high bear probability
+    # Scaled dampening factor (1.0 to 0.5) to prevent aggressive buying in collapses
+    dampening_factor = 1.0 - (req.hmm_bear_prob * 0.5)
+    final_score *= dampening_factor
         
     return ScoringResponse(
         amfi_code=req.amfi_code,

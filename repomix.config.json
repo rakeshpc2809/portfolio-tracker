@@ -7,7 +7,9 @@
     "showLineNumbers": true,
     "topFilesLength": 10
   },
-  "include": ["**/*"],
+  "include": [
+    "**/*"
+  ],
   "ignore": {
     "customPatterns": [
       "**/node_modules/**",
@@ -19,6 +21,7 @@
       "**/.git/**",
       "**/.vscode/**",
       "**/*.odt",
+      "**/*.txt",
       "**/*.xml",
       "temp.json",
       "repomix-output.xml",

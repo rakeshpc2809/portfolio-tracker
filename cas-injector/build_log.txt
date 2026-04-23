@@ -1,0 +1,54 @@
+WARNING: A terminally deprecated method in sun.misc.Unsafe has been called
+WARNING: sun.misc.Unsafe::objectFieldOffset has been called by com.google.common.util.concurrent.AbstractFuture$UnsafeAtomicHelper (file:/home/rakeshpc/.m2/wrapper/dists/apache-maven-3.9.6/a53741d1/lib/guava-32.0.1-jre.jar)
+WARNING: Please consider reporting this to the maintainers of class com.google.common.util.concurrent.AbstractFuture$UnsafeAtomicHelper
+WARNING: sun.misc.Unsafe::objectFieldOffset will be removed in a future release
+[INFO] Scanning for projects...
+[INFO] 
+[INFO] -----------------------< com.oreki:cas-injector >-----------------------
+[INFO] Building portfolio-tracker 0.0.1-SNAPSHOT
+[INFO]   from pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- clean:3.4.0:clean (default-clean) @ cas-injector ---
+[INFO] Deleting /home/rakeshpc/AntiGravity/portfolio-tracker/cas-injector/target
+[INFO] 
+[INFO] --- resources:3.3.1:resources (default-resources) @ cas-injector ---
+[INFO] Copying 1 resource from src/main/resources to target/classes
+[INFO] Copying 1 resource from src/main/resources to target/classes
+[INFO] 
+[INFO] --- compiler:3.13.0:compile (default-compile) @ cas-injector ---
+[INFO] Recompiling the module because of changed source code.
+[INFO] Compiling 98 source files with javac [debug parameters release 21] to target/classes
+[INFO] /home/rakeshpc/AntiGravity/portfolio-tracker/cas-injector/src/main/java/com/oreki/cas_injector/transactions/service/TransactionService.java: /home/rakeshpc/AntiGravity/portfolio-tracker/cas-injector/src/main/java/com/oreki/cas_injector/transactions/service/TransactionService.java uses or overrides a deprecated API.
+[INFO] /home/rakeshpc/AntiGravity/portfolio-tracker/cas-injector/src/main/java/com/oreki/cas_injector/transactions/service/TransactionService.java: Recompile with -Xlint:deprecation for details.
+[INFO] -------------------------------------------------------------
+[ERROR] COMPILATION ERROR : 
+[INFO] -------------------------------------------------------------
+[ERROR] /home/rakeshpc/AntiGravity/portfolio-tracker/cas-injector/src/main/java/com/oreki/cas_injector/dashboard/service/PortfolioFullService.java:[199,38] cannot find symbol
+  symbol:   method winRate()
+  location: variable sig of type com.oreki.cas_injector.rebalancing.dto.TacticalSignal
+[ERROR] /home/rakeshpc/AntiGravity/portfolio-tracker/cas-injector/src/main/java/com/oreki/cas_injector/dashboard/service/PortfolioFullService.java:[200,36] cannot find symbol
+  symbol:   method cvar5()
+  location: variable sig of type com.oreki.cas_injector.rebalancing.dto.TacticalSignal
+[INFO] 2 errors 
+[INFO] -------------------------------------------------------------
+[INFO] ------------------------------------------------------------------------
+[INFO] BUILD FAILURE
+[INFO] ------------------------------------------------------------------------
+[INFO] Total time:  7.155 s
+[INFO] Finished at: 2026-04-19T13:52:11+05:30
+[INFO] ------------------------------------------------------------------------
+[ERROR] Failed to execute goal org.apache.maven.plugins:maven-compiler-plugin:3.13.0:compile (default-compile) on project cas-injector: Compilation failure: Compilation failure: 
+[ERROR] /home/rakeshpc/AntiGravity/portfolio-tracker/cas-injector/src/main/java/com/oreki/cas_injector/dashboard/service/PortfolioFullService.java:[199,38] cannot find symbol
+[ERROR]   symbol:   method winRate()
+[ERROR]   location: variable sig of type com.oreki.cas_injector.rebalancing.dto.TacticalSignal
+[ERROR] /home/rakeshpc/AntiGravity/portfolio-tracker/cas-injector/src/main/java/com/oreki/cas_injector/dashboard/service/PortfolioFullService.java:[200,36] cannot find symbol
+[ERROR]   symbol:   method cvar5()
+[ERROR]   location: variable sig of type com.oreki.cas_injector.rebalancing.dto.TacticalSignal
+[ERROR] -> [Help 1]
+[ERROR] 
+[ERROR] To see the full stack trace of the errors, re-run Maven with the -e switch.
+[ERROR] Re-run Maven using the -X switch to enable full debug logging.
+[ERROR] 
+[ERROR] For more information about the errors and possible solutions, please read the following articles:
+[ERROR] [Help 1] http://cwiki.apache.org/confluence/display/MAVEN/MojoFailureException

@@ -56,10 +56,20 @@ public class ConvictionScoringService {
         List<Map<String, Object>> metrics = convictionMetricsRepository.findMetricsForInvestor(investorPan);
         log.info("📊 [2/3] Calling Python Scoring API for {} funds.", metrics.size());
 
+        // HOIST: Pre-fetch latest NAVs for all funds in the portfolio universe
+        Map<String, Double> currentNavMap = metrics.stream()
+            .map(m -> CommonUtils.SANITIZE_AMFI.apply((String) m.get("amfi_code")))
+            .distinct()
+            .collect(Collectors.toMap(
+                amfi -> amfi,
+                amfi -> navService.getLatestSchemeDetails(amfi).getNav().doubleValue(),
+                (a, b) -> a
+            ));
+
         double maxCagrFound = metrics.stream()
             .mapToDouble(m -> {
                 String amfi = CommonUtils.SANITIZE_AMFI.apply((String) m.get("amfi_code"));
-                return Math.max(0, calculatePersonalCagr(lotsByAmfi.get(amfi)));
+                return Math.max(0, calculatePersonalCagr(lotsByAmfi.get(amfi), currentNavMap.getOrDefault(amfi, 0.0)));
             }).max().orElse(35.0);
         
         if (maxCagrFound <= 5.0) maxCagrFound = 35.0;
@@ -67,17 +77,19 @@ public class ConvictionScoringService {
 
         for (Map<String, Object> fund : metrics) {
             String amfi = CommonUtils.SANITIZE_AMFI.apply((String) fund.get("amfi_code"));
+            double currentNav = currentNavMap.getOrDefault(amfi, 0.0);
             List<TaxLot> fundLots = lotsByAmfi.get(amfi);
             if (fundLots == null || fundLots.isEmpty()) continue;
 
             String isin = fundLots.get(0).getScheme().getIsin();
             String philStatus = isinToStatus.getOrDefault(isin, "ACTIVE").toUpperCase();
 
-            double personalCagr = calculatePersonalCagr(fundLots);
+            double personalCagr = calculatePersonalCagr(fundLots, currentNav);
             
             var schemeDetails = navService.getLatestSchemeDetails(amfi);
             String category = (schemeDetails.getCategory() != null) ? schemeDetails.getCategory().toUpperCase() : "OTHER";
-            TaxSimulationResult taxResult = taxSimulator.simulateHifoExit(fundLots, category, slabRate);
+            
+            TaxSimulationResult taxResult = taxSimulator.simulateHifoExit(fundLots, category, slabRate, currentNav);
             double taxPctOfValue = (taxResult.sellAmount() > 0) ? (taxResult.estimatedTax() / taxResult.sellAmount()) * 100 : 0;
 
             PythonQuantClient.PythonScoringRequest req = new PythonQuantClient.PythonScoringRequest(
@@ -117,11 +129,8 @@ public class ConvictionScoringService {
         log.info("🏁 [3/3] Python Scoring API completed and saved.");
     }
 
-    private double calculatePersonalCagr(List<TaxLot> lots) {
+    private double calculatePersonalCagr(List<TaxLot> lots, double currentNav) {
         if (lots == null || lots.isEmpty()) return 0.0;
-
-        String amfiCode = lots.get(0).getScheme().getAmfiCode();
-        double currentNav = navService.getLatestSchemeDetails(amfiCode).getNav().doubleValue();
         
         double totalCost = 0;
         double totalValue = 0;
