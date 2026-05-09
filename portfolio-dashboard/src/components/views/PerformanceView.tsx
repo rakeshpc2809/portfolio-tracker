@@ -5,6 +5,9 @@ import { formatCurrency } from '../../utils/formatters';
 import { motion } from 'framer-motion';
 import { Slider } from '../ui/slider';
 import { usePerformanceHistory } from '../../hooks/usePerformance';
+import { useQuery } from '@tanstack/react-query';
+import { benchmarkService } from '../../services/api';
+import PortfolioVisualizer from '../3d/PortfolioVisualizer';
 
 export default function PerformanceView({ 
   pan, 
@@ -16,6 +19,11 @@ export default function PerformanceView({
   isPrivate: boolean;
 }) {
   const { data: perf, isLoading } = usePerformanceHistory(pan);
+  const { data: benchmarkData } = useQuery({
+    queryKey: ['benchmark', 'NIFTY 50'],
+    queryFn: () => benchmarkService.getBenchmarkReturns("NIFTY 50"),
+    staleTime: 1000 * 60 * 60, // 1 hour
+  });
 
   // Goal Projector State
   const [goalAmount, setGoalAmount] = useState(10000000); // ₹1Cr default
@@ -85,6 +93,14 @@ export default function PerformanceView({
 
   return (
     <div className="space-y-10 pb-32">
+      {/* 3D Visualization */}
+      <PortfolioVisualizer 
+        allocations={portfolioData?.schemeBreakdown?.map((s: any) => ({
+          name: s.simpleName || s.schemeName,
+          weight: s.allocationPercentage || 0
+        })) || []} 
+      />
+
       {/* Hero Stats */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         {stats.map((s, i) => (
@@ -183,12 +199,12 @@ export default function PerformanceView({
             </thead>
             <tbody className="divide-y divide-white/5">
               {[
-                { label: '1 Month', val: perf.periodReturns.oneMonth, bench: perf.niftyReturns?.oneMonth ?? 0 }, 
-                { label: '3 Months', val: perf.periodReturns.threeMonth, bench: perf.niftyReturns?.threeMonth ?? 0 },
-                { label: '6 Months', val: perf.periodReturns.sixMonth, bench: perf.niftyReturns?.sixMonth ?? 0 },
-                { label: '1 Year', val: perf.periodReturns.oneYear, bench: perf.niftyReturns?.oneYear ?? 0 },
-                { label: '3 Years', val: perf.periodReturns.threeYear, bench: perf.niftyReturns?.threeYear ?? 0 },
-                { label: 'ITD', val: perf.periodReturns.itd, bench: perf.niftyReturns?.itd ?? 0 },
+                { label: '1 Month', val: perf.periodReturns.oneMonth, bench: benchmarkData?.oneMonth ?? 0 }, 
+                { label: '3 Months', val: perf.periodReturns.threeMonth, bench: benchmarkData?.threeMonth ?? 0 },
+                { label: '6 Months', val: perf.periodReturns.sixMonth, bench: benchmarkData?.sixMonth ?? 0 },
+                { label: '1 Year', val: perf.periodReturns.oneYear, bench: benchmarkData?.oneYear ?? 0 },
+                { label: '3 Years', val: perf.periodReturns.threeYear, bench: benchmarkData?.threeYear ?? 0 },
+                { label: 'ITD', val: perf.periodReturns.itd, bench: benchmarkData?.itd ?? 0 },
               ].map((row) => (
                 <tr key={row.label} className="group hover:bg-white/[0.02] transition-colors">
                   <td className="py-5 text-xs font-black text-secondary uppercase tracking-widest">{row.label}</td>

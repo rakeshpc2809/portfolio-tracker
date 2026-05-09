@@ -1,10 +1,14 @@
 package com.oreki.cas_injector.core.dto;
 
 import lombok.AllArgsConstructor;
+import lombok.Builder;
 import lombok.Data;
+import lombok.NoArgsConstructor;
 
 @Data
+@Builder
 @AllArgsConstructor
+@NoArgsConstructor
 public class AggregatedHolding {
     private String schemeName;      // 1
     private double units;           // 2

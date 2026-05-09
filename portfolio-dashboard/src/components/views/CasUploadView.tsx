@@ -1,13 +1,16 @@
 import React, { useState, useEffect } from 'react';
-import { uploadCas, triggerBackfill, triggerForceSync, fetchAdminStatus, triggerSnapshotBackfill } from "@/services/api";
-import { Upload, AlertCircle, CheckCircle2, Zap, Loader2, TrendingUp, Activity } from "lucide-react";
-import { motion } from "framer-motion";
+import { uploadCas, previewCas, triggerBackfill, triggerForceSync, fetchAdminStatus, triggerSnapshotBackfill } from "@/services/api";
+import { Upload, AlertCircle, CheckCircle2, Zap, Loader2, TrendingUp, Activity, X } from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";
 import { useEngineWebsocket } from '@/hooks/useEngineWebsocket';
+import ModernCasDropzone from '../ingestion/ModernCasDropzone';
 
 const CasUploadView: React.FC<{ pan: string, portfolioData?: any }> = ({ pan, portfolioData }) => {
   const [file, setFile] = useState<File | null>(null);
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewData, setPreviewData] = useState<any>(null);
   const [status, setStatus] = useState<{ type: 'success' | 'error' | null, message: string }>({ type: null, message: '' });
   
   const [adminStatus, setAdminStatus] = useState<any>(null);
@@ -17,6 +20,15 @@ const CasUploadView: React.FC<{ pan: string, portfolioData?: any }> = ({ pan, po
 
   // Detect mode: No transactions = Setup Mode
   const isSetupMode = !portfolioData || (portfolioData.totalTransactions || 0) === 0;
+
+  // Load remembered password
+  useEffect(() => {
+    const remember = localStorage.getItem('cas_key_remember');
+    if (remember === 'true') {
+      const savedPass = localStorage.getItem('cas_password');
+      if (savedPass) setPassword(savedPass);
+    }
+  }, []);
 
   // Polling for backfill status
   useEffect(() => {
@@ -38,6 +50,20 @@ const CasUploadView: React.FC<{ pan: string, portfolioData?: any }> = ({ pan, po
     }
   };
 
+  const handlePreview = async () => {
+    if (!file || !password) return;
+    setPreviewLoading(true);
+    setStatus({ type: null, message: '' });
+    try {
+      const data = await previewCas(file, password);
+      setPreviewData(data);
+    } catch (err: any) {
+      setStatus({ type: 'error', message: err.message || 'Preview failed' });
+    } finally {
+      setPreviewLoading(false);
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!file) return;
@@ -51,6 +77,11 @@ const CasUploadView: React.FC<{ pan: string, portfolioData?: any }> = ({ pan, po
         type: 'success', 
         message: `✓ Successfully processed CAS for ${result.investor}. PAN: ${result.pan}` 
       });
+      
+      if (localStorage.getItem('cas_key_remember') === 'true') {
+        localStorage.setItem('cas_password', password);
+      }
+      
       setFile(null);
       setPassword('');
       const input = document.getElementById('cas-file-input') as HTMLInputElement;
@@ -128,36 +159,122 @@ const CasUploadView: React.FC<{ pan: string, portfolioData?: any }> = ({ pan, po
                   <p className="text-xs text-muted leading-relaxed font-medium">
                     Upload your <b>CAMS/Karvy Consolidated Account Statement (CAS)</b>. This imports all transactions and tax lots.
                   </p>
-                  <form onSubmit={handleSubmit} className="space-y-6">
-                    <input
-                      id="cas-file-input"
-                      type="file"
-                      accept=".pdf"
-                      onChange={handleFileChange}
-                      className="block w-full text-[10px] text-muted
-                        file:mr-4 file:py-2 file:px-6
-                        file:rounded-xl file:border file:border-white/10
-                        file:text-[10px] file:font-black file:uppercase file:tracking-[0.15em]
-                        file:bg-white/5 file:text-secondary
-                        hover:file:bg-white/10 cursor-pointer transition-all"
+                  <div className="space-y-6">
+                    <ModernCasDropzone 
+                      onFileSelect={(f) => setFile(f)}
+                      onPasswordChange={(p) => setPassword(p)}
+                      loading={loading}
+                      error={status.type === 'error' ? status.message : null}
                     />
-                    <input
-                      type="password"
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      placeholder="PDF Password"
-                      className="flex h-12 w-full rounded-xl border border-white/5 bg-white/[0.02] px-4 py-2 text-sm text-white placeholder:text-muted/20 focus:outline-none focus:ring-1 focus:ring-accent/40 transition-all"
-                    />
+
+                    <div className="flex items-center justify-between pt-2">
+                      <div className="flex items-center gap-2">
+                        <input 
+                          type="checkbox" 
+                          id="remember-key"
+                          checked={localStorage.getItem('cas_key_remember') === 'true'}
+                          onChange={(e) => {
+                            localStorage.setItem('cas_key_remember', e.target.checked.toString());
+                            if (!e.target.checked) localStorage.removeItem('cas_password');
+                            else if (password) localStorage.setItem('cas_password', password);
+                          }}
+                          className="rounded bg-white/5 border-white/10 text-accent focus:ring-accent"
+                        />
+                        <label htmlFor="remember-key" className="text-[10px] font-black uppercase tracking-widest text-muted cursor-pointer">Remember Key</label>
+                      </div>
+                    </div>
+
                     <button 
-                      type="submit" 
-                      disabled={!file || loading}
+                      onClick={handleSubmit} 
+                      disabled={!file || loading || previewLoading}
                       className="w-full h-14 bg-accent/10 text-accent hover:bg-accent hover:text-white border border-accent/20 rounded-2xl font-black uppercase tracking-[0.2em] text-[10px] transition-all flex items-center justify-center gap-3 disabled:opacity-20"
                     >
                       {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Zap size={14} className="fill-current" />}
                       Inject Portfolio
                     </button>
-                  </form>
+
+                    <button 
+                      onClick={handlePreview} 
+                      disabled={!file || !password || loading || previewLoading}
+                      className="w-full h-10 text-muted hover:text-primary rounded-xl font-black uppercase tracking-[0.2em] text-[9px] transition-all flex items-center justify-center gap-2 disabled:opacity-20"
+                    >
+                      {previewLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : <TrendingUp size={12} />}
+                      Preview Statement Content
+                    </button>
+                  </div>
                 </div>
+
+                {/* Instant Preview Bento Modal */}
+                <AnimatePresence>
+                  {previewData && (
+                    <motion.div 
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      exit={{ opacity: 0 }}
+                      className="fixed inset-0 z-50 flex items-center justify-center p-6 bg-black/80 backdrop-blur-xl"
+                    >
+                      <motion.div 
+                        initial={{ scale: 0.9, opacity: 0, y: 20 }}
+                        animate={{ scale: 1, opacity: 1, y: 0 }}
+                        className="bg-surface border border-white/10 w-full max-w-4xl rounded-[40px] overflow-hidden shadow-2xl"
+                      >
+                        <div className="p-10 border-b border-white/5 flex justify-between items-center bg-white/[0.01]">
+                          <div className="space-y-1">
+                            <h3 className="text-xl font-black uppercase italic tracking-tight">Statement Intel</h3>
+                            <p className="text-[10px] font-bold text-muted uppercase tracking-[0.3em]">Verify the payload before injection</p>
+                          </div>
+                          <button onClick={() => setPreviewData(null)} className="w-12 h-12 rounded-full bg-white/5 flex items-center justify-center hover:bg-exit/10 hover:text-exit transition-all">
+                            <X size={20} />
+                          </button>
+                        </div>
+                        
+                        <div className="p-10 grid grid-cols-1 md:grid-cols-3 gap-6">
+                          {/* Bento 1: Investor info */}
+                          <div className="md:col-span-2 p-8 bg-white/[0.02] border border-white/5 rounded-3xl space-y-4">
+                            <p className="text-[10px] font-black text-muted uppercase tracking-widest">Detected Investor</p>
+                            <div className="space-y-1">
+                              <h4 className="text-2xl font-black text-primary">{previewData.investor}</h4>
+                              <p className="text-sm font-medium text-accent">{previewData.email} • {previewData.pan}</p>
+                            </div>
+                          </div>
+
+                          {/* Bento 2: Stats */}
+                          <div className="p-8 bg-accent/5 border border-accent/20 rounded-3xl flex flex-col justify-center items-center text-center space-y-2">
+                             <p className="text-[10px] font-black text-accent uppercase tracking-widest">Total Assets</p>
+                             <p className="text-5xl font-black text-primary">{previewData.schemes_count}</p>
+                             <p className="text-[10px] font-bold text-muted uppercase tracking-widest">Active Schemes</p>
+                          </div>
+
+                          {/* Bento 3: AMCs */}
+                          <div className="md:col-span-3 p-8 bg-white/[0.02] border border-white/5 rounded-3xl space-y-4">
+                            <p className="text-[10px] font-black text-muted uppercase tracking-widest">Associated Asset Management Companies ({previewData.amcs.length})</p>
+                            <div className="flex flex-wrap gap-2">
+                              {previewData.amcs.map((amc: string) => (
+                                <span key={amc} className="px-4 py-1.5 bg-white/5 border border-white/5 rounded-full text-[10px] font-bold text-secondary uppercase tracking-wider">{amc}</span>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="p-10 bg-white/[0.01] border-t border-white/5 flex gap-4">
+                          <button 
+                            onClick={(e) => { setPreviewData(null); handleSubmit(e as any); }}
+                            className="flex-1 h-14 bg-buy text-primary rounded-2xl font-black uppercase tracking-[0.3em] text-[10px] hover:brightness-110 transition-all"
+                          >
+                            Confirm & Inject Data
+                          </button>
+                          <button 
+                            onClick={() => setPreviewData(null)}
+                            className="px-10 h-14 bg-white/5 border border-white/5 text-muted rounded-2xl font-black uppercase tracking-[0.3em] text-[10px] hover:bg-white/10 transition-all"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </motion.div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+
                 {status.type && (
                   <div className={`p-8 rounded-3xl border flex flex-col justify-center gap-4 ${status.type === 'success' ? 'bg-buy/5 border-buy/20' : 'bg-exit/5 border-exit/20'}`}>
                     <div className="flex items-center gap-3">
@@ -333,18 +450,58 @@ const CasUploadView: React.FC<{ pan: string, portfolioData?: any }> = ({ pan, po
                 <h4 className="text-[9px] font-black uppercase tracking-[0.4em] text-muted">Advanced Ops</h4>
                 
                 <div className="space-y-4">
-                  <span className="text-[10px] font-bold text-primary">Full NAV Backfill</span>
-                  <button onClick={handleBackfill} className="w-full h-10 bg-white/5 border border-white/5 rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-white/10 transition-all">Execute</button>
+                  <div className="flex justify-between items-center">
+                    <span className="text-[10px] font-bold text-primary">Full NAV Backfill</span>
+                    {adminStatus?.backfill?.isRunning && <span className="text-[9px] font-black text-accent animate-pulse">Running</span>}
+                  </div>
+                  <button 
+                    onClick={handleBackfill} 
+                    disabled={adminStatus?.backfill?.isRunning}
+                    className="w-full h-10 bg-white/5 border border-white/5 rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-white/10 transition-all disabled:opacity-30"
+                  >
+                    Execute
+                  </button>
+                  {adminStatus?.backfill?.isRunning && (
+                    <div className="space-y-2">
+                      <div className="flex justify-between text-[8px] font-black uppercase tracking-widest text-muted">
+                        <span>{adminStatus.backfill.progress} / {adminStatus.backfill.total}</span>
+                        <span>{Math.round((adminStatus.backfill.progress/adminStatus.backfill.total)*100)}%</span>
+                      </div>
+                      <div className="h-1 w-full bg-white/5 rounded-full overflow-hidden">
+                        <div className="h-full bg-accent" style={{ width: `${(adminStatus.backfill.progress/adminStatus.backfill.total)*100}%` }} />
+                      </div>
+                    </div>
+                  )}
                 </div>
 
-                <div className="space-y-4">
+                <div className="space-y-4 pt-4 border-t border-white/5">
                   <span className="text-[10px] font-bold text-primary">Performance Rebuild</span>
                   <button onClick={handleSnapshotBackfill} className="w-full h-10 bg-white/5 border border-white/5 rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-white/10 transition-all">Execute</button>
                 </div>
 
-                <div className="space-y-4">
-                  <span className="text-[10px] font-bold text-primary">Engine Force Sync</span>
-                  <button onClick={handleSync} className="w-full h-10 bg-white/5 border border-white/5 rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-white/10 transition-all">Execute</button>
+                <div className="space-y-4 pt-4 border-t border-white/5">
+                  <div className="flex justify-between items-center">
+                    <span className="text-[10px] font-bold text-primary">Engine Force Sync</span>
+                    {adminStatus?.engine?.isRunning && <span className="text-[9px] font-black text-buy animate-pulse">Processing</span>}
+                  </div>
+                  <button 
+                    onClick={handleSync} 
+                    disabled={adminStatus?.engine?.isRunning}
+                    className="w-full h-10 bg-white/5 border border-white/5 rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-white/10 transition-all disabled:opacity-30"
+                  >
+                    Execute
+                  </button>
+                  {adminStatus?.engine?.isRunning && (
+                    <div className="space-y-2">
+                      <div className="flex justify-between text-[8px] font-black uppercase tracking-widest text-muted">
+                        <span className="truncate max-w-[150px]">{adminStatus.engine.message}</span>
+                        <span>{Math.round((adminStatus.engine.step/7)*100)}%</span>
+                      </div>
+                      <div className="h-1 w-full bg-white/5 rounded-full overflow-hidden">
+                        <div className="h-full bg-buy" style={{ width: `${(adminStatus.engine.step/7)*100}%` }} />
+                      </div>
+                    </div>
+                  )}
                 </div>
              </div>
           </div>

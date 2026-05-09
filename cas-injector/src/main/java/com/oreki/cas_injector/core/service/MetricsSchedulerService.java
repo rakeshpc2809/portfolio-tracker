@@ -30,7 +30,7 @@ public class MetricsSchedulerService {
     private final JdbcTemplate jdbcTemplate;
     private final CacheManager cacheManager;
 
-    @Value("${scraper.service.url:http://python-scraper:8001}")
+    @Value("${cas.parser.url:http://python-parser:8000}")
     private String scraperUrl;
 
     @Scheduled(cron = "0 30 19 * * MON-FRI", zone = "Asia/Kolkata")
@@ -41,7 +41,7 @@ public class MetricsSchedulerService {
         triggerScraper("/api/scraper/sync-market", "Benchmark Index Scraper");
 
         // 2. Trigger Mutual Fund Metrics Engine
-        triggerScraper("/api/scraper/sync-metrics", "Mutual Fund Metrics Engine");
+        triggerScraper("/api/v1/quant/trigger-batch", "Mutual Fund Metrics Engine");
 
         // 3. Snapshot Portfolio Values for all investors
         snapshotAllPortfolios();

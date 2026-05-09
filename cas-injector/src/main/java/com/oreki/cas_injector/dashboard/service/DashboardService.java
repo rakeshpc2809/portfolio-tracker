@@ -304,4 +304,9 @@ public class DashboardService {
             .schemeBreakdown(breakdown)
             .build();
     }
+
+    @Transactional
+    public void refreshMaterializedView() {
+        jdbcTemplate.execute("REFRESH MATERIALIZED VIEW CONCURRENTLY mv_portfolio_summary");
+    }
 }

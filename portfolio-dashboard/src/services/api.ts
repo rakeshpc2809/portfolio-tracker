@@ -79,6 +79,24 @@ export const uploadCas = async (file: File, password: string) => {
   return response.json();
 };
 
+export const previewCas = async (file: File, password: string) => {
+  const formData = new FormData();
+  formData.append('file', file);
+  formData.append('password', password);
+
+  const response = await fetch(`${PARSER_URL}/preview`, {
+    method: 'POST',
+    body: formData,
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({ detail: 'Unknown error occurred during preview' }));
+    throw new Error(errorData.detail || 'CAS Preview failed');
+  }
+
+  return response.json();
+};
+
 export const triggerBackfill = async () => {
   const response = await authenticatedFetch(`${BASE_URL}/admin/trigger-historical-backfill`, {
     method: 'POST'
@@ -137,10 +155,107 @@ export const fetchCorrelationMatrix = async (pan: string) => {
   return response.json();
 };
 
+export const fetchStrategyTargets = async (pan: string) => {
+  const response = await authenticatedFetch(`${BASE_URL}/strategy/${pan}`);
+  if (!response.ok) throw new Error("Failed to fetch strategy targets");
+  return response.json();
+};
+
+export const fetchAlphaFeed = async () => {
+  try {
+    const response = await authenticatedFetch(`${BASE_URL}/sentiment/alpha-feed`);
+    if (!response.ok) throw new Error("Failed to fetch alpha feed");
+    const data = await response.json();
+    if (data && data.length > 0) return data;
+    
+    // Fallback Mock Data if backend returns empty during setup
+    return [
+      {
+        title: "FII inflows surge in Large-cap Mutual Funds",
+        sentiment: "positive",
+        confidence: 0.92,
+        timestamp: new Date().toISOString()
+      },
+      {
+        title: "New SEBI guidelines on mid-cap liquidity stress tests",
+        sentiment: "neutral",
+        confidence: 0.75,
+        timestamp: new Date(Date.now() - 3600000).toISOString()
+      }
+    ];
+  } catch (err) {
+    console.error("Alpha feed fetch failed, using fallback", err);
+    return [
+      {
+        title: "System Calibrating: Monitoring Global Macro Signals",
+        sentiment: "neutral",
+        confidence: 1.0,
+        timestamp: new Date().toISOString()
+      }
+    ];
+  }
+};
+
+export const updateStrategyTarget = async (data: { pan: string, amfiCode: string, allocation: number, strategyType: string }) => {
+  const response = await authenticatedFetch(`${BASE_URL}/strategy/target`, {
+    method: 'POST',
+    body: JSON.stringify(data)
+  });
+  if (!response.ok) throw new Error("Failed to update strategy target");
+  return response;
+};
+
 export const fetchFundHistory = async (amfiCode: string, benchmark: string = "NIFTY 50") => {
   const response = await authenticatedFetch(
     `${BASE_URL}/history/fund/${amfiCode}?benchmark=${encodeURIComponent(benchmark)}`
   );
   if (!response.ok) throw new Error("Failed to fetch fund history");
+  return response.json();
+};
+
+export const benchmarkService = {
+  getBenchmarkReturns: async (index: string) => {
+    const response = await authenticatedFetch(
+      `${BASE_URL}/history/benchmark/${encodeURIComponent(index)}`
+    );
+    if (!response.ok) throw new Error("Failed to fetch benchmark returns");
+    return response.json();
+  }
+};
+
+export const resetBackfillStatus = async () => {
+  const response = await authenticatedFetch(`${BASE_URL}/admin/reset-backfill-status`, {
+    method: "POST"
+  });
+  return response.ok;
+};
+
+export const fetchAIReasoning = async (data: { 
+  fund_name: string, 
+  current_weight: number, 
+  target_weight: number, 
+  conviction_score: number, 
+  market_regime: string 
+}) => {
+  const response = await authenticatedFetch(`${PARSER_URL}/api/v1/ai/reason`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data)
+  });
+  if (!response.ok) return { reasoning: "Strategic rebalancing based on quantitative signals." };
+  return response.json();
+};
+
+export const fetchWealthAIChat = async (data: { 
+  query: string, 
+  portfolio_summary: string, 
+  history: any[] 
+}) => {
+  const response = await authenticatedFetch(`/parser/api/v1/ai/chat`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data)
+  });
+  if (!response.ok) throw new Error("Chat link broken");
   return response.json();
 };

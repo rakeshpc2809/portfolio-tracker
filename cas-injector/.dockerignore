@@ -1,0 +1,11 @@
+target/
+!target/*.jar
+.mvn/
+mvnw
+mvnw.cmd
+*.log
+build_log.txt
+maven_output.txt
+.git/
+.gitignore
+.dockerignore

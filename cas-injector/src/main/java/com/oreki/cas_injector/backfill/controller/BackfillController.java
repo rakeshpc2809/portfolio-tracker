@@ -56,10 +56,16 @@ public class BackfillController {
     @PostMapping("/trigger-historical-backfill")
     public ResponseEntity<String> triggerBackfill() {
         if (backfillerService.getIsRunning().get()) {
-            return ResponseEntity.badRequest().body("Backfill is already in progress.");
+            return ResponseEntity.status(409).body("Backfill is already in progress.");
         }
         taskExecutor.execute(() -> backfillerService.executeOneShotBackfill());
         return ResponseEntity.ok("Historical backfill started.");
+    }
+
+    @PostMapping("/reset-backfill-status")
+    public ResponseEntity<String> resetBackfillStatus() {
+        backfillerService.getIsRunning().set(false);
+        return ResponseEntity.ok("Backfill status reset to idle.");
     }
 
     @PostMapping("/trigger-snapshot-backfill")
@@ -105,6 +111,12 @@ public class BackfillController {
         
         return ResponseEntity.ok("Full sync started for " + 
             (pan != null ? pan : "all investors") + ".");
+    }
+
+    @PostMapping("/trigger-pipeline")
+    public ResponseEntity<String> triggerPipeline() {
+        taskExecutor.execute(() -> metricsSchedulerService.runPipeline());
+        return ResponseEntity.ok("Market & MF Metrics Pipeline started.");
     }
 
     @GetMapping("/status")

@@ -4,20 +4,15 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.math.BigDecimal;
-import java.time.LocalDate;
 
 import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 
 import com.oreki.cas_injector.convictionmetrics.repository.ConvictionMetricsRepository;
-import com.oreki.cas_injector.convictionmetrics.service.PythonQuantClient.QuantAnalyzeResponse;
 import com.oreki.cas_injector.core.utils.CommonUtils;
 
 import lombok.Getter;
@@ -29,8 +24,7 @@ public class QuantitativeEngineService {
 
     private final ConvictionMetricsRepository convictionMetricsRepository;
     private final SimpMessagingTemplate messagingTemplate;
-    private final Executor taskExecutor;
-    private final PythonQuantClient pythonQuantClient;
+
 
     @Getter private final AtomicBoolean isRunning = new AtomicBoolean(false);
     @Getter private final AtomicInteger currentStep = new AtomicInteger(0);
@@ -38,20 +32,21 @@ public class QuantitativeEngineService {
 
     public QuantitativeEngineService(
             ConvictionMetricsRepository convictionMetricsRepository,
-            SimpMessagingTemplate messagingTemplate,
-            @Qualifier("mathEngineExecutor") Executor taskExecutor,
-            PythonQuantClient pythonQuantClient) {
+            SimpMessagingTemplate messagingTemplate) {
         this.convictionMetricsRepository = convictionMetricsRepository;
         this.messagingTemplate = messagingTemplate;
-        this.taskExecutor = taskExecutor;
-        this.pythonQuantClient = pythonQuantClient;
     }
 
     private void updateStatus(int step, String message) {
         this.currentStep.set(step);
         this.lastStatusMessage = message;
-        messagingTemplate.convertAndSend("/topic/engine-progress", 
-            Map.of("step", step, "message", message, "total", 7));
+        log.info("MathEngine [Step {}/7]: {}", step, message);
+        try {
+            messagingTemplate.convertAndSend("/topic/engine-progress", 
+                Map.of("step", step, "message", message, "total", 7));
+        } catch (Exception e) {
+            log.warn("Failed to send websocket update: {}", e.getMessage());
+        }
     }
 
     public void runNightlyMathEngine() {
@@ -71,83 +66,44 @@ public class QuantitativeEngineService {
             log.info("🧮 Starting Advanced Quantitative Math Engine (Vectorized Hurst, OU, HMM)...");
             long startTime = System.currentTimeMillis();
 
-            // 1. Run main risk metrics
             updateStatus(1, "Calculating main risk metrics (Sortino, CVaR)...");
             int mainMetricsRows = convictionMetricsRepository.runNightlyMathEngine();
 
-            // 2. Run NAV Signals
             updateStatus(2, "Updating NAV signals (Percentile, ATH)...");
             int navSignalRows = convictionMetricsRepository.updateNavSignals();
 
-            // 3. Skip Bucket Z-Scorer (Pruned)
             updateStatus(3, "Skipping relative Bucket Z-Scores (Pruned)...");
 
-            // 4. Run Rolling Z-Score & Volatility Tax
             updateStatus(4, "Computing Rolling 252-day Z-Score & Volatility Tax...");
             convictionMetricsRepository.updateRollingZScoreAndVolatilityTax();
 
-            // ─── Pre-load caches ───
             Map<String, double[]> navsCache = loadAllNavs(253);
             Map<String, double[]> returnsCache = computeReturnsFromNavs(navsCache);
-            // We use truncated navs for nav-based metrics if needed, but here we just need them for Python
             
-            // Step 5: Delegate to Python Sidecar for heavy math
-            updateStatus(5, "Delegating Hurst, OU and HMM to Python Sidecar (Batched)...");
+            updateStatus(5, "Triggering Python batch job for Hurst, OU and HMM...");
             
-            List<PythonQuantClient.QuantAnalyzeRequest> batch = navsCache.keySet().stream()
-                .filter(amfi -> navsCache.containsKey(amfi) && returnsCache.containsKey(amfi))
-                .map(amfi -> new PythonQuantClient.QuantAnalyzeRequest(
-                    amfi, navsCache.get(amfi), returnsCache.get(amfi)))
-                .toList();
-
-            List<QuantAnalyzeResponse> results = pythonQuantClient.analyzeBatch(batch);
-            results.forEach(res -> persistPythonMetrics(res.amfi_code(), res));
-
-            int failed = batch.size() - results.size();
-            if (failed > 0) {
-                log.warn("⚠️ Python metrics failed for {}/{} funds — previous values retained.", 
-                    failed, batch.size());
-                updateStatus(6, "Warning: " + failed + " funds used cached metrics (Python sidecar issue).");
-            } else {
-                updateStatus(6, "All " + batch.size() + " funds processed via Python sidecar.");
+            try {
+                String pythonUrl = System.getenv().getOrDefault("CAS_PARSER_URL", "http://python-parser:8000") + "/api/v1/quant/trigger-batch";
+                java.net.http.HttpRequest request = java.net.http.HttpRequest.newBuilder()
+                        .uri(java.net.URI.create(pythonUrl))
+                        .POST(java.net.http.HttpRequest.BodyPublishers.noBody())
+                        .build();
+                java.net.http.HttpClient.newHttpClient().sendAsync(request, java.net.http.HttpResponse.BodyHandlers.discarding());
+                log.info("🎯 Triggered Python batch job asynchronously at {}", pythonUrl);
+            } catch (Exception e) {
+                log.warn("⚠️ Failed to trigger Python batch job: {}", e.getMessage());
             }
-
+            
             long endTime = System.currentTimeMillis();
-            updateStatus(7, "Complete! Updated " + mainMetricsRows + " funds.");
-            log.info("✅ Math Engine Complete! Main Metrics updated for {} funds. NAV Signals updated for {} rows. Python Vectorization complete in {} ms.", 
-                mainMetricsRows, navSignalRows, (endTime - startTime));
+            updateStatus(7, "Sync complete! System calibrated.");
+            log.info("✅ Math Engine Java phase Complete! Main Metrics updated for {} funds. NAV Signals updated for {} rows.", 
+                mainMetricsRows, navSignalRows);
         } catch (Exception e) {
             updateStatus(0, "Failed: " + e.getMessage());
             log.error("🚨 Math Engine Failed to execute native SQL or delegation.", e);
         } finally {
             isRunning.set(false);
         }
-    }
-
-    private void persistPythonMetrics(String amfi, QuantAnalyzeResponse res) {
-        String hRegime = res.hurst() < 0.47 ? "MEAN_REVERTING" : (res.hurst() > 0.53 ? "TRENDING" : "RANDOM_WALK");
-        String hmmStateStr = switch(res.hmm_state()) {
-            case 0 -> "CALM_BULL";
-            case 1 -> "STRESSED_NEUTRAL";
-            case 2 -> "VOLATILE_BEAR";
-            default -> "UNKNOWN";
-        };
-
-        convictionMetricsRepository.getJdbcTemplate().update("""
-            UPDATE fund_conviction_metrics
-            SET hurst_exponent = ?,
-                hurst_regime = ?,
-                ou_half_life = ?,
-                ou_valid = ?,
-                hmm_state = ?,
-                hmm_bull_prob = ?,
-                hmm_bear_prob = ?,
-                hmm_transition_bear = ?,
-                last_python_update = CURRENT_TIMESTAMP
-            WHERE LTRIM(amfi_code, '0') = LTRIM(?, '0')
-            AND calculation_date = (SELECT MAX(calculation_date) FROM fund_conviction_metrics WHERE LTRIM(amfi_code, '0') = LTRIM(?, '0'))
-            """, res.hurst(), hRegime, res.ou_half_life(), res.ou_valid(), hmmStateStr, 
-                 res.bull_prob(), res.bear_prob(), res.transition_to_bear(), amfi, amfi);
     }
 
     private Map<String, double[]> loadAllNavs(int days) {

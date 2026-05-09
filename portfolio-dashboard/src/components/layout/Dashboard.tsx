@@ -8,25 +8,26 @@ import {
   ShieldCheck,
   Lock,
   Unlock,
-  PieChart,
   Upload,
-  LogOut
+  LogOut,
+  Settings
 } from 'lucide-react';
 import * as Switch from '@radix-ui/react-switch';
 import * as Tabs from '@radix-ui/react-tabs';
+import * as Dialog from '@radix-ui/react-dialog';
 import { formatCurrencyShort } from '../../utils/formatters';
 import StatusRing from '../ui/StatusRing';
 
 // Views
-import TodayBriefView from '../views/TodayBriefView';
+import OverviewView from '../views/OverviewView';
 import PortfolioView from '../views/PortfolioView';
 import PerformanceView from '../views/PerformanceView';
 import RebalanceView from '../views/RebalanceView';
 import TaxView from '../views/TaxView';
 import LedgerView from '../views/LedgerView';
 import FundDetailView from '../views/FundDetailView';
-import FundsListView from '../views/FundsListView';
 import CasUploadView from '../views/CasUploadView';
+import StrategyManagerView from '../views/StrategyManagerView';
 
 export default function Dashboard({ 
   portfolioData,
@@ -47,15 +48,15 @@ export default function Dashboard({
   onLogout: () => void;
   initialTab?: string;
 }) {
-  const [activeTab, setActiveTab] = useState(initialTab);
+  const [activeTab, setActiveTab] = useState(initialTab === 'today' ? 'overview' : initialTab);
   const [isPrivate, setIsPrivate] = useState(false);
   const [selectedFundName, setSelectedFundName] = useState<string | null>(null);
+  const [isStrategyOpen, setIsStrategyOpen] = useState(false);
 
   const tabs = [
-    { id: 'today', label: 'Today', icon: <Zap size={14}/> },
+    { id: 'overview', label: 'Overview', icon: <Zap size={14}/> },
     { id: 'portfolio', label: 'Portfolio', icon: <LayoutDashboard size={14}/> },
     { id: 'performance', label: 'Performance', icon: <TrendingUp size={14}/> },
-    { id: 'funds', label: 'Each Fund', icon: <PieChart size={14}/> },
     { id: 'rebalance', label: 'Rebalance', icon: <ArrowLeftRight size={14}/> },
     { id: 'tax', label: 'Tax', icon: <ShieldCheck size={14}/> },
     { id: 'ledger', label: 'Ledger', icon: <Receipt size={14}/> },
@@ -98,7 +99,13 @@ export default function Dashboard({
               <TrendingUp size={14} className="text-white" />
             </div>
             <StatusRing score={avgConviction} size={28} />
-            <h1 className="text-[10px] font-bold uppercase tracking-[0.2em] text-accent">Portfolio OS</h1>
+            <div className="flex flex-col">
+              <h1 className="text-[10px] font-black uppercase tracking-[0.2em] text-accent">Portfolio OS</h1>
+              <div className="flex items-center gap-1.5">
+                <div className="w-1 h-1 rounded-full bg-buy animate-pulse shadow-[0_0_5px_rgba(166,227,161,0.8)]" />
+                <span className="text-[7px] font-bold text-muted uppercase tracking-widest">Live Pulse</span>
+              </div>
+            </div>
           </div>
 
           <div className="hidden lg:flex items-center gap-3 border-l border-border pl-8">
@@ -134,6 +141,14 @@ export default function Dashboard({
           <div className="h-6 w-px bg-border mx-2" />
 
           <button 
+            onClick={() => setIsStrategyOpen(true)}
+            className="flex items-center gap-2 px-3 py-1.5 rounded-lg hover:bg-white/[0.05] text-muted hover:text-primary transition-all"
+            title="Strategy Settings"
+          >
+            <Settings size={14} className="hover:rotate-45 transition-transform duration-300" />
+          </button>
+
+          <button 
             onClick={onLogout}
             className="flex items-center gap-2 px-3 py-1.5 rounded-lg hover:bg-exit/10 text-muted hover:text-exit transition-all group"
             title="Switch Account"
@@ -163,8 +178,8 @@ export default function Dashboard({
             ))}
           </Tabs.List>
 
-          <Tabs.Content value="today" className="outline-none focus:ring-0">
-            <TodayBriefView 
+          <Tabs.Content value="overview" className="outline-none focus:ring-0">
+            <OverviewView 
               portfolioData={portfolioData}
               sipAmount={sipAmount}
               setSipAmount={setSipAmount}
@@ -183,14 +198,6 @@ export default function Dashboard({
             <PerformanceView pan={pan} isPrivate={isPrivate} portfolioData={portfolioData} />
           </Tabs.Content>
           
-          <Tabs.Content value="funds" className="outline-none focus:ring-0">
-            <FundsListView 
-              portfolioData={portfolioData} 
-              onFundClick={setSelectedFundName}
-              isPrivate={isPrivate}
-            />
-          </Tabs.Content>
-
           <Tabs.Content value="rebalance" className="outline-none focus:ring-0">
             <RebalanceView 
               portfolioData={portfolioData}
@@ -208,8 +215,10 @@ export default function Dashboard({
             <LedgerView investorPan={pan} isPrivate={isPrivate} />
           </Tabs.Content>
 
+
+
           <Tabs.Content value="upload" className="outline-none focus:ring-0">
-            <CasUploadView pan={pan} />
+            <CasUploadView pan={pan} portfolioData={portfolioData} />
           </Tabs.Content>
         </Tabs.Root>
       </main>
@@ -222,6 +231,25 @@ export default function Dashboard({
           isPrivate={isPrivate}
         />
       )}
+
+      <Dialog.Root open={isStrategyOpen} onOpenChange={setIsStrategyOpen}>
+        <Dialog.Portal>
+          <Dialog.Overlay className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0" />
+          <Dialog.Content className="fixed right-0 top-0 bottom-0 w-full sm:w-[600px] bg-background border-l border-border z-[101] flex flex-col data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:slide-out-to-right data-[state=open]:slide-in-from-right duration-300 shadow-2xl">
+            <div className="flex justify-between items-center px-6 py-4 border-b border-border bg-surface/50">
+              <Dialog.Title className="text-sm font-bold uppercase tracking-wider text-primary">Strategy Settings</Dialog.Title>
+              <Dialog.Close asChild>
+                <button className="text-muted hover:text-exit transition-colors">
+                  &times;
+                </button>
+              </Dialog.Close>
+            </div>
+            <div className="flex-1 overflow-y-auto custom-scrollbar p-6">
+              <StrategyManagerView pan={pan} schemes={portfolioData?.schemeBreakdown || []} />
+            </div>
+          </Dialog.Content>
+        </Dialog.Portal>
+      </Dialog.Root>
     </div>
   );
 }

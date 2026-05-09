@@ -73,6 +73,8 @@ public class ConvictionMetricsRepository {
             "hmm_bull_prob DOUBLE PRECISION DEFAULT 0.33",
             "hmm_bear_prob DOUBLE PRECISION DEFAULT 0.33",
             "hmm_transition_bear DOUBLE PRECISION DEFAULT 0.33",
+            "expense_ratio DOUBLE PRECISION DEFAULT 0.0",
+            "aum_cr DOUBLE PRECISION DEFAULT 0.0",
             "last_python_update TIMESTAMP"
         };
 
@@ -158,7 +160,7 @@ public class ConvictionMetricsRepository {
         // 2. Fetch latest metrics from FCM using DISTINCT ON for per-fund freshness
         String metricsSql = """
             SELECT DISTINCT ON (LTRIM(m.amfi_code, '0')) 
-                   m.*, 
+                   m.*, fm.expense_ratio, fm.aum_cr,
                    (SELECT MAX(t.transaction_date) 
                     FROM "transaction" t 
                     JOIN scheme s2 ON t.scheme_id = s2.id 
@@ -174,6 +176,11 @@ public class ConvictionMetricsRepository {
                     AND f2.investor_pan = ? 
                     AND t.transaction_type = 'SELL') as last_sell
             FROM fund_conviction_metrics m
+            LEFT JOIN (
+                SELECT DISTINCT ON (scheme_code) scheme_code, expense_ratio, aum_cr
+                FROM fund_metrics
+                ORDER BY scheme_code, fetch_date DESC
+            ) fm ON LTRIM(fm.scheme_code, '0') = LTRIM(m.amfi_code, '0')
             WHERE LTRIM(m.amfi_code, '0') IN (""";
         
         // Build IN clause

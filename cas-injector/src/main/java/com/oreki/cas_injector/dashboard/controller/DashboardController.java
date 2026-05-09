@@ -14,7 +14,7 @@ import org.springframework.cache.Cache;
 import com.oreki.cas_injector.core.repository.FolioRepository;
 import com.oreki.cas_injector.core.repository.InvestorRepository;
 import com.oreki.cas_injector.core.repository.SchemeRepository;
-import com.oreki.cas_injector.core.GoogleSheetService;
+import com.oreki.cas_injector.core.service.StrategyService;
 import com.oreki.cas_injector.core.utils.CommonUtils;
 import com.oreki.cas_injector.dashboard.dto.DashboardSummaryDTO;
 import com.oreki.cas_injector.dashboard.dto.PortfolioPerformanceDTO;
@@ -51,7 +51,7 @@ public class DashboardController {
     private final CapitalGainAuditRepository auditRepo;
     private final CacheManager cacheManager;
     private final LtcgExitSchedulerService ltcgExitScheduler;
-    private final GoogleSheetService strategyService;
+    private final StrategyService strategyService;
     private final JdbcTemplate jdbcTemplate;
 
     @GetMapping("/summary/{pan}")

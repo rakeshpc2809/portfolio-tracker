@@ -116,22 +116,8 @@ public class CasProcessingService {
         if (cacheManager.getCache("dashboardSummary") != null) {
             cacheManager.getCache("dashboardSummary").evict(pan);
         }
-
-        // Trigger initial scoring for this investor
-        runInitialScoringAsync(pan);
     }
 
-    @Async("mathEngineExecutor")
-    public void runInitialScoringAsync(String pan) {
-        try {
-            log.info("🆕 New investor data loaded for PAN {}. Triggering initial scoring...", pan);
-            quantitativeEngineService.runNightlyMathEngine();  // runs global metrics first
-            convictionScoringService.calculateAndSaveFinalScores(pan);
-            log.info("✅ Initial conviction scoring complete for PAN {}", pan);
-        } catch (Exception e) {
-            log.warn("⚠️ Initial scoring failed for PAN {} (non-fatal): {}", pan, e.getMessage());
-        }
-    }
 
     private Folio findOrCreateFolio(JsonNode node, Investor investor) {
         String folioNum = node.path("folio_number").asText().trim(); 

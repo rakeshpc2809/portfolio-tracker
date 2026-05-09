@@ -39,4 +39,12 @@ public class HistoricalDataController {
         response.put("benchmark", benchmarkHistory);
         return ResponseEntity.ok(response);
     }
+
+    @GetMapping("/benchmark/{indexName}")
+    public ResponseEntity<List<IndexFundamentals>> getBenchmarkHistory(@PathVariable String indexName) {
+        String cleanName = indexName.trim().toUpperCase();
+        List<IndexFundamentals> history = indexRepo.findByIndexNameOrderByDateDesc(cleanName);
+        if (history.size() > 756) history = history.subList(0, 756);
+        return ResponseEntity.ok(history);
+    }
 }

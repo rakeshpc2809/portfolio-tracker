@@ -1,8 +1,8 @@
 # Build Stage for Java
 FROM maven:3.9.6-eclipse-temurin-21 AS build-java
-COPY cas-injector /app
+COPY . /app
 WORKDIR /app
-RUN mvn clean package -DskipTests
+RUN mvn clean package -Dmaven.test.skip=true
 
 # Run Stage
 FROM eclipse-temurin:21-jre-jammy

@@ -20,13 +20,13 @@ import com.oreki.cas_injector.backfill.service.NavService;
 import com.oreki.cas_injector.convictionmetrics.dto.MarketMetrics;
 import com.oreki.cas_injector.convictionmetrics.repository.ConvictionMetricsRepository;
 import com.oreki.cas_injector.convictionmetrics.service.ConvictionScoringService;
-import com.oreki.cas_injector.convictionmetrics.service.PythonQuantClient;
-import com.oreki.cas_injector.core.GoogleSheetService;
+
+import com.oreki.cas_injector.core.service.StrategyService;
 import com.oreki.cas_injector.core.dto.AggregatedHolding;
 import com.oreki.cas_injector.core.model.Scheme;
 import com.oreki.cas_injector.core.repository.SchemeRepository;
 import com.oreki.cas_injector.core.service.LotAggregationService;
-import com.oreki.cas_injector.core.service.SystemicRiskMonitorService;
+
 import com.oreki.cas_injector.core.utils.CommonUtils;
 import com.oreki.cas_injector.core.utils.SignalType;
 import com.oreki.cas_injector.rebalancing.dto.SipLineItem;
@@ -47,7 +47,7 @@ import lombok.extern.slf4j.Slf4j;
 @RequiredArgsConstructor
 public class PortfolioOrchestrator {
     
-    private final GoogleSheetService strategyService;
+    private final StrategyService strategyService;
     private final NavService amfiService; 
     private final TaxLotRepository taxLotRepository; 
     private final SchemeRepository schemeRepository;
@@ -57,12 +57,12 @@ public class PortfolioOrchestrator {
     private final ConvictionMetricsRepository metricsRepo;
     private final ConvictionScoringService scoringService;
     private final HierarchicalRiskParityService hrpService;
-    private final SystemicRiskMonitorService riskMonitor;
+
     private final TaxLossHarvestingService taxLossHarvestingService;
     private final com.oreki.cas_injector.transactions.repository.TransactionRepository txnRepo;
-    private final PythonQuantClient pythonQuantClient;
+    private final RebalanceEngine rebalanceEngine;
 
-    public GoogleSheetService getStrategyService() {
+    public StrategyService getStrategyService() {
         return strategyService;
     }
 
@@ -300,74 +300,19 @@ public class PortfolioOrchestrator {
                 return (s != null) ? CommonUtils.SANITIZE_AMFI.apply(s.getAmfiCode()) : "";
             }, (a, b) -> a));
 
-        // Systemic Risk Assessment (Once per portfolio)
-        SystemicRiskMonitorService.TailRiskLevel tailRisk = riskMonitor.assessTailRisk(holdings, metricsMap, nameToAmfiMap);
+        String tailRisk = "LOW";
 
-        List<PythonQuantClient.PythonAggregatedHolding> pyHoldings = holdings.stream()
-            .map(h -> new PythonQuantClient.PythonAggregatedHolding(
-                h.getIsin(), h.getSchemeName(), h.getCurrentValue(), 
-                h.getLtcgValue(), h.getLtcgAmount(), h.getStcgValue(), h.getStcgAmount(), 
-                h.getDaysToNextLtcg(), h.getNav()))
-            .toList();
+        RebalanceEngine.RebalanceRequest rebalanceReq = RebalanceEngine.RebalanceRequest.builder()
+            .pan(pan)
+            .totalPortfolioValue(totalValue)
+            .fyLtcgAlreadyRealized(fyLtcgRealized)
+            .tailRiskLevel(tailRisk)
+            .holdings(holdings)
+            .targets(targets)
+            .metrics(metricsMap)
+            .amfiMap(nameToAmfiMap)
+            .build();
             
-        List<PythonQuantClient.PythonStrategyTarget> pyTargets = targets.stream()
-            .map(t -> new PythonQuantClient.PythonStrategyTarget(
-                t.isin(), t.schemeName(), t.targetPortfolioPct(), t.sipPct(), t.status(), t.bucket()))
-            .toList();
-            
-        Map<String, PythonQuantClient.PythonMarketMetrics> pyMetrics = metricsMap.entrySet().stream()
-            .collect(Collectors.toMap(Map.Entry::getKey, e -> new PythonQuantClient.PythonMarketMetrics(
-                e.getKey(), e.getValue().convictionScore(), e.getValue().rollingZScore252(), 
-                e.getValue().hurstExponent(), e.getValue().hurstRegime(), e.getValue().hmmState(), 
-                e.getValue().hmmTransitionBearProb(), e.getValue().ouValid(), e.getValue().ouHalfLife(), 
-                e.getValue().volatilityTax(), e.getValue().historicalRarityPct())));
-                
-        PythonQuantClient.PythonRebalanceRequest req = new PythonQuantClient.PythonRebalanceRequest(
-            pan, totalValue, fyLtcgRealized, tailRisk.name(), pyHoldings, pyTargets, pyMetrics, nameToAmfiMap);
-            
-        List<PythonQuantClient.PythonTacticalSignal> pySignals = pythonQuantClient.rebalancePortfolio(req);
-        
-        List<TacticalSignal> results = new ArrayList<>();
-        for (PythonQuantClient.PythonTacticalSignal ps : pySignals) {
-            String amfi = ps.amfi_code();
-            MarketMetrics m = metricsMap.getOrDefault(amfi, MarketMetrics.fromLegacy(50, 0, 0, 0, 0, 0.5, 0, 0, java.time.LocalDate.of(1970, 1, 1)));
-            
-            results.add(TacticalSignal.builder()
-                .schemeName(ps.scheme_name())
-                .simpleName(CommonUtils.NORMALIZE_NAME.apply(ps.scheme_name()))
-                .amfiCode(ps.amfi_code())
-                .action(SignalType.valueOf(ps.action()))
-                .amount(String.format(java.util.Locale.US, "%.2f", Math.abs(ps.amount())))
-                .plannedPercentage(ps.planned_percentage())
-                .actualPercentage(ps.actual_percentage())
-                .sipPercentage(0) 
-                .fundStatus(FundStatus.fromString(ps.fund_status()))
-                .convictionScore(m.convictionScore())
-                .sortinoRatio(m.sortinoRatio())
-                .maxDrawdown(m.maxDrawdown())
-                .navPercentile1yr(m.navPercentile1yr())
-                .navPercentile3yr(m.navPercentile3yr())
-                .drawdownFromAth(m.drawdownFromAth())
-                .returnZScore(m.returnZScore())
-                .winRate(m.winRate())
-                .cvar5(m.cvar5())
-                .lastBuyDate(m.lastBuyDate())
-                .justifications(ps.justifications())
-                .reasoningMetadata(com.oreki.cas_injector.rebalancing.dto.ReasoningMetadata.neutral(ps.scheme_name()))
-                .yieldScore(m.yieldScore())
-                .riskScore(m.riskScore())
-                .valueScore(m.valueScore())
-                .painScore(m.painScore())
-                .regimeScore(m.regimeScore())
-                .frictionScore(m.frictionScore())
-                .expenseScore(m.expenseScore())
-                .expenseRatio(m.expenseRatio())
-                .aumCr(m.aumCr())
-                .ouHalfLife(m.ouHalfLife())
-                .ouValid(m.ouValid())
-                .build());
-        }
-
-        return results;
+        return rebalanceEngine.computeSignals(rebalanceReq);
     }
 }

@@ -102,10 +102,20 @@ def compute_conviction_score(req: ScoringRequest) -> ScoringResponse:
             (combined_exp_aum * WEIGHT_EXPENSE)
         )
     
-    # DAMPENER: Structural penalty during high bear probability
-    # Scaled dampening factor (1.0 to 0.5) to prevent aggressive buying in collapses
-    dampening_factor = 1.0 - (req.hmm_bear_prob * 0.5)
-    final_score *= dampening_factor
+    # 3. Add a new variable regimePenalty = hmmBearProb * 20.0
+    regime_penalty = req.hmm_bear_prob * 20.0
+    
+    # 4. Apply the regimePenalty by subtracting it from the finalScore
+    final_score -= regime_penalty
+    
+    # 5. Add AUM quality checks
+    if req.aum_cr < 100.0:
+        final_score -= 15.0
+    elif req.aum_cr > 50000.0:
+        final_score -= 10.0
+        
+    # Ensure finalScore does not drop below 0
+    final_score = max(0.0, final_score)
         
     return ScoringResponse(
         amfi_code=req.amfi_code,

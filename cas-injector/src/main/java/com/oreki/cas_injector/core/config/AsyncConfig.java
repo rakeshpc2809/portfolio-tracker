@@ -12,9 +12,11 @@ public class AsyncConfig {
 
     @Bean(name = "mathEngineExecutor")
     public Executor taskExecutor() {
+        int cores = Runtime.getRuntime().availableProcessors();
         ThreadPoolTaskExecutor exec = new ThreadPoolTaskExecutor();
-        exec.setCorePoolSize(3);
-        exec.setMaxPoolSize(3);
+        exec.setCorePoolSize(cores * 2);
+        exec.setMaxPoolSize(cores * 4);
+        exec.setQueueCapacity(500);
         exec.setThreadNamePrefix("math-engine-");
         exec.initialize();
         return exec;
