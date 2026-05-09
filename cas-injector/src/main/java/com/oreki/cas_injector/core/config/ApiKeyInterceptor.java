@@ -3,11 +3,14 @@ package com.oreki.cas_injector.core.config;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.HandlerInterceptor;
+import lombok.extern.slf4j.Slf4j;
+
 
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 
 @Component
+@Slf4j
 public class ApiKeyInterceptor implements HandlerInterceptor {
 
     @Value("${portfolio.api.key:dev-secret-key}")
@@ -22,7 +25,7 @@ public class ApiKeyInterceptor implements HandlerInterceptor {
 
         // Skip API key check for error path and health checks
         String path = request.getRequestURI();
-        if (path.endsWith("/error") || path.contains("/actuator") || path.contains("/health") || path.contains("/status") || path.contains("/ws")) {
+        if (path.endsWith("/error") || path.contains("/actuator") || path.contains("/health") || path.contains("/status")) {
             return true;
         }
 
@@ -31,7 +34,11 @@ public class ApiKeyInterceptor implements HandlerInterceptor {
             return true;
         }
 
-        response.sendError(HttpServletResponse.SC_UNAUTHORIZED, "Unauthorized: Invalid or missing API Key");
+        log.warn("🚨 Unauthorized access attempt: {} {} from IP: {}. Missing or invalid X-API-KEY", 
+                 request.getMethod(), path, request.getRemoteAddr());
+        
+        response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+        response.getWriter().write("Unauthorized: Invalid or missing API Key");
         return false;
     }
 }

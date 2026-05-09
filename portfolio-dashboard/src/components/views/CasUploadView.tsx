@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { uploadCas, previewCas, triggerBackfill, triggerForceSync, fetchAdminStatus, triggerSnapshotBackfill } from "@/services/api";
-import { Upload, AlertCircle, CheckCircle2, Zap, Loader2, TrendingUp, Activity, X } from "lucide-react";
+import { Upload, AlertCircle, CheckCircle2, Zap, Loader2, TrendingUp, Activity, X, ShieldCheck } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useEngineWebsocket } from '@/hooks/useEngineWebsocket';
 import ModernCasDropzone from '../ingestion/ModernCasDropzone';
@@ -201,6 +201,37 @@ const CasUploadView: React.FC<{ pan: string, portfolioData?: any }> = ({ pan, po
                       {previewLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : <TrendingUp size={12} />}
                       Preview Statement Content
                     </button>
+                  </div>
+                </div>
+
+                {/* AA Integration Bento */}
+                <div className="bg-accent/5 border border-accent/20 rounded-[2.5rem] p-10 flex flex-col justify-between space-y-8 relative overflow-hidden group">
+                  <div className="absolute top-0 right-0 p-8 opacity-10 group-hover:scale-110 transition-transform duration-700">
+                    <Activity size={160} className="text-accent" />
+                  </div>
+                  
+                  <div className="space-y-4 relative z-10">
+                    <div className="flex items-center gap-2">
+                      <span className="px-2 py-0.5 bg-accent/20 text-accent rounded text-[8px] font-black uppercase tracking-[0.2em]">Live Sync</span>
+                      <span className="px-2 py-0.5 bg-buy/20 text-buy rounded text-[8px] font-black uppercase tracking-[0.2em]">New</span>
+                    </div>
+                    <h3 className="text-2xl font-black text-primary tracking-tight">Connect via Account Aggregator</h3>
+                    <p className="text-xs text-secondary leading-relaxed font-medium max-w-[280px]">
+                      Skip the PDF. Securely link your MF Central or CAMS account via SEBI-regulated AA ecosystem for real-time sync.
+                    </p>
+                  </div>
+
+                  <div className="space-y-4 relative z-10">
+                    <button 
+                      onClick={() => alert("Account Aggregator integration is currently in Sandbox mode. Please use PDF upload for now.")}
+                      className="w-full h-16 bg-accent shadow-[0_0_40px_rgba(129,140,248,0.4)] hover:shadow-[0_0_50px_rgba(129,140,248,0.6)] text-primary rounded-2xl font-black uppercase tracking-[0.3em] text-[11px] transition-all flex items-center justify-center gap-4 group/aa"
+                    >
+                      <ShieldCheck size={20} className="group-hover:scale-110 transition-transform" />
+                      Link via AA Provider
+                    </button>
+                    <p className="text-[9px] text-muted text-center font-bold uppercase tracking-widest opacity-40">
+                      Supports: Setu · Onemoney · Anumati
+                    </p>
                   </div>
                 </div>
 

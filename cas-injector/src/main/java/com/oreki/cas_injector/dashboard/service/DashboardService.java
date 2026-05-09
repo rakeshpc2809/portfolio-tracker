@@ -186,15 +186,34 @@ public class DashboardService {
 
                 // Cash flows for XIRR
                 List<TransactionDTO> cashFlows = txs.stream()
+                    .filter(t -> !"DIVIDEND_REINVESTMENT".equalsIgnoreCase(t.getTransactionType()))
                     .map(t -> {
-                        BigDecimal preciseAmount = Optional.ofNullable(schemeNavHistory.get(t.getTransactionDate()))
-                            .map(nav -> nav.multiply(t.getUnits().abs()))
-                            .orElse(t.getAmount().abs());
+                        String type = t.getTransactionType().toUpperCase();
+                                // Determine if it's an outflow (investment/cost) or inflow (redemption/gain)
+                        // If units exist and are non-zero, the sign of units tells the story.
+                        // Positive units = Purchase (Outflow from pocket)
+                        // Negative units = Sale (Inflow to pocket)
+                        boolean isOutflow;
+                        if (t.getUnits() != null && t.getUnits().abs().compareTo(new BigDecimal("0.0001")) > 0) {
+                            isOutflow = t.getUnits().compareTo(BigDecimal.ZERO) > 0;
+                        } else {
+                            // Fallback to type for charges (units=0)
+                            isOutflow = type.contains("BUY") || type.contains("PURCHASE") || 
+                                       type.contains("SWITCH_IN") || type.contains("STAMP") || 
+                                       type.contains("STT") || type.contains("TDS");
+                        }
+
+                        // Precise amount calculation: NAV * Units if units exist, else fallback to Amount
+                        BigDecimal preciseAmount;
+                        if (t.getUnits() != null && t.getUnits().abs().compareTo(new BigDecimal("0.0001")) > 0) {
+                            preciseAmount = Optional.ofNullable(schemeNavHistory.get(t.getTransactionDate()))
+                                .map(nav -> nav.multiply(t.getUnits().abs()))
+                                .orElse(t.getAmount().abs());
+                        } else {
+                            preciseAmount = t.getAmount().abs();
+                        }
                         
-                        // Outflows (Buy/Tax) are negative, Inflows (Sell/Div) are positive
-                        boolean isOutflow = "BUY".equalsIgnoreCase(t.getTransactionType()) || "STAMP_DUTY".equalsIgnoreCase(t.getTransactionType());
                         BigDecimal flow = isOutflow ? preciseAmount.negate() : preciseAmount;
-                        
                         return new TransactionDTO(flow, t.getTransactionDate());
                     })
                     .collect(Collectors.toList());
@@ -258,6 +277,11 @@ public class DashboardService {
                     .hmmState(m.hmmState())
                     .hmmBullProb(m.hmmBullProb())
                     .hmmBearProb(m.hmmBearProb())
+                    .alpha(m.alpha())
+                    .betaMkt(m.betaMkt())
+                    .betaSmb(m.betaSmb())
+                    .betaHml(m.betaHml())
+                    .rSquared(m.rSquared())
                     .build();
             })
             .collect(Collectors.toList());
@@ -304,6 +328,7 @@ public class DashboardService {
             .schemeBreakdown(breakdown)
             .build();
     }
+
 
     @Transactional
     public void refreshMaterializedView() {

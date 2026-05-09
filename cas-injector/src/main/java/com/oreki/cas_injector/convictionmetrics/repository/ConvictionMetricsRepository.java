@@ -75,6 +75,11 @@ public class ConvictionMetricsRepository {
             "hmm_transition_bear DOUBLE PRECISION DEFAULT 0.33",
             "expense_ratio DOUBLE PRECISION DEFAULT 0.0",
             "aum_cr DOUBLE PRECISION DEFAULT 0.0",
+            "alpha DOUBLE PRECISION DEFAULT 0.0",
+            "beta_mkt DOUBLE PRECISION DEFAULT 0.0",
+            "beta_smb DOUBLE PRECISION DEFAULT 0.0",
+            "beta_hml DOUBLE PRECISION DEFAULT 0.0",
+            "r_squared DOUBLE PRECISION DEFAULT 0.0",
             "last_python_update TIMESTAMP"
         };
 
@@ -167,14 +172,14 @@ public class ConvictionMetricsRepository {
                     JOIN folio f2 ON s2.folio_id = f2.id
                     WHERE LTRIM(s2.amfi_code, '0') = LTRIM(m.amfi_code, '0') 
                     AND f2.investor_pan = ? 
-                    AND t.transaction_type = 'BUY') as last_buy,
+                    AND UPPER(t.transaction_type) IN ('BUY', 'PURCHASE', 'SWITCH_IN', 'PURCHASE_SIP')) as last_buy,
                    (SELECT MAX(t.transaction_date) 
                     FROM "transaction" t 
                     JOIN scheme s2 ON t.scheme_id = s2.id 
                     JOIN folio f2 ON s2.folio_id = f2.id
                     WHERE LTRIM(s2.amfi_code, '0') = LTRIM(m.amfi_code, '0') 
                     AND f2.investor_pan = ? 
-                    AND t.transaction_type = 'SELL') as last_sell
+                    AND UPPER(t.transaction_type) IN ('SELL', 'REDEMPTION', 'SWITCH_OUT')) as last_sell
             FROM fund_conviction_metrics m
             LEFT JOIN (
                 SELECT DISTINCT ON (scheme_code) scheme_code, expense_ratio, aum_cr

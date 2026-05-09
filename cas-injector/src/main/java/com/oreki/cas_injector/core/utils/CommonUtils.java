@@ -8,6 +8,8 @@ import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Map;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.function.BiFunction;
 import java.util.function.Function;
 
@@ -71,27 +73,50 @@ public class CommonUtils {
 
     public static final Function<List<TransactionDTO>, BigDecimal> SOLVE_XIRR = txs -> {
         if (txs == null || txs.size() < 2) return BigDecimal.ZERO;
+        
+        // Ensure sorted for base date consistency
+        List<TransactionDTO> sortedTxs = new ArrayList<>(txs);
+        sortedTxs.sort(Comparator.comparing(TransactionDTO::getDate));
 
         double rate = 0.1; // Initial guess 10%
         
-        // Phase 1: Newton-Raphson for fast convergence
-        for (int i = 0; i < 30; i++) {
+        // Phase 1: Newton-Raphson
+        boolean converged = false;
+        for (int i = 0; i < 50; i++) {
             double epsilon = 0.0001;
-            double npv = calculateNpv(rate, txs);
-            double derivative = (calculateNpv(rate + epsilon, txs) - npv) / epsilon;
+            double npv = calculateNpv(rate, sortedTxs);
+            double derivative = (calculateNpv(rate + epsilon, sortedTxs) - npv) / epsilon;
             
-            if (Math.abs(derivative) < 1e-7) break; 
-            rate = rate - (npv / derivative);
+            if (Math.abs(derivative) < 1e-10) break; 
+            
+            double nextRate = rate - (npv / derivative);
+            if (Math.abs(nextRate - rate) < 1e-7) {
+                rate = nextRate;
+                converged = true;
+                break;
+            }
+            rate = nextRate;
         }
         
-        // Phase 2: Robustness fallback (Bisection) for non-converged or extreme cases
-        if (!Double.isFinite(rate) || rate < -0.99 || rate > 10.0) { // Bound at 1000% return
-            double lo = -0.99, hi = 10.0;
-            for (int j = 0; j < 50; j++) {
-                double mid = (lo + hi) / 2.0;
-                if (calculateNpv(mid, txs) > 0) lo = mid; else hi = mid;
+        // Phase 2: Robust Bisection Fallback
+        if (!converged || !Double.isFinite(rate) || rate < -0.999 || rate > 20.0) {
+            double lo = -0.999, hi = 20.0;
+            // Check if signs actually differ at bounds
+            double fLo = calculateNpv(lo, sortedTxs);
+            double fHi = calculateNpv(hi, sortedTxs);
+            
+            if (fLo * fHi < 0) {
+                for (int j = 0; j < 100; j++) {
+                    double mid = (lo + hi) / 2.0;
+                    double fMid = calculateNpv(mid, sortedTxs);
+                    if (fMid > 0) lo = mid; else hi = mid;
+                    if (Math.abs(hi - lo) < 1e-7) break;
+                }
+                rate = (lo + hi) / 2.0;
+            } else {
+                // If signs dont differ, take the one closer to zero
+                rate = Math.abs(fLo) < Math.abs(fHi) ? lo : hi;
             }
-            rate = (lo + hi) / 2.0;
         }
 
         return BigDecimal.valueOf(rate * 100);

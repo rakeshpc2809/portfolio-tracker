@@ -9,24 +9,19 @@ import {
   Lock,
   Unlock,
   Upload,
-  LogOut,
-  Settings
+  Settings,
+  Target
 } from 'lucide-react';
 import * as Switch from '@radix-ui/react-switch';
-import * as Tabs from '@radix-ui/react-tabs';
 import * as Dialog from '@radix-ui/react-dialog';
+import { Link, Outlet, useLocation } from '@tanstack/react-router';
 import { formatCurrencyShort } from '../../utils/formatters';
 import StatusRing from '../ui/StatusRing';
+import PanSwitcher from '../ui/PanSwitcher';
+import { DashboardProvider } from '../../context/DashboardContext';
 
 // Views
-import OverviewView from '../views/OverviewView';
-import PortfolioView from '../views/PortfolioView';
-import PerformanceView from '../views/PerformanceView';
-import RebalanceView from '../views/RebalanceView';
-import TaxView from '../views/TaxView';
-import LedgerView from '../views/LedgerView';
 import FundDetailView from '../views/FundDetailView';
-import CasUploadView from '../views/CasUploadView';
 import StrategyManagerView from '../views/StrategyManagerView';
 
 export default function Dashboard({ 
@@ -37,7 +32,7 @@ export default function Dashboard({
   setLumpsum,
   pan,
   onLogout,
-  initialTab = 'today'
+  children
 }: { 
   portfolioData: any;
   sipAmount: number;
@@ -46,25 +41,26 @@ export default function Dashboard({
   setLumpsum: (val: number) => void;
   pan: string;
   onLogout: () => void;
-  initialTab?: string;
+  children?: React.ReactNode;
 }) {
-  const [activeTab, setActiveTab] = useState(initialTab === 'today' ? 'overview' : initialTab);
   const [isPrivate, setIsPrivate] = useState(false);
   const [selectedFundName, setSelectedFundName] = useState<string | null>(null);
   const [isStrategyOpen, setIsStrategyOpen] = useState(false);
+  const location = useLocation();
 
   const tabs = [
-    { id: 'overview', label: 'Overview', icon: <Zap size={14}/> },
-    { id: 'portfolio', label: 'Portfolio', icon: <LayoutDashboard size={14}/> },
-    { id: 'performance', label: 'Performance', icon: <TrendingUp size={14}/> },
-    { id: 'rebalance', label: 'Rebalance', icon: <ArrowLeftRight size={14}/> },
-    { id: 'tax', label: 'Tax', icon: <ShieldCheck size={14}/> },
-    { id: 'ledger', label: 'Ledger', icon: <Receipt size={14}/> },
-    { id: 'upload', label: 'Data', icon: <Upload size={14}/> },
+    { id: 'overview', label: 'Overview', icon: <Zap size={14}/>, path: '/dashboard/overview' },
+    { id: 'portfolio', label: 'Portfolio', icon: <LayoutDashboard size={14}/>, path: '/dashboard/portfolio' },
+    { id: 'performance', label: 'Performance', icon: <TrendingUp size={14}/>, path: '/dashboard/performance' },
+    { id: 'sip-allocation', label: 'SIP Allocation', icon: <Target size={14}/>, path: '/dashboard/sip-allocation' },
+    { id: 'rebalance', label: 'Rebalance', icon: <ArrowLeftRight size={14}/>, path: '/dashboard/rebalance' },
+    { id: 'tax', label: 'Tax', icon: <ShieldCheck size={14}/>, path: '/dashboard/tax' },
+    { id: 'ledger', label: 'Ledger', icon: <Receipt size={14}/>, path: '/dashboard/ledger' },
+    { id: 'goals', label: 'Goals', icon: <Target size={14}/>, path: '/dashboard/goals' },
+    { id: 'upload', label: 'Data', icon: <Upload size={14}/>, path: '/dashboard/upload' },
   ];
 
   const selectedFund = portfolioData?.schemeBreakdown?.find((s: any) => s.schemeName === selectedFundName);
-
   const mask = (val: string) => isPrivate ? "••••" : val;
 
   const stats = [
@@ -140,6 +136,17 @@ export default function Dashboard({
 
           <div className="h-6 w-px bg-border mx-2" />
 
+          <PanSwitcher 
+            currentPan={pan} 
+            onSwitch={(newPan) => {
+              localStorage.setItem('portfolio_pan', newPan);
+              window.location.reload(); // Refresh to clear all states and refetch
+            }} 
+            onLogout={onLogout}
+          />
+
+          <div className="h-6 w-px bg-border mx-2" />
+
           <button 
             onClick={() => setIsStrategyOpen(true)}
             className="flex items-center gap-2 px-3 py-1.5 rounded-lg hover:bg-white/[0.05] text-muted hover:text-primary transition-all"
@@ -147,80 +154,46 @@ export default function Dashboard({
           >
             <Settings size={14} className="hover:rotate-45 transition-transform duration-300" />
           </button>
-
-          <button 
-            onClick={onLogout}
-            className="flex items-center gap-2 px-3 py-1.5 rounded-lg hover:bg-exit/10 text-muted hover:text-exit transition-all group"
-            title="Switch Account"
-          >
-            <LogOut size={14} className="group-hover:translate-x-0.5 transition-transform" />
-            <span className="text-[9px] font-black uppercase tracking-widest hidden sm:inline">Exit</span>
-          </button>
         </div>
       </header>
 
-      <main className="relative z-10 p-8 max-w-7xl mx-auto">
-        <Tabs.Root value={activeTab} onValueChange={setActiveTab} className="space-y-12">
-          <Tabs.List className="flex items-center gap-0.5 p-1 bg-surface border border-border rounded-xl w-full md:w-fit overflow-x-auto scrollbar-none backdrop-blur-sm">
-            {tabs.map((tab) => (
-              <Tabs.Trigger
+      <main className="relative z-10 p-8 max-w-7xl mx-auto space-y-12">
+        <nav className="flex items-center gap-0.5 p-1 bg-surface border border-border rounded-xl w-full md:w-fit overflow-x-auto scrollbar-none backdrop-blur-sm">
+          {tabs.map((tab) => {
+            const isActive = location.pathname === tab.path;
+            return (
+              <Link
                 key={tab.id}
-                value={tab.id}
-                className="relative flex items-center gap-1.5 px-4 py-2 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all duration-200 whitespace-nowrap outline-none cursor-pointer
-                  data-[state=inactive]:text-muted data-[state=inactive]:hover:text-secondary data-[state=inactive]:hover:bg-white/[0.03]
-                  data-[state=active]:text-accent data-[state=active]:bg-accent/10"
+                to={tab.path}
+                className={`relative flex items-center gap-1.5 px-4 py-2 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all duration-200 whitespace-nowrap outline-none cursor-pointer
+                  ${isActive 
+                    ? 'text-accent bg-accent/10' 
+                    : 'text-muted hover:text-secondary hover:bg-white/[0.03]'}`}
               >
                 {tab.icon}
                 <span className="hidden sm:inline">{tab.label}</span>
-                {/* active underline */}
-                <span className="data-[state=inactive]:hidden absolute bottom-0.5 left-3 right-3 h-px bg-accent/60 rounded-full" />
-              </Tabs.Trigger>
-            ))}
-          </Tabs.List>
+                {isActive && (
+                  <span className="absolute bottom-0.5 left-3 right-3 h-px bg-accent/60 rounded-full" />
+                )}
+              </Link>
+            );
+          })}
+        </nav>
 
-          <Tabs.Content value="overview" className="outline-none focus:ring-0">
-            <OverviewView 
-              portfolioData={portfolioData}
-              sipAmount={sipAmount}
-              setSipAmount={setSipAmount}
-              lumpsum={lumpsum}
-              setLumpsum={setLumpsum}
-              onFundClick={setSelectedFundName}
-              isPrivate={isPrivate}
-            />
-          </Tabs.Content>
-          
-          <Tabs.Content value="portfolio" className="outline-none focus:ring-0">
-            <PortfolioView portfolioData={portfolioData} isPrivate={isPrivate} onFundClick={setSelectedFundName} pan={pan} />
-          </Tabs.Content>
-
-          <Tabs.Content value="performance" className="outline-none focus:ring-0">
-            <PerformanceView pan={pan} isPrivate={isPrivate} portfolioData={portfolioData} />
-          </Tabs.Content>
-          
-          <Tabs.Content value="rebalance" className="outline-none focus:ring-0">
-            <RebalanceView 
-              portfolioData={portfolioData}
-              sipAmount={sipAmount}
-              setSipAmount={setSipAmount}
-              isPrivate={isPrivate}
-            />
-          </Tabs.Content>
-          
-          <Tabs.Content value="tax" className="outline-none focus:ring-0">
-            <TaxView portfolioData={portfolioData} isPrivate={isPrivate} pan={pan} />
-          </Tabs.Content>
-          
-          <Tabs.Content value="ledger" className="outline-none focus:ring-0">
-            <LedgerView investorPan={pan} isPrivate={isPrivate} />
-          </Tabs.Content>
-
-
-
-          <Tabs.Content value="upload" className="outline-none focus:ring-0">
-            <CasUploadView pan={pan} portfolioData={portfolioData} />
-          </Tabs.Content>
-        </Tabs.Root>
+        <div className="outline-none focus:ring-0">
+          <DashboardProvider value={{ 
+            portfolioData, 
+            sipAmount, 
+            setSipAmount, 
+            lumpsum, 
+            setLumpsum, 
+            isPrivate, 
+            setSelectedFundName,
+            pan 
+          }}>
+            {children || <Outlet />}
+          </DashboardProvider>
+        </div>
       </main>
 
       {selectedFundName && (

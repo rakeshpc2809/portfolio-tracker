@@ -28,9 +28,9 @@ public class FifoInventoryService {
     private final CapitalGainAuditRepository auditRepo;
 
     public void applyInventoryRules(Transaction tx, String category) {
-        String type = tx.getTransactionType();
+        String type = tx.getTransactionType().toUpperCase();
 
-        if ("BUY".equalsIgnoreCase(type)) {
+        if (type.contains("BUY") || type.contains("PURCHASE") || type.contains("SWITCH_IN")) {
             taxLotRepo.save(TaxLot.builder()
                 .buyTransaction(tx)
                 .scheme(tx.getScheme())
@@ -41,7 +41,7 @@ public class FifoInventoryService {
                 .status("OPEN")
                 .build());
         } 
-        else if ("STAMP_DUTY".equalsIgnoreCase(type)) {
+        else if (type.contains("STAMP_DUTY") || type.contains("STAMP")) {
             taxLotRepo.findFirstBySchemeAndStatusOrderByBuyDateDesc(tx.getScheme(), "OPEN")
                 .ifPresent(lot -> {
                     BigDecimal currentTotalCost = lot.getCostBasisPerUnit().multiply(lot.getOriginalUnits());
@@ -54,7 +54,7 @@ public class FifoInventoryService {
                     txnRepo.save(tx);
                 });
         } 
-        else if ("SELL".equalsIgnoreCase(type)) {
+        else if (type.contains("SELL") || type.contains("REDEMPTION") || type.contains("SWITCH_OUT")) {
             consumeLotsFIFO(tx, category);
         }
     }

@@ -103,4 +103,11 @@ public class SchemePerformanceDTO {
     private List<String> justifications;
     private LocalDate lastBuyDate;
     private List<Integer> convictionHistory;
+    
+    // Attribution Fields
+    private double alpha;
+    private double betaMkt;
+    private double betaSmb;
+    private double betaHml;
+    private double rSquared;
 }

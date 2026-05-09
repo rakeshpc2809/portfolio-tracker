@@ -4,12 +4,8 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
-
-import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 
 import com.oreki.cas_injector.convictionmetrics.repository.ConvictionMetricsRepository;
@@ -23,30 +19,19 @@ import lombok.extern.slf4j.Slf4j;
 public class QuantitativeEngineService {
 
     private final ConvictionMetricsRepository convictionMetricsRepository;
-    private final SimpMessagingTemplate messagingTemplate;
-
 
     @Getter private final AtomicBoolean isRunning = new AtomicBoolean(false);
     @Getter private final AtomicInteger currentStep = new AtomicInteger(0);
     @Getter private String lastStatusMessage = "Idle";
 
-    public QuantitativeEngineService(
-            ConvictionMetricsRepository convictionMetricsRepository,
-            SimpMessagingTemplate messagingTemplate) {
+    public QuantitativeEngineService(ConvictionMetricsRepository convictionMetricsRepository) {
         this.convictionMetricsRepository = convictionMetricsRepository;
-        this.messagingTemplate = messagingTemplate;
     }
 
     private void updateStatus(int step, String message) {
         this.currentStep.set(step);
         this.lastStatusMessage = message;
         log.info("MathEngine [Step {}/7]: {}", step, message);
-        try {
-            messagingTemplate.convertAndSend("/topic/engine-progress", 
-                Map.of("step", step, "message", message, "total", 7));
-        } catch (Exception e) {
-            log.warn("Failed to send websocket update: {}", e.getMessage());
-        }
     }
 
     public void runNightlyMathEngine() {
@@ -72,32 +57,13 @@ public class QuantitativeEngineService {
             updateStatus(2, "Updating NAV signals (Percentile, ATH)...");
             int navSignalRows = convictionMetricsRepository.updateNavSignals();
 
-            updateStatus(3, "Skipping relative Bucket Z-Scores (Pruned)...");
-
             updateStatus(4, "Computing Rolling 252-day Z-Score & Volatility Tax...");
             convictionMetricsRepository.updateRollingZScoreAndVolatilityTax();
 
-            Map<String, double[]> navsCache = loadAllNavs(253);
-            Map<String, double[]> returnsCache = computeReturnsFromNavs(navsCache);
-            
-            updateStatus(5, "Triggering Python batch job for Hurst, OU and HMM...");
-            
-            try {
-                String pythonUrl = System.getenv().getOrDefault("CAS_PARSER_URL", "http://python-parser:8000") + "/api/v1/quant/trigger-batch";
-                java.net.http.HttpRequest request = java.net.http.HttpRequest.newBuilder()
-                        .uri(java.net.URI.create(pythonUrl))
-                        .POST(java.net.http.HttpRequest.BodyPublishers.noBody())
-                        .build();
-                java.net.http.HttpClient.newHttpClient().sendAsync(request, java.net.http.HttpResponse.BodyHandlers.discarding());
-                log.info("🎯 Triggered Python batch job asynchronously at {}", pythonUrl);
-            } catch (Exception e) {
-                log.warn("⚠️ Failed to trigger Python batch job: {}", e.getMessage());
-            }
-            
             long endTime = System.currentTimeMillis();
             updateStatus(7, "Sync complete! System calibrated.");
-            log.info("✅ Math Engine Java phase Complete! Main Metrics updated for {} funds. NAV Signals updated for {} rows.", 
-                mainMetricsRows, navSignalRows);
+            log.info("✅ Math Engine Java phase Complete! Main Metrics updated for {} funds. NAV Signals updated for {} rows. Time: {}ms", 
+                mainMetricsRows, navSignalRows, (endTime - startTime));
         } catch (Exception e) {
             updateStatus(0, "Failed: " + e.getMessage());
             log.error("🚨 Math Engine Failed to execute native SQL or delegation.", e);

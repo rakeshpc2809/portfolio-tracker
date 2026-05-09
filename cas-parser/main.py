@@ -253,6 +253,7 @@ async def sync_market_data():
         "NIFTY MIDCAP 150": "^NSMIDCP150", 
         "NIFTY SMALLCAP 250": "^NSESCP250",
         "NIFTY 500": "^NSE500",
+        "NIFTY 50 VALUE 20": "^NS50V20",
         "GOLD_PRICE_INDEX": "GC=F"
     }
 
@@ -455,6 +456,25 @@ async def chat_with_portfolio(req: ChatRequest):
 async def ai_health():
     return await ai_reasoning.check_ai_health()
 
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.cron import CronTrigger
+from quant_batch import run_batch_job
+
+# --- 5. SCHEDULER ---
+scheduler = AsyncIOScheduler(timezone="Asia/Kolkata")
+scheduler.add_job(
+    run_batch_job,
+    trigger=CronTrigger(hour=19, minute=30, day_of_week='mon-fri'),
+    id='nightly_quant_job',
+    name='Nightly Quantitative Metrics Batch Job',
+    replace_existing=True
+)
+scheduler.start()
+
+@app.on_event("shutdown")
+def shutdown_event():
+    scheduler.shutdown()
+
 @app.get("/health")
 async def health_check():
-    return {"status": "healthy"}
+    return {"status": "healthy", "scheduler_running": scheduler.running}

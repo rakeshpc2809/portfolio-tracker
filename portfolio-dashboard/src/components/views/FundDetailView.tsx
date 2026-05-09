@@ -350,6 +350,7 @@ export default function FundDetailView({
                 </section>
 
                 {/* Score Breakdown Bars */}
+                {/* Score Breakdown Bars */}
                 <section className="space-y-4">
                   <div className="flex items-center justify-between px-2">
                     <h3 className="text-muted text-[10px] font-black uppercase tracking-[0.2em] flex items-center gap-2">
@@ -396,6 +397,68 @@ export default function FundDetailView({
                   </motion.div>
                 </section>
               </div>
+
+              {/* Fama-French Attribution Section */}
+              <section className="bg-surface-elevated border border-white/5 p-8 rounded-[2.5rem] space-y-6 shadow-inner group hover:border-white/10 transition-all">
+                <div className="flex items-center justify-between">
+                  <div className="space-y-1">
+                    <h3 className="text-primary text-[10px] font-black uppercase tracking-[0.2em]">Fama-French Attribution</h3>
+                    <p className="text-[9px] text-muted font-bold uppercase tracking-widest opacity-40">3-Factor Regression Analysis (Log Returns)</p>
+                  </div>
+                  <div className="px-3 py-1 bg-accent/10 border border-accent/20 rounded-full">
+                    <span className="text-[9px] font-black text-accent uppercase tracking-widest">Confidence: {(fund.rSquared * 100).toFixed(0)}% (R²)</span>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
+                  {[
+                    { 
+                      label: 'Alpha (Selection)', 
+                      value: `${(fund.alpha * 100).toFixed(2)}%`, 
+                      desc: 'Excess return beyond style factors.',
+                      color: fund.alpha > 0 ? 'text-buy' : 'text-exit',
+                      glow: fund.alpha > 0 ? 'glow-buy' : 'glow-exit'
+                    },
+                    { 
+                      label: 'Beta (Market)', 
+                      value: fund.betaMkt?.toFixed(2), 
+                      desc: 'Sensitivity to Nifty 50.',
+                      color: 'text-primary'
+                    },
+                    { 
+                      label: 'Size (SMB)', 
+                      value: fund.betaSmb?.toFixed(2), 
+                      desc: 'Small-cap vs Large-cap tilt.',
+                      color: fund.betaSmb > 0.3 ? 'text-accent' : 'text-secondary'
+                    },
+                    { 
+                      label: 'Value (HML)', 
+                      value: fund.betaHml?.toFixed(2), 
+                      desc: 'Value vs Growth orientation.',
+                      color: fund.betaHml > 0.3 ? 'text-warning' : 'text-secondary'
+                    }
+                  ].map((f, i) => (
+                    <div key={i} className="space-y-2 p-4 bg-black/20 rounded-2xl border border-white/5 group/f hover:border-white/10 transition-all">
+                      <p className="text-[8px] font-black uppercase tracking-widest text-muted opacity-60">{f.label}</p>
+                      <p className={`text-2xl font-black tabular-nums tracking-tighter ${f.color} ${f.glow || ''}`}>
+                        {f.value}
+                      </p>
+                      <p className="text-[8px] font-medium text-muted/60 leading-tight group-hover/f:text-muted transition-colors">{f.desc}</p>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="pt-2">
+                  <div className="p-4 bg-white/[0.02] border border-dashed border-white/10 rounded-2xl">
+                    <p className="text-[10px] text-secondary font-medium leading-relaxed italic opacity-80">
+                      {fund.betaSmb > 0.4 ? "This fund heavily exploits the Small-Cap factor (SMB)." : 
+                       fund.betaHml > 0.4 ? "This fund maintains a strong Value-style tilt (HML)." :
+                       fund.alpha > 0.05 ? "Significant stock selection alpha detected beyond market factors." :
+                       "Fund returns are largely explained by Market Beta."}
+                    </p>
+                  </div>
+                </div>
+              </section>
 
               {/* Valuation Visual */}
               <section className="bg-surface-elevated border border-white/5 p-8 rounded-[2.5rem] space-y-8 shadow-inner group hover:border-white/10 transition-all">

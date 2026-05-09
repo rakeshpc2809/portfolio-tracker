@@ -37,11 +37,11 @@ public class MetricsSchedulerService {
     public void runPipeline() {
         logger.info("Starting scheduled execution of Market & MF Metrics Pipeline via HTTP...");
 
-        // 1. Trigger Benchmark Index Scraper
-        triggerScraper("/api/scraper/sync-market", "Benchmark Index Scraper");
+        // 1. Trigger Benchmark Index Scraper (Now handled by Python internal scheduler)
+        // triggerScraper("/api/scraper/sync-market", "Benchmark Index Scraper");
 
-        // 2. Trigger Mutual Fund Metrics Engine
-        triggerScraper("/api/v1/quant/trigger-batch", "Mutual Fund Metrics Engine");
+        // 2. Trigger Mutual Fund Metrics Engine (Now handled by Python internal scheduler)
+        // triggerScraper("/api/v1/quant/trigger-batch", "Mutual Fund Metrics Engine");
 
         // 3. Snapshot Portfolio Values for all investors
         snapshotAllPortfolios();

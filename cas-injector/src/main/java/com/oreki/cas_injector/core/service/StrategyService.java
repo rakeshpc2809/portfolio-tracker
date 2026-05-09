@@ -8,6 +8,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
+import org.springframework.context.ApplicationEventPublisher;
 import java.math.BigDecimal;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -17,7 +18,7 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class StrategyService {
 
-    private final EventStoreService eventStoreService;
+    private final ApplicationEventPublisher eventPublisher;
     private final StrategyTargetRepository strategyRepository;
     private final SchemeRepository schemeRepository;
 
@@ -33,7 +34,7 @@ public class StrategyService {
                 .version(System.currentTimeMillis())
                 .build();
 
-        eventStoreService.publish(event);
+        eventPublisher.publishEvent(event);
     }
 
     public List<com.oreki.cas_injector.rebalancing.dto.StrategyTarget> fetchLatestStrategy() {

@@ -11,3 +11,5 @@ scikit-learn
 yfinance
 psycopg2-binary
 ollama
+apscheduler
+asyncpg

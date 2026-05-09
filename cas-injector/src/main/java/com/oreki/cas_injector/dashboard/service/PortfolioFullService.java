@@ -49,7 +49,8 @@ public class PortfolioFullService {
     private final TaxLotRepository taxLotRepository;
     private final BenchmarkService benchmarkService;
     private final HierarchicalRiskParityService hrpService;
-
+    private final com.oreki.cas_injector.core.service.CasProcessingService casProcessingService;
+ 
     public PortfolioPerformanceDTO getPerformanceHistory(String pan) {
         // 1. Fetch portfolio_snapshot rows ordered by date ASC
         List<Map<String, Object>> snapshots = jdbcTemplate.queryForList("""

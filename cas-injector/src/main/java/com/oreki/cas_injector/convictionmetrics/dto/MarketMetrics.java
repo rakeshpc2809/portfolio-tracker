@@ -46,7 +46,14 @@ public record MarketMetrics(
     String hmmState,               // "CALM_BULL" | "STRESSED_NEUTRAL" | "VOLATILE_BEAR"
     double hmmBullProb,
     double hmmBearProb,
-    double hmmTransitionBearProb
+    double hmmTransitionBearProb,
+    
+    // ── Attribution fields ──────────────────────────────────────────────────
+    double alpha,
+    double betaMkt,
+    double betaSmb,
+    double betaHml,
+    double rSquared
 ) {
     /** Backward-compatible factory: creates a MarketMetrics from the old 9-field query result. */
     public static MarketMetrics fromLegacy(
@@ -65,7 +72,8 @@ public record MarketMetrics(
             "RANDOM_WALK",  // hurstRegime
             50.0,           // historicalRarityPct: neutral
             0.0, false,     // OU defaults
-            "STRESSED_NEUTRAL", 0.33, 0.33, 0.33 // HMM defaults
+            "STRESSED_NEUTRAL", 0.33, 0.33, 0.33, // HMM defaults
+            0.0, 1.0, 0.0, 0.0, 0.0 // Attribution defaults
         );
     }
 
@@ -103,7 +111,12 @@ public record MarketMetrics(
                 String.valueOf(r.getOrDefault("hmm_state", "STRESSED_NEUTRAL")),
                 getSafeDouble(r.get("hmm_bull_prob")),
                 getSafeDouble(r.get("hmm_bear_prob")),
-                getSafeDouble(r.get("hmm_transition_bear"))
+                getSafeDouble(r.get("hmm_transition_bear")),
+                getSafeDouble(r.get("alpha")),
+                getSafeDouble(r.get("beta_mkt")),
+                getSafeDouble(r.get("beta_smb")),
+                getSafeDouble(r.get("beta_hml")),
+                getSafeDouble(r.get("r_squared"))
             ),
             (a, b) -> a 
         ));

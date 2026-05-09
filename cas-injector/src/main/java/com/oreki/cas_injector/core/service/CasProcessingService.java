@@ -98,7 +98,8 @@ public class CasProcessingService {
             pendingTransactions.forEach(tx -> {
                 txnRepo.findByTxnHash(tx.getTxnHash()).ifPresent(savedTx -> {
                     String category = "UNKNOWN";
-                    if ("SELL".equalsIgnoreCase(savedTx.getTransactionType()) || "STAMP_DUTY".equalsIgnoreCase(savedTx.getTransactionType())) {
+                    String type = savedTx.getTransactionType().toUpperCase();
+                    if (type.contains("SELL") || type.contains("REDEMPTION") || type.contains("SWITCH_OUT") || type.contains("STAMP_DUTY")) {
                          category = navService.getLatestSchemeDetails(savedTx.getScheme().getAmfiCode()).getCategory();
                     }
                     fifoService.applyInventoryRules(savedTx, category);
@@ -202,6 +203,49 @@ public class CasProcessingService {
                 return transactions.size();
             }
         });
+    }
+
+    @Transactional
+    public void reprocessPortfolio(String pan) {
+        log.info("🔄 Reprocessing portfolio tax lots for PAN: {}", pan);
+        
+        // 1. Clear old taxation data for this user
+        jdbcTemplate.update("""
+            DELETE FROM capital_gain_audit 
+            WHERE sell_transaction_id IN (
+                SELECT t.id FROM transaction t 
+                JOIN scheme s ON t.scheme_id = s.id 
+                JOIN folio f ON s.folio_id = f.id 
+                WHERE f.investor_pan = ?
+            )
+            """, pan);
+            
+        jdbcTemplate.update("""
+            DELETE FROM tax_lot 
+            WHERE scheme_id IN (
+                SELECT s.id FROM scheme s 
+                JOIN folio f ON s.folio_id = f.id 
+                WHERE f.investor_pan = ?
+            )
+            """, pan);
+
+        // 2. Fetch all transactions in chronological order
+        List<Transaction> transactions = txnRepo.findBySchemeFolioInvestorPanOrderByDateAsc(pan);
+        log.info("📊 Re-applying FIFO rules to {} transactions", transactions.size());
+
+        // 3. Re-apply FIFO
+        for (Transaction tx : transactions) {
+            String category = "UNKNOWN";
+            String type = tx.getTransactionType().toUpperCase();
+            if (type.contains("SELL") || type.contains("REDEMPTION") || type.contains("SWITCH_OUT") || type.contains("STAMP_DUTY")) {
+                 category = navService.getLatestSchemeDetails(tx.getScheme().getAmfiCode()).getCategory();
+            }
+            fifoService.applyInventoryRules(tx, category);
+        }
+
+        // 4. Refresh Read Model
+        eventPublisher.publishEvent(new com.oreki.cas_injector.core.event.CasIngestionCompletedEvent(pan));
+        log.info("✅ Portfolio reprocessing complete.");
     }
 
     public void processPortfolioTaxation(List<Transaction> allSells) {

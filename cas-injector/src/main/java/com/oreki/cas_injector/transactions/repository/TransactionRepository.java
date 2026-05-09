@@ -21,6 +21,8 @@ public interface TransactionRepository extends JpaRepository<Transaction, Long>,
 
     // Find everything EXCEPT Stamp Duty for your portfolio valuation
     List<Transaction> findByTransactionTypeNot(String type);
+ 
+    List<Transaction> findBySchemeFolioInvestorPanOrderByDateAsc(String pan);
 
     long countBySchemeFolioInvestorPan(String pan);
 
@@ -36,7 +38,7 @@ public interface TransactionRepository extends JpaRepository<Transaction, Long>,
            "  WHERE LTRIM(s.amfi_code, '0') = LTRIM(:amfiCode, '0') " +
            "  AND f.investor_pan = :pan" +
            ") " +
-           "AND t.transaction_type = 'BUY' " +
+           "AND UPPER(t.transaction_type) IN ('BUY', 'PURCHASE', 'SWITCH_IN', 'PURCHASE_SIP') " +
            "ORDER BY t.transaction_date DESC LIMIT 1", nativeQuery = true)
     java.util.Optional<Transaction> findLatestBuyBySchemeAmfiCodeAndPan(@Param("amfiCode") String amfiCode, @Param("pan") String pan);
 
@@ -47,7 +49,7 @@ public interface TransactionRepository extends JpaRepository<Transaction, Long>,
            "  WHERE LTRIM(s.amfi_code, '0') = LTRIM(:amfiCode, '0') " +
            "  AND f.investor_pan = :pan" +
            ") " +
-           "AND t.transaction_type = 'SELL' " +
+           "AND UPPER(t.transaction_type) IN ('SELL', 'REDEMPTION', 'SWITCH_OUT') " +
            "ORDER BY t.transaction_date DESC LIMIT 1", nativeQuery = true)
     java.util.Optional<Transaction> findLatestSellBySchemeAmfiCodeAndPan(@Param("amfiCode") String amfiCode, @Param("pan") String pan);
 }

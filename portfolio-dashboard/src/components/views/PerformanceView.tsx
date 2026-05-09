@@ -7,8 +7,6 @@ import { Slider } from '../ui/slider';
 import { usePerformanceHistory } from '../../hooks/usePerformance';
 import { useQuery } from '@tanstack/react-query';
 import { benchmarkService } from '../../services/api';
-import PortfolioVisualizer from '../3d/PortfolioVisualizer';
-
 export default function PerformanceView({ 
   pan, 
   isPrivate,
@@ -93,14 +91,6 @@ export default function PerformanceView({
 
   return (
     <div className="space-y-10 pb-32">
-      {/* 3D Visualization */}
-      <PortfolioVisualizer 
-        allocations={portfolioData?.schemeBreakdown?.map((s: any) => ({
-          name: s.simpleName || s.schemeName,
-          weight: s.allocationPercentage || 0
-        })) || []} 
-      />
-
       {/* Hero Stats */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         {stats.map((s, i) => (

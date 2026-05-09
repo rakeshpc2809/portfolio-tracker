@@ -72,7 +72,6 @@ export default function App() {
             setLumpsum={setLumpsum}
             pan="NEW_USER"
             onLogout={handleLogout}
-            initialTab="upload"
           />
         </motion.div>
       </AnimatePresence>
