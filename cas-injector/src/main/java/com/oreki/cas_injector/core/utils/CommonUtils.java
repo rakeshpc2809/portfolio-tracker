@@ -19,13 +19,9 @@ import com.fasterxml.jackson.databind.JsonNode;
 
 public class CommonUtils {
 
-// Sanitizes strings for database consistency
+    // Sanitizes strings for database consistency
     public static final Function<String, String> SANITIZE = s -> 
         s == null ? "" : s.trim().toUpperCase();
-
-    public static final Function<BigDecimal, BigDecimal> SCALE_MONEY = b -> 
-        (b == null ? BigDecimal.ZERO : b)
-            .setScale(2, RoundingMode.HALF_UP);
 
     // Safely converts JSON nodes to BigDecimal
     public static final Function<JsonNode, BigDecimal> TO_DECIMAL = node -> 
@@ -58,35 +54,32 @@ public class CommonUtils {
         }
     };
 
-
+    // Calculates NPV
     private static double calculateNpv(double rate, List<TransactionDTO> txs) {
         double npv = 0.0;
         for (TransactionDTO tx : txs) {
-            // Convert BigDecimal to double for the math
             double amount = tx.getAmount().doubleValue(); 
             long days = ChronoUnit.DAYS.between(txs.get(0).getDate(), tx.getDate());
-            // Use annualization: (1 + rate)^(days/365.25)
             npv += amount / Math.pow(1.0 + rate, days / 365.25);
         }
         return npv;
     }
 
+    // Solves XIRR using Newton-Raphson method
     public static final Function<List<TransactionDTO>, BigDecimal> SOLVE_XIRR = txs -> {
         if (txs == null || txs.size() < 2) return BigDecimal.ZERO;
         
-        // Ensure sorted for base date consistency
         List<TransactionDTO> sortedTxs = new ArrayList<>(txs);
         sortedTxs.sort(Comparator.comparing(TransactionDTO::getDate));
 
         double rate = 0.1; // Initial guess 10%
-        
-        // Phase 1: Newton-Raphson
         boolean converged = false;
+
         for (int i = 0; i < 50; i++) {
             double epsilon = 0.0001;
             double npv = calculateNpv(rate, sortedTxs);
             double derivative = (calculateNpv(rate + epsilon, sortedTxs) - npv) / epsilon;
-            
+
             if (Math.abs(derivative) < 1e-10) break; 
             
             double nextRate = rate - (npv / derivative);
@@ -97,14 +90,12 @@ public class CommonUtils {
             }
             rate = nextRate;
         }
-        
-        // Phase 2: Robust Bisection Fallback
+
         if (!converged || !Double.isFinite(rate) || rate < -0.999 || rate > 20.0) {
             double lo = -0.999, hi = 20.0;
-            // Check if signs actually differ at bounds
             double fLo = calculateNpv(lo, sortedTxs);
             double fHi = calculateNpv(hi, sortedTxs);
-            
+
             if (fLo * fHi < 0) {
                 for (int j = 0; j < 100; j++) {
                     double mid = (lo + hi) / 2.0;
@@ -114,19 +105,20 @@ public class CommonUtils {
                 }
                 rate = (lo + hi) / 2.0;
             } else {
-                // If signs dont differ, take the one closer to zero
                 rate = Math.abs(fLo) < Math.abs(fHi) ? lo : hi;
             }
         }
 
         return BigDecimal.valueOf(rate * 100);
     };
-    
-    public static final Function<BigDecimal, FundStatus> GET_STATUS = units -> 
-    (units != null && units.compareTo(new BigDecimal("0.001")) > 0) 
-        ? FundStatus.ACTIVE 
-        : FundStatus.REDEEMED;
 
+    // Determines the status of a fund based on units
+    public static final Function<BigDecimal, FundStatus> GET_STATUS = units -> 
+        (units != null && units.compareTo(new BigDecimal("0.001")) > 0) 
+            ? FundStatus.ACTIVE 
+            : FundStatus.REDEEMED;
+
+    // Normalizes a fund name by removing unnecessary words and truncating
     public static final Function<String, String> NORMALIZE_NAME = name -> {
         if (name == null) return "UNKNOWN FUND";
         String s = name.toUpperCase()
@@ -138,14 +130,14 @@ public class CommonUtils {
             .replaceAll("-", " ")
             .replaceAll("\\s+", " ")
             .trim();
-        
-        // Truncate to first 25 chars if still too long, but try to keep it readable
+
         if (s.length() > 28) {
             return s.substring(0, 25) + "...";
         }
         return s;
     };
 
+    // Gets the start date of the current fiscal year
     public static LocalDate getCurrentFyStart() {
         LocalDate today = LocalDate.now();
         int year = today.getYear();
@@ -155,15 +147,13 @@ public class CommonUtils {
         return LocalDate.of(year, 4, 1);
     }
 
+    // Calculates the number of days between two dates
     private static long getDays(LocalDate buy, LocalDate sell) {
         return ChronoUnit.DAYS.between(buy, sell);
     }
 
     /**
-     * Tri-Function to determine the Tax Category based on:
-     * 1. Purchase Date (Important for Debt/Gold post-April 2023)
-     * 2. Sale Date
-     * 3. Fund Category (Equity, Arbitrage, Gold, Debt)
+     * Determines the tax category based on purchase date, sale date, and fund category.
      */
     public static final TriFunction<LocalDate, LocalDate, String, String> DETERMINE_TAX_CATEGORY = (buyDate, sellDate, category) -> {
         if (buyDate == null || sellDate == null || category == null) return "UNKNOWN";
@@ -173,36 +163,28 @@ public class CommonUtils {
         LocalDate cutoff2023 = LocalDate.of(2023, 4, 1);
 
         // --- RULE 1: EQUITY & ARBITRAGE ---
-        // Arbitrage funds are taxed as Equity (65%+ exposure)
         if (cat.contains("EQUITY") || cat.contains("ARBITRAGE")) {
             return (days > 365) ? "EQUITY_LTCG" : "EQUITY_STCG";
         }
 
         // --- RULE 2: GOLD FoF & DEBT FUNDS ---
         if (cat.contains("GOLD") || cat.contains("DEBT") || cat.contains("BOND")) {
-            
-            // New 2023 Rule: If bought on/after April 1, 2023, 
-            // no LTCG benefit exists (taxed at slab rate).
             if (!buyDate.isBefore(cutoff2023)) {
                 return "SLAB_RATE_TAX";
             }
-
-            // Old Rule: Units bought before April 1, 2023 
-            // get LTCG benefit after 3 years (1095 days).
             return (days > 1095) ? "NON_EQUITY_LTCG_OLD" : "NON_EQUITY_STCG_OLD";
         }
 
         // --- RULE 3: OTHER HYBRIDS (Balanced/Conservative) ---
-        // For funds with 35% to 65% Equity (post-2024 rules)
         if (cat.contains("BALANCED") || cat.contains("HYBRID")) {
-             return (days > 730) ? "HYBRID_LTCG" : "SLAB_RATE_TAX";
+            return (days > 730) ? "HYBRID_LTCG" : "SLAB_RATE_TAX";
         }
 
         return "OTHER_STCG";
     };
 
     /**
-     * Maps common bucket/category keywords to canonical benchmark indices
+     * Maps common bucket/category keywords to canonical benchmark indices.
      */
     public static final Map<String, String> CATEGORY_TO_BENCHMARK = Map.of(
         "LARGE",      "NIFTY 50",
@@ -213,12 +195,16 @@ public class CommonUtils {
         "GOLD",       "GOLD_PRICE_INDEX"
     );
 
+    /**
+     * Determines the benchmark index based on bucket and category.
+     */
     public static final BiFunction<String, String, String> DETERMINE_BENCHMARK = (bucket, category) -> {
         String search = (bucket + " " + category).toUpperCase();
         return CATEGORY_TO_BENCHMARK.entrySet().stream()
             .filter(e -> search.contains(e.getKey()))
             .map(Map.Entry::getValue)
             .findFirst().orElse("NIFTY 50");
+
     };
 
     /**

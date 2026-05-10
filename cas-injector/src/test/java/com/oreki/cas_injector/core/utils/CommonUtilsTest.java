@@ -16,7 +16,6 @@ public class CommonUtilsTest {
 
     @Test
     public void testSolveXirr_SimpleOneYear() {
-        // Invest 100 on Year 0, Get 110 on Year 1 -> 10% XIRR
         List<TransactionDTO> txs = Arrays.asList(
             new TransactionDTO(new BigDecimal("-100.00"), LocalDate.of(2020, 1, 1)),
             new TransactionDTO(new BigDecimal("110.00"), LocalDate.of(2021, 1, 1))
@@ -28,10 +27,6 @@ public class CommonUtilsTest {
 
     @Test
     public void testSolveXirr_ComplexMultiple() {
-        // Multi-stage investment
-        // Jan 1: -10,000
-        // Jul 1: -10,000
-        // Next Jan 1: 22,000  (approx 13-14% XIRR)
         List<TransactionDTO> txs = Arrays.asList(
             new TransactionDTO(new BigDecimal("-10000.00"), LocalDate.of(2023, 1, 1)),
             new TransactionDTO(new BigDecimal("-10000.00"), LocalDate.of(2023, 7, 1)),
@@ -44,11 +39,6 @@ public class CommonUtilsTest {
 
     @Test
     public void testSolveXirr_WithRedemptions() {
-        // Test scenario with partial redemption
-        // 2024-01-01: Buy 10,000
-        // 2024-06-01: Sell 5,000
-        // 2025-01-01: Remaining value is 6,000
-        // Net: -10k (out), +5k (in), +6k (final value) -> Overall profit 1k on 10k
         List<TransactionDTO> txs = Arrays.asList(
             new TransactionDTO(new BigDecimal("-10000.00"), LocalDate.of(2024, 1, 1)),
             new TransactionDTO(new BigDecimal("5000.00"), LocalDate.of(2024, 6, 1)),
@@ -56,7 +46,6 @@ public class CommonUtilsTest {
         );
 
         BigDecimal xirr = CommonUtils.SOLVE_XIRR.apply(txs);
-        // Approximately 13.9% XIRR for this scenario
         assertTrue(xirr.doubleValue() > 13.0 && xirr.doubleValue() < 15.0, "XIRR should be ~14%, got: " + xirr);
     }
 
@@ -72,7 +61,6 @@ public class CommonUtilsTest {
 
     @Test
     public void testDetermineTaxCategory_DebtNewRule() {
-        // Debt bought after April 2023 is always SLAB_RATE_TAX
         LocalDate buy = LocalDate.of(2023, 4, 2);
         LocalDate sell = LocalDate.of(2026, 4, 2);
 
