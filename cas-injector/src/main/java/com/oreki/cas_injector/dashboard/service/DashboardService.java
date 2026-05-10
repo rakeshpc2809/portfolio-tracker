@@ -13,6 +13,8 @@ import com.oreki.cas_injector.convictionmetrics.dto.MarketMetrics;
 import com.oreki.cas_injector.convictionmetrics.repository.ConvictionMetricsRepository;
 import com.oreki.cas_injector.core.dto.SchemeDetailsDTO;
 import com.oreki.cas_injector.core.dto.SchemePerformanceDTO;
+import com.oreki.cas_injector.stocks.StockAggregationService;
+import com.oreki.cas_injector.stocks.StockHoldingDTO;
 import com.oreki.cas_injector.core.model.Investor;
 import com.oreki.cas_injector.core.model.Scheme;
 import com.oreki.cas_injector.transactions.model.Transaction;
@@ -53,6 +55,7 @@ public class DashboardService {
     private final BenchmarkService benchmarkService;
     private final JdbcTemplate jdbcTemplate;
     private final PortfolioDashboardReadModelRepository summaryRepo;
+    private final StockAggregationService stockAggSvc;
     private final com.fasterxml.jackson.databind.ObjectMapper objectMapper;
 
     @Transactional(readOnly = true)
@@ -256,6 +259,7 @@ public class DashboardService {
                     .xirr(displayXirr)
                     .benchmarkXirr(benchXirr)
                     .status(status)
+                    .action("HOLD")
                     .category(amfiCategory)
                     .bucket(bucket)
                     .amc(info.getAmc())
@@ -286,6 +290,36 @@ public class DashboardService {
             })
             .collect(Collectors.toList());
 
+        // --- MERGE STOCKS ---
+        List<StockHoldingDTO> stocks = stockAggSvc.getPortfolio(pan);
+        for (StockHoldingDTO stock : stocks) {
+            breakdown.add(SchemePerformanceDTO.builder()
+                .schemeName(stock.getCompanyName() + " (" + stock.getTicker() + ")")
+                .simpleName(stock.getCompanyName())
+                .isin(stock.getIsin())
+                .amfiCode(stock.getTicker())
+                .totalInvested(BigDecimal.valueOf(stock.getInvestedAmount()))
+                .currentInvested(BigDecimal.valueOf(stock.getInvestedAmount()))
+                .currentValue(BigDecimal.valueOf(stock.getCurrentValue()))
+                .realizedGain(BigDecimal.ZERO)
+                .unrealizedGain(BigDecimal.valueOf(stock.getUnrealisedPnl()))
+                .ltcgUnrealizedGain(stock.getUnrealisedLtcg())
+                .stcgUnrealizedGain(stock.getUnrealisedStcg())
+                .transactionCount(1) // Aggregated
+                .xirr("N/A") // TODO: Calculate stock XIRR if possible
+                .status(FundStatus.ACTIVE)
+                .category("Direct Stock")
+                .bucket("DIRECT_EQUITY")
+                .amc("NSE/BSE")
+                .action("HOLD")
+                .convictionScore(60) // Default for stocks
+                .build());
+        }
+
+        double totalValue = breakdown.stream()
+            .mapToDouble(s -> s.getCurrentValue() != null ? s.getCurrentValue().doubleValue() : 0.0)
+            .sum();
+
         BigDecimal aggregateCurrentInvested = breakdown.stream().map(s -> s.getCurrentInvested()).reduce(BigDecimal.ZERO, BigDecimal::add);
         BigDecimal aggregateCurrentValue = breakdown.stream().map(s -> s.getCurrentValue()).reduce(BigDecimal.ZERO, BigDecimal::add);
         BigDecimal aggregateTotalInvested = breakdown.stream().map(s -> s.getTotalInvested()).reduce(BigDecimal.ZERO, BigDecimal::add);
@@ -310,6 +344,12 @@ public class DashboardService {
         Double investorSlab = jdbcTemplate.queryForObject("SELECT tax_slab FROM investor WHERE pan = ?", Double.class, pan);
         double slabRate = (investorSlab != null) ? investorSlab : 0.30;
 
+        // realized LTCG for current FY (Dashboard Summary)
+        BigDecimal realizedLtcg = allInvestorAudits.stream()
+            .filter(a -> a.getTaxCategory().contains("LTCG") && !a.getSellTransaction().getDate().isBefore(fyStart))
+            .map(CapitalGainAudit::getRealizedGain)
+            .reduce(BigDecimal.ZERO, BigDecimal::add);
+
         return DashboardSummaryDTO.builder()
             .investorName(investorName)
             .totalFolios((int) summaryData.stream().map(PortfolioSummary::getFolioId).distinct().count())
@@ -324,6 +364,7 @@ public class DashboardService {
             .overallReturn(CommonUtils.SCALE_MONEY.apply(portfolioPerformance) + "%")
             .overallXirr(CommonUtils.SCALE_MONEY.apply(totalXirr) + "%")
             .totalSTCG(realizedStcg)
+            .totalLTCG(realizedLtcg)
             .taxSlab(slabRate)
             .schemeBreakdown(breakdown)
             .build();

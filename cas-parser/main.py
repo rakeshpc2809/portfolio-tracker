@@ -15,6 +15,10 @@ import pandas as pd
 import yfinance as yf
 from rebalance_engine import RebalanceRequest, TacticalSignal, compute_signals
 from scoring_engine import ScoringRequest, ScoringResponse, compute_conviction_score
+from bootstrap_mc import monte_carlo_projection
+from broker_parser import parse_indmoney_csv, parse_cdsl_statement
+from stock_lot_engine import rebuild_lots_for_stock
+import asyncpg
 
 
 # Configure logging
@@ -30,6 +34,26 @@ app = FastAPI(title="Mutual Fund CAS Parser & Quant Service")
 JAVA_MARKET_URL = os.getenv("JAVA_MARKET_URL", "http://java-backend:8080/api/market/index-history")
 API_KEY = os.getenv("PORTFOLIO_API_KEY", "dev-secret-key")
 
+DB_HOST = os.getenv("DB_HOST", "postgres")
+DB_PORT = os.getenv("DB_PORT", "5432")
+DB_NAME = os.getenv("DB_NAME", "cas_db")
+DB_USER = os.getenv("DB_USER", "user")
+DB_PASS = os.getenv("DB_PASSWORD", "password")
+
+db_pool = None
+
+@app.on_event("startup")
+async def startup_event():
+    global db_pool
+    db_pool = await asyncpg.create_pool(
+        host=DB_HOST,
+        port=DB_PORT,
+        database=DB_NAME,
+        user=DB_USER,
+        password=DB_PASS
+    )
+    logger.info("Database pool initialized")
+
 try:
     from hmmlearn import hmm
     HMM_AVAILABLE = True
@@ -41,6 +65,18 @@ except ImportError:
 class HmmFitRequest(BaseModel):
     returns: List[float]
     n_states: int = 3
+
+class MonteCarloRequest(BaseModel):
+    daily_returns: List[float]
+    current_value: float
+    monthly_sip: float
+    horizon_months: int
+    n_simulations: int = 1000
+
+class MonteCarloResponse(BaseModel):
+    p10: float
+    p50: float
+    p90: float
 
 class HmmFitResponse(BaseModel):
     states: List[int]
@@ -210,6 +246,21 @@ async def analyze_quant(req: QuantAnalyzeRequest):
         }
     except Exception as e:
         logger.error(f"Quant analysis failed for {req.amfi_code}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/v1/quant/monte-carlo", response_model=MonteCarloResponse)
+async def run_monte_carlo(req: MonteCarloRequest):
+    try:
+        res = monte_carlo_projection(
+            req.daily_returns,
+            req.current_value,
+            req.monthly_sip,
+            req.horizon_months,
+            req.n_simulations
+        )
+        return res
+    except Exception as e:
+        logger.error(f"Monte Carlo failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/v1/quant/analyze-batch", response_model=BatchAnalyzeResponse)
@@ -478,3 +529,37 @@ def shutdown_event():
 @app.get("/health")
 async def health_check():
     return {"status": "healthy", "scheduler_running": scheduler.running}
+
+# --- 6. STOCK ROUTES ---
+
+@app.post("/api/v1/stocks/parse-csv")
+async def parse_stocks_csv(
+    file: UploadFile,
+    source: str = Form("INDMONEY_CSV")
+):
+    try:
+        content = await file.read()
+        if source == "INDMONEY_CSV":
+            records = parse_indmoney_csv(content)
+        elif source == "CDSL":
+            records = parse_cdsl_statement(content)
+        else:
+            raise HTTPException(status_code=400, detail=f"Unsupported source: {source}")
+        
+        return {"status": "success", "transactions": records}
+    except Exception as e:
+        logger.error(f"Stock CSV parsing failed: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.post("/api/v1/stocks/rebuild-lots/{stock_id}")
+async def rebuild_stock_lots(stock_id: int):
+    if not db_pool:
+        raise HTTPException(status_code=503, detail="Database pool not initialized")
+    
+    async with db_pool.acquire() as conn:
+        try:
+            await rebuild_lots_for_stock(conn, stock_id)
+            return {"status": "success", "stock_id": stock_id}
+        except Exception as e:
+            logger.error(f"Failed to rebuild lots for stock {stock_id}: {e}")
+            raise HTTPException(status_code=500, detail=str(e))

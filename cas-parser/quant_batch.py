@@ -12,6 +12,61 @@ from scoring_engine import ScoringRequest, compute_conviction_score
 from main import calculate_hurst_vectorized, calculate_ou_params_vectorized, calculate_hmm_regimes
 from attribution_engine import run_attribution_analysis
 
+def calculate_xirr(tx_rows, current_nav):
+    import datetime
+    
+    cashflows = []
+    total_units = 0.0
+    for r in tx_rows:
+        amount = float(r["total_amount"])
+        units = float(r["units"] or 0)
+        ttype = r["transaction_type"].upper()
+        
+        if ttype in ("BUY", "PURCHASE", "SWITCH_IN"):
+            val = -amount
+            total_units += units
+        elif ttype in ("STAMP_DUTY_TAX", "STT_TAX"):
+            val = -amount
+        else:
+            val = amount
+            total_units -= units
+            
+        cashflows.append((val, r["transaction_date"]))
+        
+    current_value = max(0.0, total_units) * current_nav
+    if current_value > 0:
+        cashflows.append((current_value, datetime.date.today()))
+        
+    if len(cashflows) < 2:
+        return 0.0
+        
+    cashflows.sort(key=lambda x: x[1])
+    
+    def npv(rate):
+        if rate <= -1.0: return float('inf')
+        total = 0.0
+        for cf, dt in cashflows:
+            days = (dt - cashflows[0][1]).days
+            total += cf / ((1.0 + rate) ** (days / 365.25))
+        return total
+
+    rate = 0.1
+    for _ in range(50):
+        fx = npv(rate)
+        fx_prime = (npv(rate + 0.0001) - fx) / 0.0001
+        if abs(fx_prime) < 1e-10: break
+        next_rate = rate - fx / fx_prime
+        if abs(next_rate - rate) < 1e-7:
+            return next_rate * 100.0
+        rate = next_rate
+        
+    low, high = -0.99, 10.0
+    for _ in range(100):
+        mid = (low + high) / 2
+        if npv(mid) > 0: low = mid
+        else: high = mid
+    return ((low + high) / 2) * 100.0
+
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
@@ -142,9 +197,19 @@ async def run_batch_job():
             for m in metrics_rows:
                 amfi = str(m["amfi_code"]).lstrip('0')
                 
+                tx_rows = await conn.fetch("""
+                    SELECT t.transaction_date, t.total_amount, t.transaction_type, t.units
+                    FROM transaction t
+                    JOIN scheme s ON t.scheme_id = s.id
+                    WHERE LTRIM(s.amfi_code, '0') = $1
+                """, amfi)
+                
+                current_nav = nav_data[amfi]["navs"][0] if amfi in nav_data and nav_data[amfi]["navs"] else 0.0
+                actual_xirr = calculate_xirr(tx_rows, current_nav)
+                
                 req = ScoringRequest(
                     amfi_code=amfi,
-                    personal_cagr=12.0,
+                    personal_cagr=actual_xirr,
                     max_cagr_found=max_cagr,
                     tax_pct_of_value=0.0,
                     category="EQUITY",

@@ -21,6 +21,7 @@ import TaxView from './components/views/TaxView';
 import LedgerView from './components/views/LedgerView';
 import GoalsView from './components/views/GoalsView';
 import CasUploadView from './components/views/CasUploadView';
+import StocksView from './components/views/StocksView';
 
 // Root Route
 const rootRoute = createRootRoute({
@@ -173,6 +174,15 @@ const uploadRoute = createRoute({
   },
 });
 
+const stocksRoute = createRoute({
+  getParentRoute: () => dashboardRoute,
+  path: 'stocks',
+  component: () => {
+    const { pan, isPrivate } = useDashboardContext();
+    return <StocksView pan={pan} isPrivate={isPrivate} />;
+  },
+});
+
 // Create the route tree
 const routeTree = rootRoute.addChildren([
   indexRoute,
@@ -185,6 +195,7 @@ const routeTree = rootRoute.addChildren([
     taxRoute,
     ledgerRoute,
     goalsRoute,
+    stocksRoute,
     uploadRoute,
   ]),
 ]);

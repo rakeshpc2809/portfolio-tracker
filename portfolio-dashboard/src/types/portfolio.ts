@@ -1,0 +1,54 @@
+import { z } from 'zod';
+
+export const SchemePerformanceSchema = z.object({
+  schemeName: z.string(),
+  simpleName: z.string().optional(),
+  amfiCode: z.string(),
+  action: z.enum(['BUY', 'SELL', 'HOLD', 'WATCH', 'EXIT']).default('HOLD'),
+  amount: z.string().optional(),
+  currentValue: z.number(),
+  allocationPercentage: z.number(),
+  plannedPercentage: z.number().nullable().optional(),
+  convictionScore: z.number().min(0).max(100),
+  sortinoRatio: z.number().nullable().optional(),
+  maxDrawdown: z.number().nullable().optional(),
+  xirr: z.string().nullable().optional(),
+  benchmarkXirr: z.number().nullable().optional(),
+  category: z.string(),
+  bucket: z.string().nullable().optional(),
+  amc: z.string().nullable().optional(),
+  yieldScore: z.number().nullable().optional(),
+  riskScore: z.number().nullable().optional(),
+  valueScore: z.number().nullable().optional(),
+  painScore: z.number().nullable().optional(),
+  regimeScore: z.number().nullable().optional(),
+  frictionScore: z.number().nullable().optional(),
+  expenseScore: z.number().nullable().optional(),
+  hmmState: z.string().nullable().optional(),
+  hmmBearProb: z.number().nullable().optional(),
+  hurstExponent: z.number().nullable().optional(),
+  hurstRegime: z.string().nullable().optional(),
+  volatilityTax: z.number().nullable().optional(),
+  navPercentile1yr: z.number().nullable().optional(),
+  drawdownFromAth: z.number().nullable().optional(),
+  lastBuyDate: z.string().nullable().optional(),
+  justifications: z.array(z.string()).nullable().optional(),
+  rSquared: z.number().nullable().optional(),
+  alpha: z.number().nullable().optional(),
+  betaMkt: z.number().nullable().optional(),
+  betaSmb: z.number().nullable().optional(),
+  betaHml: z.number().nullable().optional(),
+});
+
+export const DashboardSummarySchema = z.object({
+  currentValueAmount: z.number(),
+  totalInvestedAmount: z.number(),
+  overallReturn: z.string(),
+  overallXirr: z.string(),
+  totalSTCG: z.number().nullable().optional(),
+  totalLTCG: z.number().nullable().optional(),
+  schemeBreakdown: z.array(SchemePerformanceSchema),
+});
+
+export type SchemePerformance = z.infer<typeof SchemePerformanceSchema>;
+export type DashboardSummary = z.infer<typeof DashboardSummarySchema>;

@@ -10,7 +10,8 @@ import {
   Unlock,
   Upload,
   Settings,
-  Target
+  Target,
+  BarChart3
 } from 'lucide-react';
 import * as Switch from '@radix-ui/react-switch';
 import * as Dialog from '@radix-ui/react-dialog';
@@ -57,6 +58,7 @@ export default function Dashboard({
     { id: 'tax', label: 'Tax', icon: <ShieldCheck size={14}/>, path: '/dashboard/tax' },
     { id: 'ledger', label: 'Ledger', icon: <Receipt size={14}/>, path: '/dashboard/ledger' },
     { id: 'goals', label: 'Goals', icon: <Target size={14}/>, path: '/dashboard/goals' },
+    { id: 'stocks', label: 'Stocks', icon: <BarChart3 size={14}/>, path: '/dashboard/stocks' },
     { id: 'upload', label: 'Data', icon: <Upload size={14}/>, path: '/dashboard/upload' },
   ];
 

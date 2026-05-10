@@ -34,6 +34,8 @@ export default function TodayBriefView({
   onFundClick: (schemeName: string) => void;
   isPrivate: boolean;
 }) {
+  if (!portfolioData) return null;
+
   const payload = portfolioData.tacticalPayload || { 
     sipPlan: [], 
     opportunisticSignals: [], 

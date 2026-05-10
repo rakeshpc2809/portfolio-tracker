@@ -100,7 +100,8 @@ public class SchemePerformanceDTO {
     private String signalType;
     private String action;
     private BigDecimal signalAmount;
-    private List<String> justifications;
+    @Builder.Default
+    private List<String> justifications = new java.util.ArrayList<>();
     private LocalDate lastBuyDate;
     private List<Integer> convictionHistory;
     

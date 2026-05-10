@@ -10,6 +10,7 @@ import { ResponsiveLine } from '@nivo/line';
 import { 
   Radar, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, ResponsiveContainer 
 } from 'recharts';
+import ConvictionScoreWaterfall from '../ui/ConvictionScoreWaterfall';
 
 export default function FundDetailView({ 
   fund, 
@@ -351,20 +352,36 @@ export default function FundDetailView({
 
                 {/* Score Breakdown Bars */}
                 {/* Score Breakdown Bars */}
-                <section className="space-y-4">
+                <section className="space-y-6">
                   <div className="flex items-center justify-between px-2">
                     <h3 className="text-muted text-[10px] font-black uppercase tracking-[0.2em] flex items-center gap-2">
                       <Zap size={12} className="text-warning fill-current" /> Engine Diagnostics
                     </h3>
                     {!hasRealScores && <span className="text-[9px] text-muted font-bold italic opacity-40 uppercase">Mode: Heuristic Estimate</span>}
                   </div>
+
+                  {hasRealScores && (
+                    <div className="bg-white/[0.02] border border-white/5 p-6 rounded-[2.5rem] shadow-2xl">
+                      <p className="text-[9px] font-black uppercase tracking-[0.2em] text-muted mb-4 opacity-60">Weighted Contribution Bridge</p>
+                      <ConvictionScoreWaterfall 
+                        yieldScore={fund.yieldScore}
+                        riskScore={fund.riskScore}
+                        valueScore={fund.valueScore}
+                        painScore={fund.painScore}
+                        regimeScore={fund.regimeScore}
+                        frictionScore={fund.frictionScore}
+                        expenseScore={fund.expenseScore}
+                        finalScore={fund.convictionScore}
+                      />
+                    </div>
+                  )}
                   
                   <motion.div variants={container} initial="hidden" animate="show" className="space-y-2">
                     {components.map((c) => (
                       <motion.div key={c.label} variants={item} className="bg-white/[0.03] border border-white/5 p-4 rounded-2xl flex items-center gap-6 group hover:bg-white/[0.06] transition-all cursor-default shadow-lg">
                         <div className="w-20">
                           <p className="text-[10px] font-black text-secondary uppercase tracking-widest">{c.label}</p>
-                          <p className="text-[8px] font-bold opacity-40">WEIGHTED</p>
+                          <p className="text-[8px] font-bold opacity-40">RAW SCORE</p>
                         </div>
                         <div className="flex-1 h-1.5 bg-black/20 rounded-full overflow-hidden border border-white/5">
                           <motion.div 

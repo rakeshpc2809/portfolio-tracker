@@ -1,7 +1,7 @@
 import logging
 import pandas as pd
 import numpy as np
-from sklearn.linear_model import LinearRegression
+import statsmodels.api as sm
 from typing import Dict, List, Any
 
 logger = logging.getLogger(__name__)
@@ -13,12 +13,13 @@ async def run_attribution_analysis(pool):
     - Mkt: Nifty 50
     - SMB (Size): Nifty Smallcap 250 - Nifty 50
     - HML (Value): Nifty 50 Value 20 - Nifty 50
+    - WML (Momentum): NIFTY 200 MOMENTUM 30 - Nifty 50
     """
     logger.info("📈 Starting Fama-French Attribution Analysis...")
     
     async with pool.acquire() as conn:
         # 1. Fetch Factor Data
-        indices = ["NIFTY 50", "NIFTY SMALLCAP 250", "NIFTY 500", "NIFTY 50 VALUE 20"]
+        indices = ["NIFTY 50", "NIFTY SMALLCAP 250", "NIFTY 500", "NIFTY 50 VALUE 20", "NIFTY 200 MOMENTUM 30"]
         index_data_rows = await conn.fetch("""
             SELECT index_name, date, closing_price
             FROM index_fundamentals
@@ -35,7 +36,7 @@ async def run_attribution_analysis(pool):
         df_indices['date'] = pd.to_datetime(df_indices['date'])
         
         # Pivot to have dates as index and index names as columns
-        df_pivoted = df_indices.pivot(index='date', columns='index_name', values='closing_price').fillna(method='ffill')
+        df_pivoted = df_indices.pivot(index='date', columns='index_name', values='closing_price').ffill()
         
         # Calculate daily log returns
         df_returns = np.log(df_pivoted / df_pivoted.shift(1)).dropna()
@@ -56,7 +57,13 @@ async def run_attribution_analysis(pool):
         else:
             df_returns['HML'] = 0.0
             
-        factors = df_returns[['Mkt', 'SMB', 'HML']]
+        # WML: Momentum factor
+        if 'NIFTY 200 MOMENTUM 30' in df_returns.columns and 'NIFTY 50' in df_returns.columns:
+            df_returns['WML'] = df_returns['NIFTY 200 MOMENTUM 30'] - df_returns['NIFTY 50']
+        else:
+            df_returns['WML'] = 0.0
+            
+        factors = df_returns[['Mkt', 'SMB', 'HML', 'WML']]
         
         # 2. Fetch Fund NAVs
         fund_nav_rows = await conn.fetch("""
@@ -90,17 +97,17 @@ async def run_attribution_analysis(pool):
                 if len(aligned_data) < 60:
                     continue
                 
-                X = aligned_data[['Mkt', 'SMB', 'HML']]
+                X = aligned_data[['Mkt', 'SMB', 'HML', 'WML']]
                 y = aligned_data.iloc[:, 0] # First column is fund returns
                 
-                model = LinearRegression()
-                model.fit(X, y)
+                X_const = sm.add_constant(X)
+                model = sm.OLS(y, X_const).fit(cov_type='HAC', cov_kwds={'maxlags': 5})
                 
-                alpha = model.intercept_ * 252 # Annualized Alpha
-                beta_mkt = model.coef_[0]
-                beta_smb = model.coef_[1]
-                beta_hml = model.coef_[2]
-                r_squared = model.score(X, y)
+                alpha = model.params['const'] * 252 # Annualized Alpha
+                beta_mkt = model.params['Mkt'] if 'Mkt' in model.params else 0.0
+                beta_smb = model.params['SMB'] if 'SMB' in model.params else 0.0
+                beta_hml = model.params['HML'] if 'HML' in model.params else 0.0
+                r_squared = model.rsquared
                 
                 # 3. Update DB
                 update_query = """

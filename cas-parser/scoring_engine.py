@@ -49,15 +49,15 @@ def compute_conviction_score(req: ScoringRequest) -> ScoringResponse:
     # 2. RISK SCORE (Continuous Sortino)
     risk_score = max(0.0, min(100.0, 50.0 + (req.sortino_ratio * 25.0)))
     
-    # 3. VALUE SCORE (Z-Score cheapness)
-    value_score = max(5.0, min(95.0, 50.0 - (req.rolling_z_score_252 * 22.5)))
+    # 3. VALUE SCORE (Z-Score cheapness, Sigmoid)
+    value_score = 100.0 / (1.0 + math.exp(req.rolling_z_score_252 * 1.2))
     
     # 4. PAIN + RECOVERY (MDD blended with OU Half-life)
     mdd = abs(req.max_drawdown)
     pain_score = max(0.0, 100.0 - (mdd * 1.5))
     
     recovery_score = pain_score
-    if req.ou_valid:
+    if req.ou_valid and req.max_drawdown < -5.0:
         recovery_score = max(0.0, min(100.0, 100.0 * math.exp(-req.ou_half_life / 30.0)))
         
     pain_recovery_score = (pain_score * 0.6) + (recovery_score * 0.4)
@@ -102,14 +102,12 @@ def compute_conviction_score(req: ScoringRequest) -> ScoringResponse:
             (combined_exp_aum * WEIGHT_EXPENSE)
         )
     
-    # 3. Add a new variable regimePenalty = hmmBearProb * 20.0
-    regime_penalty = req.hmm_bear_prob * 20.0
+    # 3. Apply Multiplicative Regime
+    regime_multiplier = 1.0 - (req.hmm_bear_prob * 0.25)
+    final_score = final_score * regime_multiplier
     
-    # 4. Apply the regimePenalty by subtracting it from the finalScore
-    final_score -= regime_penalty
-    
-    # 5. Add AUM quality checks
-    if req.aum_cr < 100.0:
+    # 4. Add AUM quality checks
+    if req.aum_cr < 100.0 and req.aum_cr > 0:
         final_score -= 15.0
     elif req.aum_cr > 50000.0:
         final_score -= 10.0

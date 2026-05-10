@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { uploadCas, previewCas, triggerBackfill, triggerForceSync, fetchAdminStatus, triggerSnapshotBackfill } from "@/services/api";
+import { uploadCas, previewCas, triggerBackfill, triggerForceSync, fetchAdminStatus, triggerSnapshotBackfill, uploadStockCsv } from "@/services/api";
 import { Upload, AlertCircle, CheckCircle2, Zap, Loader2, TrendingUp, Activity, X, ShieldCheck } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useEngineWebsocket } from '@/hooks/useEngineWebsocket';
@@ -321,6 +321,41 @@ const CasUploadView: React.FC<{ pan: string, portfolioData?: any }> = ({ pan, po
             </div>
           </section>
 
+          {/* STEP 1.5: STOCKS (Optional) */}
+          <section className="relative">
+            <div className="absolute -left-12 top-0 h-full w-px bg-white/5 hidden lg:block" />
+            <div className="absolute -left-[51px] top-0 w-1.5 h-1.5 rounded-full bg-white/20 hidden lg:block" />
+            <div className="space-y-6">
+              <div className="flex items-center gap-4">
+                <span className="text-[10px] font-black text-muted bg-white/5 px-3 py-1 rounded-full border border-white/5 uppercase tracking-widest">Optional</span>
+                <h3 className="text-sm font-black uppercase tracking-[0.3em] text-primary">Equity Tradebook</h3>
+              </div>
+              <div className="bg-surface border border-white/5 rounded-3xl p-8 max-w-2xl space-y-6">
+                <p className="text-xs text-muted leading-relaxed font-medium">
+                  Upload your <b>INDmoney Tradebook CSV</b> or <b>CDSL Transaction Statement</b> to track direct stocks.
+                </p>
+                <div className="flex flex-col md:flex-row gap-4">
+                  <input
+                    type="file"
+                    id="stock-file-input"
+                    accept=".csv"
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      if (f) {
+                        setLoading(true);
+                        uploadStockCsv(f, pan)
+                          .then(() => setStatus({ type: 'success', message: '✓ Stock tradebook imported successfully' }))
+                          .catch((err: any) => setStatus({ type: 'error', message: err.message }))
+                          .finally(() => setLoading(false));
+                      }
+                    }}
+                    className="flex-1 text-[10px] text-muted file:mr-4 file:py-2 file:px-6 file:rounded-xl file:border-white/10 file:bg-white/5 file:text-secondary"
+                  />
+                </div>
+              </div>
+            </div>
+          </section>
+
           {/* STEP 2: NAV DATA */}
           <section className="relative">
             <div className="absolute -left-12 top-0 h-full w-px bg-white/5 hidden lg:block" />
@@ -472,6 +507,33 @@ const CasUploadView: React.FC<{ pan: string, portfolioData?: any }> = ({ pan, po
                   Update
                 </button>
               </form>
+            </div>
+
+            <div className="bg-surface border border-white/5 rounded-3xl p-8 space-y-6">
+              <div className="flex items-center gap-3">
+                <TrendingUp className="text-accent" size={18} />
+                <h3 className="text-xs font-black uppercase tracking-widest text-primary">Equity Tradebook Import</h3>
+              </div>
+              <p className="text-xs text-secondary leading-relaxed font-medium">
+                Upload your <b>INDmoney Stock CSV</b> to synchronize your direct equity holdings.
+              </p>
+              <div className="flex flex-col md:flex-row gap-4">
+                <input
+                  type="file"
+                  accept=".csv"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (f) {
+                      setLoading(true);
+                      uploadStockCsv(f, pan)
+                        .then(() => setStatus({ type: 'success', message: '✓ Stock tradebook imported successfully' }))
+                        .catch((err: any) => setStatus({ type: 'error', message: err.message }))
+                        .finally(() => setLoading(false));
+                    }
+                  }}
+                  className="flex-1 text-[10px] text-muted file:mr-4 file:py-2 file:px-6 file:rounded-xl file:border-white/10 file:bg-white/5 file:text-secondary"
+                />
+              </div>
             </div>
           </div>
 

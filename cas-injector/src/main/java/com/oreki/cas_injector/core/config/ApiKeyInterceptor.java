@@ -25,7 +25,7 @@ public class ApiKeyInterceptor implements HandlerInterceptor {
 
         // Skip API key check for error path and health checks
         String path = request.getRequestURI();
-        if (path.endsWith("/error") || path.contains("/actuator") || path.contains("/health") || path.contains("/status")) {
+        if (path.endsWith("/error") || path.contains("/actuator") || path.contains("/health") || path.contains("/status") || path.contains("/ws")) {
             return true;
         }
 

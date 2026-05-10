@@ -1,4 +1,5 @@
 import { normalizeCategory } from '../utils/formatters';
+import { DashboardSummarySchema } from '../types/portfolio';
 
 const BASE_URL = '/api';
 const PARSER_URL = '/parser';
@@ -19,20 +20,21 @@ export const fetchMasterPortfolio = async (investorPan: string, sip: number = 75
     const response = await authenticatedFetch(`${BASE_URL}/dashboard/full/${investorPan}?sip=${sip}&lumpsum=${lumpsum}`);
     if (!response.ok) throw new Error("Portfolio synchronization failed");
     
-    const dashboard = await response.json();
+    const rawData = await response.json();
+    const dashboard = DashboardSummarySchema.parse(rawData);
 
-    const mergedData = (dashboard.schemeBreakdown || []).map((item: any) => {
+    const mergedData = (dashboard.schemeBreakdown || []).map((item) => {
       return {
         ...item,
         cleanCategory: normalizeCategory(item.category, item.schemeName),
         shortName: item.schemeName ? item.schemeName.substring(0, 25) + "..." : "Unknown Fund",
-        deviation: (parseFloat(item.allocationPercentage || 0) - parseFloat(item.plannedPercentage || 0)).toFixed(2)
+        deviation: (parseFloat(String(item.allocationPercentage || 0)) - parseFloat(String(item.plannedPercentage || 0))).toFixed(2)
       };
-    }).sort((a: any, b: any) => b.convictionScore - a.convictionScore);
+    }).sort((a, b) => b.convictionScore - a.convictionScore);
 
     return { ...dashboard, schemeBreakdown: mergedData };
   } catch (error) {
-    console.error("API Error:", error);
+    console.error("API Validation/Fetch Error:", error);
     throw error;
   }
 };
@@ -76,6 +78,47 @@ export const uploadCas = async (file: File, password: string) => {
     throw new Error(errorData.detail || 'CAS Parsing failed');
   }
 
+  return response.json();
+};
+
+export const uploadStockCsv = async (file: File, pan: string, source: string = 'INDMONEY_CSV') => {
+  const formData = new FormData();
+  formData.append('file', file);
+  formData.append('pan', pan);
+  formData.append('source', source);
+
+  const response = await authenticatedFetch(`${BASE_URL}/stocks/import`, {
+    method: 'POST',
+    body: formData,
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({ error: 'Stock import failed' }));
+    throw new Error(errorData.error || 'Stock import failed');
+  }
+
+  return response.json();
+};
+
+export const fetchStockPortfolio = async (pan: string) => {
+  const response = await authenticatedFetch(`${BASE_URL}/stocks/portfolio?pan=${pan}`);
+  if (!response.ok) throw new Error("Failed to fetch stock portfolio");
+  return response.json();
+};
+
+export const syncStockPrices = async (pan: string) => {
+  const response = await authenticatedFetch(`${BASE_URL}/stocks/sync?pan=${pan}`, {
+    method: 'POST'
+  });
+  if (!response.ok) throw new Error("Failed to sync stock prices");
+  return response.json();
+};
+
+export const purgeStockData = async (pan: string) => {
+  const response = await authenticatedFetch(`${BASE_URL}/stocks/purge?pan=${pan}`, {
+    method: 'DELETE'
+  });
+  if (!response.ok) throw new Error("Failed to purge stock data");
   return response.json();
 };
 
