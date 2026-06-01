@@ -35,6 +35,11 @@ public class CommonUtils {
             ? BigDecimal.ZERO 
             : amt.abs().divide(units.abs(), 4, RoundingMode.HALF_UP);
 
+    // Scales money to two decimal places
+    public static final Function<BigDecimal, BigDecimal> SCALE_MONEY = val -> 
+        val == null ? BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP) 
+                    : val.setScale(2, RoundingMode.HALF_UP);
+
     // Generates the Idempotency Hash
     public static final BiFunction<JsonNode, Long, String> GENERATE_HASH = (node, schemeId) -> {
         try {

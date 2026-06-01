@@ -56,3 +56,15 @@ repomix-output.xml
 temp.json
 allocation_plan.odt
 portfolio_os_execution_plan.md
+.aider*
+
+# User Data Reports (Excel/CSV)
+*TransactionsReport*.xlsx
+Transaction cum Holding*.csv
+
+# Build Logs
+*build_log.txt
+
+# Markdown Docs / Analysis
+portfolio_tracker_analysis.md
+stock_tracking_indmoney_implementation.md

@@ -306,7 +306,7 @@ public class DashboardService {
                 .ltcgUnrealizedGain(stock.getUnrealisedLtcg())
                 .stcgUnrealizedGain(stock.getUnrealisedStcg())
                 .transactionCount(1) // Aggregated
-                .xirr("N/A") // TODO: Calculate stock XIRR if possible
+                .xirr(CommonUtils.SCALE_MONEY.apply(BigDecimal.valueOf(stock.getXirr())) + "%")
                 .status(FundStatus.ACTIVE)
                 .category("Direct Stock")
                 .bucket("DIRECT_EQUITY")

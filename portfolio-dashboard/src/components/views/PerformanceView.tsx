@@ -5,6 +5,7 @@ import {
 } from 'recharts';
 import { ResponsiveLine } from '@nivo/line';
 import { ResponsiveHeatMap } from '@nivo/heatmap';
+import { ResponsiveScatterPlot } from '@nivo/scatterplot';
 import { Activity, Target } from 'lucide-react';
 import { formatCurrency } from '../../utils/formatters';
 import { motion } from 'framer-motion';
@@ -212,6 +213,128 @@ export default function PerformanceView({
     return histogram;
   }, [dailyReturns]);
 
+  const scatterData = useMemo(() => {
+    if (!portfolioData || !portfolioData.schemeBreakdown) return [];
+    
+    const active = portfolioData.schemeBreakdown.filter((s: any) => s.allocationPercentage > 0.01);
+    
+    const bullPoints: any[] = [];
+    const neutralPoints: any[] = [];
+    const bearPoints: any[] = [];
+    
+    active.forEach((s: any) => {
+      let fundXirr = 0.0;
+      try {
+        fundXirr = parseFloat(s.xirr?.replace('%', '') || '0');
+      } catch (e) {
+        fundXirr = 0.0;
+      }
+      const risk = Math.abs(s.maxDrawdown || 0);
+      
+      const pt = {
+        x: risk,
+        y: fundXirr,
+        name: s.simpleName || s.schemeName,
+        weight: s.allocationPercentage
+      };
+      
+      if (s.hmmState === 'CALM_BULL') {
+        bullPoints.push(pt);
+      } else if (s.hmmState === 'VOLATILE_BEAR') {
+        bearPoints.push(pt);
+      } else {
+        neutralPoints.push(pt);
+      }
+    });
+    
+    return [
+      { id: "Calm Bull", color: "#a6e3a1", data: bullPoints },
+      { id: "Stressed Neutral", color: "#fab387", data: neutralPoints },
+      { id: "Volatile Bear", color: "#f38ba8", data: bearPoints }
+    ].filter(series => series.data.length > 0);
+  }, [portfolioData]);
+
+  const niftyMaxDrawdown = useMemo(() => {
+    if (!perf || !perf.niftyHistory || perf.niftyHistory.length === 0) return 12.0;
+    let maxVal = 0;
+    let maxDD = 0;
+    perf.niftyHistory.forEach((b: any) => {
+      const val = b.normalizedValue;
+      if (val > maxVal) maxVal = val;
+      const dd = maxVal > 0 ? (val / maxVal) - 1 : 0;
+      if (dd < maxDD) maxDD = dd;
+    });
+    return Math.abs(maxDD * 100);
+  }, [perf]);
+
+  const historyRegimes = useMemo(() => {
+    if (!perf || !perf.history || perf.history.length === 0) return [];
+    
+    const points = perf.history.map((p: any, idx: number) => {
+      let maxVal = 0;
+      for (let j = 0; j <= idx; j++) {
+        if (perf.history[j].value > maxVal) maxVal = perf.history[j].value;
+      }
+      const dd = maxVal > 0 ? (p.value / maxVal) - 1 : 0;
+      
+      const prevIdx = Math.max(0, idx - 15);
+      const momentum = (p.value - perf.history[prevIdx].value) / perf.history[prevIdx].value;
+      
+      let state = 'STRESSED_NEUTRAL';
+      if (dd < -0.06) {
+        state = 'VOLATILE_BEAR';
+      } else if (momentum > 0.01) {
+        state = 'CALM_BULL';
+      }
+      
+      return {
+        date: new Date(p.date),
+        state
+      };
+    });
+    
+    const segments: Array<{ state: string; startDate: Date; endDate: Date }> = [];
+    if (points.length === 0) return [];
+    
+    let currentSegment = {
+      state: points[0].state,
+      startDate: points[0].date,
+      endDate: points[0].date,
+    };
+    
+    for (let i = 1; i < points.length; i++) {
+      if (points[i].state === currentSegment.state) {
+        currentSegment.endDate = points[i].date;
+      } else {
+        segments.push(currentSegment);
+        currentSegment = {
+          state: points[i].state,
+          startDate: points[i].date,
+          endDate: points[i].date,
+        };
+      }
+    }
+    segments.push(currentSegment);
+    return segments;
+  }, [perf]);
+
+  const totalDuration = useMemo(() => {
+    if (historyRegimes.length === 0) return 0;
+    const start = historyRegimes[0].startDate.getTime();
+    const end = historyRegimes[historyRegimes.length - 1].endDate.getTime();
+    return end - start || 1;
+  }, [historyRegimes]);
+
+  const regimeConsensus = useMemo(() => {
+    if (!portfolioData || !portfolioData.schemeBreakdown) return { bull: 0, neutral: 0, bear: 0, total: 0 };
+    const active = portfolioData.schemeBreakdown.filter((s: any) => s.allocationPercentage > 0.01);
+    const total = active.length;
+    const bull = active.filter((s: any) => s.hmmState === 'CALM_BULL').length;
+    const bear = active.filter((s: any) => s.hmmState === 'VOLATILE_BEAR').length;
+    const neutral = active.filter((s: any) => s.hmmState === 'STRESSED_NEUTRAL').length;
+    return { bull, neutral, bear, total };
+  }, [portfolioData]);
+
   if (isLoading) {
     return (
       <div className="h-96 flex items-center justify-center">
@@ -319,6 +442,54 @@ export default function PerformanceView({
             )}
           />
         </div>
+
+        {/* HMM Consensus Regime Timeline */}
+        {historyRegimes.length > 0 && (
+          <div className="space-y-3 mt-6 pt-6 border-t border-white/5">
+            <div className="flex flex-col sm:flex-row justify-between gap-2 text-[9px] font-black uppercase tracking-wider text-muted/60">
+              <span>HMM Market Regime Trajectory Overlay</span>
+              <span className="flex flex-wrap gap-4">
+                <span className="flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full bg-[#a6e3a1]" /> Calm Bull</span>
+                <span className="flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full bg-[#fab387]" /> Stressed Neutral</span>
+                <span className="flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full bg-[#f38ba8]" /> Volatile Bear</span>
+              </span>
+            </div>
+            <div className="w-full h-3 rounded-full overflow-hidden flex bg-black/40 border border-white/5 p-[1px] shadow-inner">
+              {historyRegimes.map((seg, idx) => {
+                const duration = seg.endDate.getTime() - seg.startDate.getTime();
+                const widthPct = (duration / totalDuration) * 100;
+                
+                let color = '#a6e3a1';
+                let name = 'Calm Bull';
+                if (seg.state === 'VOLATILE_BEAR') {
+                  color = '#f38ba8';
+                  name = 'Volatile Bear';
+                } else if (seg.state === 'STRESSED_NEUTRAL') {
+                  color = '#fab387';
+                  name = 'Stressed Neutral';
+                }
+                
+                return (
+                  <div
+                    key={idx}
+                    style={{ width: `${widthPct}%`, backgroundColor: color }}
+                    className="h-full relative group/seg first:rounded-l-full last:rounded-r-full transition-opacity hover:opacity-85 cursor-help"
+                  >
+                    {/* Tooltip on hover */}
+                    <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover/seg:block z-30 min-w-[150px]">
+                      <div className="bg-[#181825]/95 backdrop-blur-md border border-white/10 p-2.5 rounded-xl shadow-2xl text-[9px] text-[#cdd6f4] text-center space-y-0.5 pointer-events-none">
+                        <p className="font-black uppercase tracking-wider" style={{ color }}>{name}</p>
+                        <p className="font-bold opacity-60">
+                          {seg.startDate.toLocaleDateString(undefined, { month: 'short', year: 'numeric' })} - {seg.endDate.toLocaleDateString(undefined, { month: 'short', year: 'numeric' })}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
       </section>
 
       {/* Underwater / Drawdown Chart */}
@@ -551,6 +722,88 @@ export default function PerformanceView({
           </table>
         </div>
       </section>
+
+      {/* Risk-Return Frontier */}
+      {scatterData.length > 0 && (
+        <section className="bg-surface/40 backdrop-blur-xl border border-white/5 p-10 rounded-[2.5rem] shadow-2xl space-y-8">
+          <div className="flex items-center justify-between">
+            <div className="space-y-1">
+              <h3 className="text-primary text-[10px] font-black uppercase tracking-[0.3em]">Risk-Return Efficiency Frontier</h3>
+              <p className="text-sm font-bold text-secondary">Fund return (XIRR) plotted against risk (Max Drawdown). Larger spheres denote higher allocation weight.</p>
+            </div>
+          </div>
+          <div className="h-96 w-full bg-black/20 rounded-3xl border border-white/5 p-6 shadow-inner relative">
+            <ResponsiveScatterPlot
+              data={scatterData}
+              margin={{ top: 20, right: 20, bottom: 50, left: 60 }}
+              xScale={{ type: 'linear', min: 0, max: 'auto' }}
+              yScale={{ type: 'linear', min: 'auto', max: 'auto' }}
+              axisTop={null}
+              axisRight={null}
+              axisBottom={{
+                tickSize: 5,
+                tickPadding: 5,
+                tickRotation: 0,
+                legend: 'Risk (Maximum Drawdown %)',
+                legendPosition: 'middle',
+                legendOffset: 40
+              }}
+              axisLeft={{
+                tickSize: 5,
+                tickPadding: 5,
+                tickRotation: 0,
+                legend: 'Return (XIRR %)',
+                legendPosition: 'middle',
+                legendOffset: -45
+              }}
+              colors={d => d.color}
+              nodeSize={node => Math.max(10, Math.min(30, (node.data.weight || 1) * 1.0))}
+              useMesh={true}
+              theme={{
+                axis: {
+                  ticks: { text: { fill: "#6c7086", fontSize: 10, fontWeight: 700 } },
+                  legend: { text: { fill: "#cdd6f4", fontSize: 10, fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.1em' } }
+                },
+                grid: { line: { stroke: "rgba(255,255,255,0.05)" } },
+                tooltip: { container: { background: "#181825", color: "#cdd6f4", fontSize: 12, borderRadius: 12 } }
+              }}
+              markers={[
+                {
+                  axis: 'y',
+                  value: perf.xirr - perf.alphaPct,
+                  lineStyle: { stroke: 'rgba(166, 227, 161, 0.5)', strokeWidth: 1.5, strokeDasharray: '4 4' },
+                  legend: `Nifty 50 XIRR: ${(perf.xirr - perf.alphaPct).toFixed(1)}%`,
+                  legendPosition: 'top-left',
+                  textStyle: { fill: '#a6e3a1', fontSize: 9, fontWeight: 'bold' }
+                },
+                {
+                  axis: 'x',
+                  value: niftyMaxDrawdown,
+                  lineStyle: { stroke: 'rgba(243, 139, 168, 0.5)', strokeWidth: 1.5, strokeDasharray: '4 4' },
+                  legend: `Nifty 50 Max DD: ${niftyMaxDrawdown.toFixed(1)}%`,
+                  legendPosition: 'bottom-right',
+                  textStyle: { fill: '#f38ba8', fontSize: 9, fontWeight: 'bold' }
+                }
+              ]}
+              tooltip={({ node }) => (
+                <div className="bg-[#181825]/95 backdrop-blur-md border border-white/10 p-4 rounded-2xl shadow-2xl space-y-2 select-none text-[#cdd6f4]">
+                  <p className="font-black text-xs text-primary">{node.data.name}</p>
+                  <div className="grid grid-cols-2 gap-x-4 gap-y-1 pt-1.5 border-t border-white/5 text-[10px]">
+                    <span className="font-bold text-muted uppercase">Weight</span>
+                    <span className="font-black text-right text-accent">{node.data.weight.toFixed(2)}%</span>
+                    
+                    <span className="font-bold text-muted uppercase">XIRR</span>
+                    <span className={`font-black text-right ${node.data.y >= 0 ? 'text-buy' : 'text-exit'}`}>{node.data.y.toFixed(2)}%</span>
+                    
+                    <span className="font-bold text-muted uppercase">Max DD</span>
+                    <span className="font-black text-right text-exit">-{node.data.x.toFixed(2)}%</span>
+                  </div>
+                </div>
+              )}
+            />
+          </div>
+        </section>
+      )}
 
       {/* Goal Projector Section */}
       <section className="bg-accent/5 backdrop-blur-xl border border-accent/10 p-10 rounded-[2.5rem] shadow-2xl space-y-10">

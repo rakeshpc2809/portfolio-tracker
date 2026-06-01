@@ -75,6 +75,41 @@ export default function TaxView({
     }
   ], [realizedLTCG, totalUnrealizedLTCG, realizedSTCG, totalUnrealizedSTCG, totalSlabRateGain]);
 
+  const waterfallData = useMemo(() => {
+    let b1 = 0, s1 = 0;
+    let b2 = 0, s2 = 0;
+    let b3 = 0, s3 = 0;
+    let b4 = 0, s4 = 0;
+    
+    stcgFunds.forEach((f: any) => {
+      if (f.isSlab || f.days <= 0) return;
+      if (f.days <= 30) {
+        b1 += f.stcgGain;
+        s1 += f.saving;
+      } else if (f.days <= 90) {
+        b2 += f.stcgGain;
+        s2 += f.saving;
+      } else if (f.days <= 180) {
+        b3 += f.stcgGain;
+        s3 += f.saving;
+      } else {
+        b4 += f.stcgGain;
+        s4 += f.saving;
+      }
+    });
+    
+    return [
+      { bracket: '0-30 Days', 'STCG Exposure': b1, 'Est. Tax Savings': s1 },
+      { bracket: '31-90 Days', 'STCG Exposure': b2, 'Est. Tax Savings': s2 },
+      { bracket: '91-180 Days', 'STCG Exposure': b3, 'Est. Tax Savings': s3 },
+      { bracket: '180+ Days', 'STCG Exposure': b4, 'Est. Tax Savings': s4 }
+    ];
+  }, [stcgFunds]);
+
+  const totalPotentialSavings = useMemo(() => {
+    return stcgFunds.reduce((acc: number, f: any) => acc + (f.saving || 0), 0);
+  }, [stcgFunds]);
+
   const projectedLtcgTax = Math.max(0, totalUnrealizedLTCG - (ltcgLimit - realizedLTCG)) * 0.125;
   const projectedStcgTax = totalUnrealizedSTCG * 0.20 + totalSlabRateGain * investorSlab;
   const totalProjectedTax = projectedLtcgTax + projectedStcgTax;
@@ -280,6 +315,87 @@ export default function TaxView({
                 </div>
               </div>
             </div>
+
+            {/* STCG Waterfall Section */}
+            {stcgFunds.filter((f: any) => !f.isSlab && f.days > 0).length > 0 && (
+              <section className="bg-surface/40 backdrop-blur-xl border border-white/5 p-10 rounded-[2.5rem] shadow-2xl space-y-8">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                  <div className="space-y-1">
+                    <h3 className="text-primary text-[10px] font-black uppercase tracking-[0.3em]">STCG Conversion Waterfall</h3>
+                    <p className="text-sm font-bold text-secondary">Short-term lots grouped by countdown conversion brackets into 12.5% LTCG status</p>
+                  </div>
+                  {totalPotentialSavings > 0 && (
+                    <div className="px-4 py-2 rounded-2xl bg-buy/10 border border-buy/20 flex items-center gap-2 text-xs font-black text-buy uppercase tracking-wider">
+                      <span>Potential Tax Savings:</span>
+                      <span><CurrencyValue isPrivate={isPrivate} value={totalPotentialSavings} /></span>
+                    </div>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                  <div className="lg:col-span-2">
+                    <div className="h-72 w-full bg-black/20 rounded-3xl border border-white/5 p-6 shadow-inner relative">
+                      <ResponsiveBar
+                        data={waterfallData}
+                        keys={['STCG Exposure', 'Est. Tax Savings']}
+                        indexBy="bracket"
+                        margin={{ top: 20, right: 30, bottom: 40, left: 65 }}
+                        padding={0.3}
+                        groupMode="grouped"
+                        valueScale={{ type: 'linear' }}
+                        colors={({ id }) => id === 'STCG Exposure' ? '#f38ba8' : '#a6e3a1'}
+                        axisTop={null}
+                        axisRight={null}
+                        axisBottom={{
+                          tickSize: 5,
+                          tickPadding: 5,
+                          tickRotation: 0,
+                        }}
+                        axisLeft={{
+                          tickSize: 5,
+                          tickPadding: 5,
+                          tickRotation: 0,
+                          format: v => `₹${(v/1000).toFixed(0)}k`
+                        }}
+                        enableLabel={false}
+                        theme={{
+                          axis: {
+                            ticks: { text: { fill: "#6c7086", fontSize: 10, fontWeight: 700 } },
+                          },
+                          grid: { line: { stroke: "rgba(255,255,255,0.05)" } },
+                          tooltip: { container: { background: "#181825", color: "#cdd6f4", fontSize: 11, borderRadius: 10 } }
+                        }}
+                        valueFormat={v => formatCurrency(v)}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="bg-black/20 rounded-[2rem] p-8 border border-white/5 flex flex-col justify-between">
+                    <div className="space-y-4">
+                      <p className="text-[10px] font-black uppercase tracking-[0.2em] text-muted border-b border-white/5 pb-3">Conversion Intelligence</p>
+                      <p className="text-xs font-bold text-secondary leading-relaxed">
+                        Holding short-term lots until they qualify for LTCG saves <span className="text-buy font-extrabold">7.5%</span> on tax rates (20% down to 12.5%). Avoid selling assets in the 0-30 and 31-90 day ranges to lock in risk-free yield.
+                      </p>
+                    </div>
+
+                    <div className="space-y-3 pt-6 border-t border-white/5">
+                      <div className="flex justify-between items-center text-xs">
+                        <span className="font-bold text-muted">Equity STCG Exposure</span>
+                        <span className="font-black text-primary">
+                          <CurrencyValue isPrivate={isPrivate} value={stcgFunds.filter((f: any) => !f.isSlab).reduce((acc: number, f: any) => acc + f.stcgGain, 0)} />
+                        </span>
+                      </div>
+                      <div className="flex justify-between items-center text-xs">
+                        <span className="font-bold text-muted">Est. Waiting Tax</span>
+                        <span className="font-black text-exit">
+                          <CurrencyValue isPrivate={isPrivate} value={stcgFunds.filter((f: any) => !f.isSlab).reduce((acc: number, f: any) => acc + f.tax, 0)} />
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </section>
+            )}
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
               {/* STCG Lock List Upgraded to Cards */}

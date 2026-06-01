@@ -6,7 +6,14 @@ import org.springframework.stereotype.Service;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.math.BigDecimal;
+import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import com.oreki.cas_injector.core.utils.CommonUtils;
+import com.oreki.cas_injector.transactions.dto.TransactionDTO;
 
 @Service
 @RequiredArgsConstructor
@@ -52,7 +59,7 @@ public class StockAggregationService {
             GROUP BY ls.ticker, ls.isin, ls.company_name, ls.exchange, ls.sector, lp.close_price
             """;
 
-        return jdbc.query(sql, (rs, rowNum) -> {
+        List<StockHoldingDTO> portfolio = jdbc.query(sql, (rs, rowNum) -> {
             double currentVal = rs.getDouble("current_value");
             double invested   = rs.getDouble("total_invested");
             double uLtcg      = rs.getDouble("unrealised_ltcg");
@@ -77,5 +84,57 @@ public class StockAggregationService {
                 .stcgTaxEstimate(Math.max(0, uStcg) * 0.20)
                 .build();
         }, pan);
+
+        // Fetch all transactions to compute stock-level XIRR
+        String txnSql = """
+            SELECT s.ticker, st.transaction_date, st.transaction_type, st.total_amount
+            FROM stock_transaction st
+            JOIN stock s ON st.stock_id = s.id
+            JOIN folio f ON s.folio_id = f.id
+            WHERE f.investor_pan = ?
+            ORDER BY st.transaction_date ASC
+            """;
+
+        Map<String, List<TransactionDTO>> stockTxns = new HashMap<>();
+        jdbc.query(txnSql, (rs) -> {
+            String ticker = rs.getString("ticker");
+            java.sql.Date date = rs.getDate("transaction_date");
+            String type = rs.getString("transaction_type");
+            double amount = rs.getDouble("total_amount");
+
+            if (ticker != null && date != null && type != null) {
+                double flow = 0.0;
+                if ("BUY".equalsIgnoreCase(type)) {
+                    flow = -amount;
+                } else if ("SELL".equalsIgnoreCase(type)) {
+                    flow = amount;
+                } else {
+                    return; // ignore non-cash events like splits/bonus for cash flow
+                }
+                stockTxns.computeIfAbsent(ticker, k -> new ArrayList<>())
+                    .add(new TransactionDTO(BigDecimal.valueOf(flow), date.toLocalDate()));
+            }
+        }, pan);
+
+        // Calculate XIRR for each stock
+        for (StockHoldingDTO stock : portfolio) {
+            List<TransactionDTO> txs = stockTxns.getOrDefault(stock.getTicker(), new ArrayList<>());
+            List<TransactionDTO> cashFlows = new ArrayList<>(txs);
+            if (stock.getQuantity() > 0.0001) {
+                cashFlows.add(new TransactionDTO(BigDecimal.valueOf(stock.getCurrentValue()), LocalDate.now()));
+            }
+            
+            double xirr = 0.0;
+            if (cashFlows.size() >= 2) {
+                try {
+                    xirr = CommonUtils.SOLVE_XIRR.apply(cashFlows).doubleValue();
+                } catch (Exception e) {
+                    log.warn("Failed to calculate XIRR for stock {}: {}", stock.getTicker(), e.getMessage());
+                }
+            }
+            stock.setXirr(xirr);
+        }
+
+        return portfolio;
     }
 }

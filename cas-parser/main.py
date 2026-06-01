@@ -469,17 +469,6 @@ async def preview_cas(
         logger.error(f"CAS Preview failed: {str(e)}")
         raise HTTPException(status_code=400, detail=str(e))
 
-import sentiment_engine
-
-@app.post("/api/v1/sentiment/analyze")
-async def analyze_sentiment_route(payload: Dict[str, Any]):
-    text = payload.get("text")
-    metadata = payload.get("metadata", {})
-    if not text:
-        raise HTTPException(status_code=400, detail="Text is required")
-    
-    result = sentiment_engine.analyze_sentiment(text, metadata)
-    return result
 
 import ai_reasoning
 
