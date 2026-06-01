@@ -60,7 +60,6 @@ export default function Dashboard({
     { id: 'rebalance', label: 'Rebalance', icon: <ArrowLeftRight size={16}/>, path: '/dashboard/rebalance' },
     { id: 'tax', label: 'Tax', icon: <ShieldCheck size={16}/>, path: '/dashboard/tax' },
     { id: 'ledger', label: 'Ledger', icon: <Receipt size={16}/>, path: '/dashboard/ledger' },
-    { id: 'goals', label: 'Goals', icon: <Target size={16}/>, path: '/dashboard/goals' },
     { id: 'stocks', label: 'Stocks', icon: <BarChart3 size={16}/>, path: '/dashboard/stocks' },
     { id: 'upload', label: 'Data', icon: <Upload size={16}/>, path: '/dashboard/upload' },
   ];

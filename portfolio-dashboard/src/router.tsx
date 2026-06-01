@@ -19,7 +19,6 @@ import SipAllocationView from './components/views/SipAllocationView';
 import RebalanceView from './components/views/RebalanceView';
 import TaxView from './components/views/TaxView';
 import LedgerView from './components/views/LedgerView';
-import GoalsView from './components/views/GoalsView';
 import CasUploadView from './components/views/CasUploadView';
 import StocksView from './components/views/StocksView';
 
@@ -159,12 +158,6 @@ const ledgerRoute = createRoute({
   },
 });
 
-const goalsRoute = createRoute({
-  getParentRoute: () => dashboardRoute,
-  path: 'goals',
-  component: () => <GoalsView />,
-});
-
 const uploadRoute = createRoute({
   getParentRoute: () => dashboardRoute,
   path: 'upload',
@@ -194,7 +187,6 @@ const routeTree = rootRoute.addChildren([
     rebalanceRoute,
     taxRoute,
     ledgerRoute,
-    goalsRoute,
     stocksRoute,
     uploadRoute,
   ]),

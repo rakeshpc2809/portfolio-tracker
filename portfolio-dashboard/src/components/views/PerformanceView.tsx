@@ -325,15 +325,6 @@ export default function PerformanceView({
     return end - start || 1;
   }, [historyRegimes]);
 
-  const regimeConsensus = useMemo(() => {
-    if (!portfolioData || !portfolioData.schemeBreakdown) return { bull: 0, neutral: 0, bear: 0, total: 0 };
-    const active = portfolioData.schemeBreakdown.filter((s: any) => s.allocationPercentage > 0.01);
-    const total = active.length;
-    const bull = active.filter((s: any) => s.hmmState === 'CALM_BULL').length;
-    const bear = active.filter((s: any) => s.hmmState === 'VOLATILE_BEAR').length;
-    const neutral = active.filter((s: any) => s.hmmState === 'STRESSED_NEUTRAL').length;
-    return { bull, neutral, bear, total };
-  }, [portfolioData]);
 
   if (isLoading) {
     return (
@@ -756,7 +747,7 @@ export default function PerformanceView({
                 legendPosition: 'middle',
                 legendOffset: -45
               }}
-              colors={d => d.color}
+              colors={(d: any) => d.color}
               nodeSize={node => Math.max(10, Math.min(30, (node.data.weight || 1) * 1.0))}
               useMesh={true}
               theme={{
