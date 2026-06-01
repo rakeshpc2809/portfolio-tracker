@@ -25,12 +25,15 @@ import lombok.EqualsAndHashCode;
 import lombok.NoArgsConstructor;
 import lombok.ToString;
 
+import org.hibernate.annotations.SoftDelete;
+
 @Entity
 @Table(name = "transaction")
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
+@SoftDelete
 public class Transaction {
 
     @Id

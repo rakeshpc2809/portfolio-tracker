@@ -86,7 +86,7 @@ public class PortfolioOrchestrator {
 
         Map<String, MarketMetrics> metricsMap = metricsRepo.fetchLiveMetricsMap(pan);
         List<StrategyTarget> targets = strategyService.fetchLatestStrategy();
-        double totalValue = holdings.stream().mapToDouble(AggregatedHolding::getCurrentValue).sum();
+        double totalValue = holdings.stream().mapToDouble(h -> h.getCurrentValue() != null ? h.getCurrentValue().doubleValue() : 0.0).sum();
 
         List<SipLineItem> plan = new ArrayList<>();
         for (StrategyTarget target : targets) {
@@ -107,7 +107,7 @@ public class PortfolioOrchestrator {
             double targetPct = target.targetPortfolioPct();
 
             AggregatedHolding h = holdingsByIsin.get(isin);
-            double currentVal = (h != null) ? h.getCurrentValue() : 0.0;
+            double currentVal = (h != null && h.getCurrentValue() != null) ? h.getCurrentValue().doubleValue() : 0.0;
 
             double cappedTargetPct = Math.min(targetPct, MAX_SINGLE_FUND_CONCENTRATION * 100);
             double targetValue = (cappedTargetPct / 100.0) * (totalValue + monthlySip);
@@ -279,7 +279,7 @@ public class PortfolioOrchestrator {
         List<AggregatedHolding> holdings = aggregationService.aggregate(openLots);
         Map<String, MarketMetrics> metricsMap = metricsRepo.fetchLiveMetricsMap(pan);
         List<StrategyTarget> targets = strategyService.fetchLatestStrategy();
-        double totalValue = holdings.stream().mapToDouble(AggregatedHolding::getCurrentValue).sum();
+        double totalValue = holdings.stream().mapToDouble(h -> h.getCurrentValue() != null ? h.getCurrentValue().doubleValue() : 0.0).sum();
 
         Double fyLtcgRealized = jdbcTemplate.queryForObject("""
             SELECT COALESCE(SUM(cg.realized_gain), 0)

@@ -1,6 +1,7 @@
 package com.oreki.cas_injector.convictionmetrics.model;
 
 import java.time.LocalDate;
+import java.math.BigDecimal;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -37,21 +38,21 @@ public class FundMetric {
     @Column(name = "scheme_name", length = 255)
     private String schemeName;
 
-    private Double nav;
+    private BigDecimal nav;
 
     @Column(name = "expense_ratio")
-    private Double expenseRatio;
+    private BigDecimal expenseRatio;
 
     @Column(name = "aum_cr")
-    private Double aumCr;
+    private BigDecimal aumCr;
 
     // Legacy/Unused columns still referenced by some native SQL
     @Column(name = "pe_ratio")
-    private Double peRatio;
+    private BigDecimal peRatio;
 
     @Column(name = "pb_ratio")
-    private Double pbRatio;
+    private BigDecimal pbRatio;
 
     @Column(name = "coverage_pct")
-    private Double coveragePct;
+    private BigDecimal coveragePct;
 }

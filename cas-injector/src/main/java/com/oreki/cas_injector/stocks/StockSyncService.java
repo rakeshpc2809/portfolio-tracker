@@ -6,11 +6,10 @@ import com.oreki.cas_injector.stocks.repository.StockRepository;
 import com.oreki.cas_injector.stocks.repository.StockPriceEodRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.http.HttpEntity;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.HttpMethod;
 import org.springframework.stereotype.Service;
-import org.springframework.web.client.RestTemplate;
+import org.springframework.web.client.RestClient;
+import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
+import io.github.resilience4j.retry.annotation.Retry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -27,13 +26,15 @@ public class StockSyncService {
 
     private final StockRepository stockRepo;
     private final StockPriceEodRepository priceRepo;
-    private final RestTemplate rest;
+    private final RestClient restClient = RestClient.create();
 
     @Value("${indstocks.api.base-url:https://api.indstocks.com}")
     private String baseUrl;
     @Value("${indstocks.api.token:}")
     private String token;
 
+    @CircuitBreaker(name = "indstocksService", fallbackMethod = "fallbackSyncLivePrices")
+    @Retry(name = "indstocksService")
     public int syncLivePrices(String pan) {
         List<Stock> stocks = stockRepo.findByFolioInvestorPan(pan);
         if (stocks.isEmpty()) return 0;
@@ -42,45 +43,45 @@ public class StockSyncService {
             .map(s -> s.getExchange() + "_" + s.getIsin())
             .collect(Collectors.joining(","));
 
-        log.info("🔄 Syncing live prices for {} stocks...", stocks.size());
+        log.info("🔄 Syncing live prices via RestClient for {} stocks...", stocks.size());
 
-        HttpHeaders headers = new HttpHeaders();
+        var requestSpec = restClient.get()
+            .uri(baseUrl + "/market/quotes/ltp?scrip-codes=" + codes);
+
         if (token != null && !token.isEmpty()) {
-            headers.set("Authorization", token);
+            requestSpec.header("Authorization", token);
         }
 
-        try {
-            var resp = rest.exchange(
-                baseUrl + "/market/quotes/ltp?scrip-codes=" + codes,
-                HttpMethod.GET, new HttpEntity<>(headers), Map.class);
-            
-            if (resp.getBody() == null || !resp.getBody().containsKey("data")) {
-                log.warn("Price sync API returned empty data");
-                return 0;
-            }
-            
-            Map<String, Object> data = (Map<String, Object>) resp.getBody().get("data");
-            LocalDate today = LocalDate.now();
-            int updatedCount = 0;
-
-            for (Stock stock : stocks) {
-                String lookupKey = stock.getExchange() + "_" + stock.getIsin();
-                if (data.containsKey(lookupKey)) {
-                    Map<String, Object> quote = (Map<String, Object>) data.get(lookupKey);
-                    double ltp = ((Number) quote.get("ltp")).doubleValue();
-
-                    priceRepo.save(StockPriceEod.builder()
-                            .ticker(stock.getTicker())
-                            .priceDate(today)
-                            .closePrice(BigDecimal.valueOf(ltp))
-                            .build());
-                    updatedCount++;
-                }
-            }
-            return updatedCount;
-        } catch (Exception e) {
-            log.error("Live price sync failed for codes {}: {}", codes, e.getMessage());
+        Map<?, ?> body = requestSpec.retrieve().body(Map.class);
+        
+        if (body == null || !body.containsKey("data")) {
+            log.warn("Price sync API returned empty data");
             return 0;
         }
+        
+        Map<String, Object> data = (Map<String, Object>) body.get("data");
+        LocalDate today = LocalDate.now();
+        int updatedCount = 0;
+
+        for (Stock stock : stocks) {
+            String lookupKey = stock.getExchange() + "_" + stock.getIsin();
+            if (data.containsKey(lookupKey)) {
+                Map<String, Object> quote = (Map<String, Object>) data.get(lookupKey);
+                double ltp = ((Number) quote.get("ltp")).doubleValue();
+
+                priceRepo.save(StockPriceEod.builder()
+                        .ticker(stock.getTicker())
+                        .priceDate(today)
+                        .closePrice(BigDecimal.valueOf(ltp))
+                        .build());
+                updatedCount++;
+            }
+        }
+        return updatedCount;
+    }
+
+    public int fallbackSyncLivePrices(String pan, Throwable t) {
+        log.warn("🛡️ Circuit breaker fallback activated for live price sync! Error: {}", t.getMessage());
+        return 0;
     }
 }

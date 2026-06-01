@@ -17,12 +17,14 @@ import lombok.Data;
 import lombok.EqualsAndHashCode;
 import lombok.NoArgsConstructor;
 import lombok.ToString;
+import org.hibernate.annotations.SoftDelete;
 
 @Entity
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
+@SoftDelete
 public class Folio {
     @Id @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;

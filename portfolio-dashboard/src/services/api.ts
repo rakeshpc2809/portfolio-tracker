@@ -87,7 +87,7 @@ export const uploadStockCsv = async (file: File, pan: string, source: string = '
   formData.append('pan', pan);
   formData.append('source', source);
 
-  const response = await authenticatedFetch(`${BASE_URL}/stocks/import`, {
+  const response = await authenticatedFetch(`${PARSER_URL}/api/upload`, {
     method: 'POST',
     body: formData,
   });

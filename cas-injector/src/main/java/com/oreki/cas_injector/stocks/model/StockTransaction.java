@@ -6,12 +6,15 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
 
+import org.hibernate.annotations.SoftDelete;
+
 @Entity
 @Table(name = "stock_transaction")
 @Data
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
+@SoftDelete
 public class StockTransaction {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)

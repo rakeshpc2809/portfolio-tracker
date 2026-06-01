@@ -521,9 +521,10 @@ async def health_check():
 
 # --- 6. STOCK ROUTES ---
 
-@app.post("/api/v1/stocks/parse-csv")
-async def parse_stocks_csv(
+@app.post("/api/upload")
+async def upload_stocks_file(
     file: UploadFile,
+    pan: str = Form(...),
     source: str = Form("INDMONEY_CSV")
 ):
     try:
@@ -534,10 +535,34 @@ async def parse_stocks_csv(
             records = parse_cdsl_statement(content)
         else:
             raise HTTPException(status_code=400, detail=f"Unsupported source: {source}")
-        
-        return {"status": "success", "transactions": records}
+
+        # Format dates as ISO string for JSON serialization
+        for r in records:
+            if isinstance(r.get("transaction_date"), (date, datetime)):
+                r["transaction_date"] = r["transaction_date"].isoformat()
+
+        # Post to Java backend
+        JAVA_BACKEND_URL = os.getenv("JAVA_BACKEND_URL", "http://java-backend:8080/api")
+        payload = {
+            "pan": pan,
+            "transactions": records
+        }
+
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                f"{JAVA_BACKEND_URL}/v1/ingest/normalized-transactions",
+                json=payload,
+                headers={"X-API-KEY": API_KEY},
+                timeout=60.0
+            )
+            if response.status_code == 200:
+                return response.json()
+            else:
+                logger.error(f"Java backend returned error: {response.status_code} - {response.text}")
+                raise HTTPException(status_code=500, detail=f"Java backend ingestion failed: {response.text}")
+
     except Exception as e:
-        logger.error(f"Stock CSV parsing failed: {e}")
+        logger.error(f"Upload and ingestion failed: {e}")
         raise HTTPException(status_code=400, detail=str(e))
 
 @app.post("/api/v1/stocks/rebuild-lots/{stock_id}")

@@ -1,9 +1,9 @@
 package com.oreki.cas_injector.domain.service;
 
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
-import java.util.ArrayList;
 import com.oreki.cas_injector.domain.model.TaxLotDomain;
 import com.oreki.cas_injector.domain.spec.TaxLotDomainSpecs;
 import com.oreki.cas_injector.core.dto.AggregatedHolding;
@@ -11,32 +11,43 @@ import com.oreki.cas_injector.core.dto.AggregatedHolding;
 public class AggregationDomainService {
 
     public AggregatedHolding aggregateSchemeLots(String schemeName, String isin, String category, double liveNav, List<TaxLotDomain> lots) {
-        double units = 0, cost = 0, val = 0, ltcgGains = 0, stcgGains = 0;
-        double ltcgVal = 0, stcgVal = 0;
+        BigDecimal units = BigDecimal.ZERO;
+        BigDecimal cost = BigDecimal.ZERO;
+        BigDecimal val = BigDecimal.ZERO;
+        BigDecimal ltcgGains = BigDecimal.ZERO;
+        BigDecimal stcgGains = BigDecimal.ZERO;
+        BigDecimal ltcgVal = BigDecimal.ZERO;
+        BigDecimal stcgVal = BigDecimal.ZERO;
+        BigDecimal liveNavDec = BigDecimal.valueOf(liveNav);
+
         int minDaysToLtcg = 1095;
         LocalDate oldest = LocalDate.now();
 
         for (TaxLotDomain lot : lots) {
-            double lUnits = lot.getRemainingUnits();
-            double lCost  = lot.getPurchasePrice() * lUnits;
-            double lVal   = lUnits * liveNav;
-            double gain   = lVal - lCost;
+            BigDecimal lUnits = BigDecimal.valueOf(lot.getRemainingUnits());
+            BigDecimal lPrice = BigDecimal.valueOf(lot.getPurchasePrice());
+            BigDecimal lCost  = lPrice.multiply(lUnits);
+            BigDecimal lVal   = lUnits.multiply(liveNavDec);
+            BigDecimal gain   = lVal.subtract(lCost);
 
-            units += lUnits; cost += lCost; val += lVal;
+            units = units.add(lUnits);
+            cost = cost.add(lCost);
+            val = val.add(lVal);
+
             if (lot.getPurchaseDate().isBefore(oldest)) oldest = lot.getPurchaseDate();
 
             if (TaxLotDomainSpecs.isDebt(category).isSatisfiedBy(lot)) {
-                stcgVal   += lVal;
-                stcgGains += Math.max(0, gain);
+                stcgVal   = stcgVal.add(lVal);
+                stcgGains = stcgGains.add(gain.max(BigDecimal.ZERO));
                 continue;
             }
 
             if (TaxLotDomainSpecs.isLtcgEligible(category).isSatisfiedBy(lot)) {
-                ltcgVal   += lVal;
-                ltcgGains += Math.max(0, gain);
+                ltcgVal   = ltcgVal.add(lVal);
+                ltcgGains = ltcgGains.add(gain.max(BigDecimal.ZERO));
             } else {
-                stcgVal   += lVal;
-                stcgGains += Math.max(0, gain);
+                stcgVal   = stcgVal.add(lVal);
+                stcgGains = stcgGains.add(gain.max(BigDecimal.ZERO));
 
                 int waitDays = 0;
                 if (TaxLotDomainSpecs.isEquity(category).isSatisfiedBy(lot)) waitDays = 365;
@@ -51,13 +62,14 @@ public class AggregationDomainService {
             }
         }
 
-        int finalDaysToNext = (stcgVal > 0 && minDaysToLtcg < 1095) ? minDaysToLtcg : 0;
+        int finalDaysToNext = (stcgVal.compareTo(BigDecimal.ZERO) > 0 && minDaysToLtcg < 1095) ? minDaysToLtcg : 0;
+        BigDecimal stcgTaxEst = stcgGains.multiply(BigDecimal.valueOf(0.20));
 
         return new AggregatedHolding(
             schemeName, units, val, cost,
             ltcgVal, ltcgGains, stcgVal, stcgGains,
             finalDaysToNext, (int) ChronoUnit.DAYS.between(oldest, LocalDate.now()),
-            category, "ACTIVE", isin, stcgGains * 0.20, liveNav
+            category, "ACTIVE", isin, stcgTaxEst, liveNavDec
         );
     }
 }

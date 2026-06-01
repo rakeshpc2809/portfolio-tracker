@@ -16,14 +16,24 @@ public class GoalController {
     private final GoalRepository goalRepo;
 
     @GetMapping
-    public List<PortfolioGoal> getGoals(@RequestHeader("X-PAN") String pan) {
+    public List<PortfolioGoal> getGoals() {
+        String pan = getPanFromSecurityContext();
         return goalRepo.findByInvestorPan(pan);
     }
 
     @PostMapping
-    public PortfolioGoal saveGoal(@RequestBody PortfolioGoal goal, @RequestHeader("X-PAN") String pan) {
+    public PortfolioGoal saveGoal(@RequestBody PortfolioGoal goal) {
+        String pan = getPanFromSecurityContext();
         goal.setInvestorPan(pan);
         return goalRepo.save(goal);
+    }
+
+    private String getPanFromSecurityContext() {
+        var auth = org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication();
+        if (auth == null || !auth.isAuthenticated() || auth.getPrincipal() == null) {
+            throw new org.springframework.security.authentication.BadCredentialsException("Unauthorized: Missing or invalid JWT token");
+        }
+        return auth.getName();
     }
 
     @DeleteMapping("/{id}")

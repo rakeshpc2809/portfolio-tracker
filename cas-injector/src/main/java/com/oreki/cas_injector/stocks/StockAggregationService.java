@@ -60,10 +60,22 @@ public class StockAggregationService {
             """;
 
         List<StockHoldingDTO> portfolio = jdbc.query(sql, (rs, rowNum) -> {
-            double currentVal = rs.getDouble("current_value");
-            double invested   = rs.getDouble("total_invested");
-            double uLtcg      = rs.getDouble("unrealised_ltcg");
-            double uStcg      = rs.getDouble("unrealised_stcg");
+            BigDecimal totalQty     = rs.getBigDecimal("total_qty") != null ? rs.getBigDecimal("total_qty") : BigDecimal.ZERO;
+            BigDecimal avgCost      = rs.getBigDecimal("avg_cost") != null ? rs.getBigDecimal("avg_cost") : BigDecimal.ZERO;
+            BigDecimal currentPrice = rs.getBigDecimal("current_price") != null ? rs.getBigDecimal("current_price") : BigDecimal.ZERO;
+            BigDecimal currentVal   = rs.getBigDecimal("current_value") != null ? rs.getBigDecimal("current_value") : BigDecimal.ZERO;
+            BigDecimal invested    = rs.getBigDecimal("total_invested") != null ? rs.getBigDecimal("total_invested") : BigDecimal.ZERO;
+            BigDecimal uLtcg       = rs.getBigDecimal("unrealised_ltcg") != null ? rs.getBigDecimal("unrealised_ltcg") : BigDecimal.ZERO;
+            BigDecimal uStcg       = rs.getBigDecimal("unrealised_stcg") != null ? rs.getBigDecimal("unrealised_stcg") : BigDecimal.ZERO;
+            
+            BigDecimal unrealisedPnl = currentVal.subtract(invested);
+            BigDecimal unrealisedPnlPct = BigDecimal.ZERO;
+            if (invested.compareTo(BigDecimal.ZERO) > 0) {
+                unrealisedPnlPct = unrealisedPnl.multiply(BigDecimal.valueOf(100)).divide(invested, 4, java.math.RoundingMode.HALF_UP);
+            }
+            
+            BigDecimal ltcgTax = uLtcg.max(BigDecimal.ZERO).multiply(BigDecimal.valueOf(0.125));
+            BigDecimal stcgTax = uStcg.max(BigDecimal.ZERO).multiply(BigDecimal.valueOf(0.20));
             
             return StockHoldingDTO.builder()
                 .ticker(rs.getString("ticker"))
@@ -71,17 +83,17 @@ public class StockAggregationService {
                 .companyName(rs.getString("company_name"))
                 .exchange(rs.getString("exchange"))
                 .sector(rs.getString("sector"))
-                .quantity(rs.getDouble("total_qty"))
-                .avgCostPerShare(rs.getDouble("avg_cost"))
-                .currentPrice(rs.getDouble("current_price"))
+                .quantity(totalQty)
+                .avgCostPerShare(avgCost)
+                .currentPrice(currentPrice)
                 .currentValue(currentVal)
                 .investedAmount(invested)
-                .unrealisedPnl(currentVal - invested)
-                .unrealisedPnlPct(invested > 0 ? (currentVal - invested) / invested * 100 : 0)
+                .unrealisedPnl(unrealisedPnl)
+                .unrealisedPnlPct(unrealisedPnlPct)
                 .unrealisedLtcg(uLtcg)
                 .unrealisedStcg(uStcg)
-                .ltcgTaxEstimate(Math.max(0, uLtcg) * 0.125)
-                .stcgTaxEstimate(Math.max(0, uStcg) * 0.20)
+                .ltcgTaxEstimate(ltcgTax)
+                .stcgTaxEstimate(stcgTax)
                 .build();
         }, pan);
 
@@ -100,19 +112,19 @@ public class StockAggregationService {
             String ticker = rs.getString("ticker");
             java.sql.Date date = rs.getDate("transaction_date");
             String type = rs.getString("transaction_type");
-            double amount = rs.getDouble("total_amount");
+            BigDecimal amount = rs.getBigDecimal("total_amount") != null ? rs.getBigDecimal("total_amount") : BigDecimal.ZERO;
 
             if (ticker != null && date != null && type != null) {
-                double flow = 0.0;
+                BigDecimal flow = BigDecimal.ZERO;
                 if ("BUY".equalsIgnoreCase(type)) {
-                    flow = -amount;
+                    flow = amount.negate();
                 } else if ("SELL".equalsIgnoreCase(type)) {
                     flow = amount;
                 } else {
                     return; // ignore non-cash events like splits/bonus for cash flow
                 }
                 stockTxns.computeIfAbsent(ticker, k -> new ArrayList<>())
-                    .add(new TransactionDTO(BigDecimal.valueOf(flow), date.toLocalDate()));
+                    .add(new TransactionDTO(flow, date.toLocalDate()));
             }
         }, pan);
 
@@ -120,14 +132,14 @@ public class StockAggregationService {
         for (StockHoldingDTO stock : portfolio) {
             List<TransactionDTO> txs = stockTxns.getOrDefault(stock.getTicker(), new ArrayList<>());
             List<TransactionDTO> cashFlows = new ArrayList<>(txs);
-            if (stock.getQuantity() > 0.0001) {
-                cashFlows.add(new TransactionDTO(BigDecimal.valueOf(stock.getCurrentValue()), LocalDate.now()));
+            if (stock.getQuantity() != null && stock.getQuantity().compareTo(BigDecimal.valueOf(0.0001)) > 0) {
+                cashFlows.add(new TransactionDTO(stock.getCurrentValue(), LocalDate.now()));
             }
             
-            double xirr = 0.0;
+            BigDecimal xirr = BigDecimal.ZERO;
             if (cashFlows.size() >= 2) {
                 try {
-                    xirr = CommonUtils.SOLVE_XIRR.apply(cashFlows).doubleValue();
+                    xirr = CommonUtils.SOLVE_XIRR.apply(cashFlows);
                 } catch (Exception e) {
                     log.warn("Failed to calculate XIRR for stock {}: {}", stock.getTicker(), e.getMessage());
                 }

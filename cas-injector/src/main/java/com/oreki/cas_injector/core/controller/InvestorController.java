@@ -15,16 +15,21 @@ import java.util.Map;
 public class InvestorController {
 
     private final InvestorRepository investorRepo;
+    private final com.oreki.cas_injector.core.config.JwtService jwtService;
 
     @GetMapping("/check/{pan}")
     public ResponseEntity<Map<String, String>> checkInvestor(@PathVariable String pan) {
         String cleanPan = pan.trim().toUpperCase();
         return investorRepo.findById(cleanPan)
-            .map(investor -> ResponseEntity.ok(Map.of(
-                "pan", investor.getPan(),
-                "name", investor.getName() != null ? investor.getName() : "Investor",
-                "email", investor.getEmail() != null ? investor.getEmail() : ""
-            )))
+            .map(investor -> {
+                String token = jwtService.generateToken(cleanPan);
+                return ResponseEntity.ok(Map.of(
+                    "pan", investor.getPan(),
+                    "name", investor.getName() != null ? investor.getName() : "Investor",
+                    "email", investor.getEmail() != null ? investor.getEmail() : "",
+                    "token", token
+                ));
+            })
             .orElse(ResponseEntity.notFound().build());
     }
 }

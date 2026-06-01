@@ -20,24 +20,6 @@ public class StockController {
     private final StockSyncService   syncSvc;
     private final StockAggregationService aggSvc;
 
-    @PostMapping("/import")
-    public ResponseEntity<?> importCsv(
-            @RequestParam("file") MultipartFile file,
-            @RequestParam("pan") String pan,
-            @RequestParam(value = "source", defaultValue = "INDMONEY_CSV") String source) {
-        try {
-            int count = importSvc.importFromCsv(file.getBytes(), pan, source);
-            Map<String, Object> resp = new HashMap<>();
-            resp.put("status", "success");
-            resp.put("imported", count);
-            return ResponseEntity.ok(resp);
-        } catch (Exception e) {
-            log.error("CSV import failed", e);
-            Map<String, String> err = new HashMap<>();
-            err.put("error", e.getMessage());
-            return ResponseEntity.badRequest().body(err);
-        }
-    }
 
     @DeleteMapping("/purge")
     public ResponseEntity<?> purgeData(@RequestParam("pan") String pan) {

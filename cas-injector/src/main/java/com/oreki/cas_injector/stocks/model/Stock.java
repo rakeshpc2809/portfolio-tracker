@@ -5,12 +5,15 @@ import jakarta.persistence.*;
 import lombok.*;
 import java.time.OffsetDateTime;
 
+import org.hibernate.annotations.SoftDelete;
+
 @Entity
 @Table(name = "stock")
 @Data
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
+@SoftDelete
 public class Stock {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)

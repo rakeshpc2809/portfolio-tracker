@@ -49,7 +49,7 @@ public class RebalanceEngine {
             this.metrics = metrics;
             this.req = req;
             this.amfiCode = amfiCode;
-            this.actualPct = req.totalPortfolioValue > 0 ? (holding.getCurrentValue() / req.totalPortfolioValue * 100.0) : 0.0;
+            this.actualPct = req.totalPortfolioValue > 0 ? ((holding.getCurrentValue() != null ? holding.getCurrentValue().doubleValue() : 0.0) / req.totalPortfolioValue * 100.0) : 0.0;
             this.targetPct = target.targetPortfolioPct();
             this.drift = this.actualPct - this.targetPct;
             
@@ -64,6 +64,12 @@ public class RebalanceEngine {
                 this.status = "ACTIVE";
             }
         }
+
+        double val() { return holding.getCurrentValue() != null ? holding.getCurrentValue().doubleValue() : 0.0; }
+        double ltcgG() { return holding.getLtcgAmount() != null ? holding.getLtcgAmount().doubleValue() : 0.0; }
+        double stcgG() { return holding.getStcgAmount() != null ? holding.getStcgAmount().doubleValue() : 0.0; }
+        double ltcgV() { return holding.getLtcgValue() != null ? holding.getLtcgValue().doubleValue() : 0.0; }
+        double stcgV() { return holding.getStcgValue() != null ? holding.getStcgValue().doubleValue() : 0.0; }
 
         TacticalSignal createSignal(String action, double amount, List<String> justifications) {
             return TacticalSignal.builder()
@@ -120,7 +126,7 @@ public class RebalanceEngine {
             return ("DROPPED".equals(ctx.status) || "EXIT".equals(ctx.status)) && "VOLATILE_BEAR".equals(ctx.metrics.hmmState());
         }
         public TacticalSignal evaluate(RebalanceContext ctx) {
-            return ctx.createSignal("EXIT", ctx.holding.getCurrentValue(), List.of("Beta Mitigation: VOLATILE_BEAR regime. Exiting immediately to reduce drawdown exposure."));
+            return ctx.createSignal("EXIT", ctx.val(), List.of("Beta Mitigation: VOLATILE_BEAR regime. Exiting immediately to reduce drawdown exposure."));
         }
     }
 
@@ -128,23 +134,23 @@ public class RebalanceEngine {
         public boolean canHandle(RebalanceContext ctx) {
             if (!("DROPPED".equals(ctx.status) || "EXIT".equals(ctx.status))) return false;
             double ltcgRemaining = Math.max(0.0, 125000.0 - ctx.req.fyLtcgAlreadyRealized);
-            return ctx.holding.getLtcgAmount() > 0 && ctx.holding.getStcgAmount() < 100 && ctx.holding.getLtcgAmount() <= ltcgRemaining;
+            return ctx.ltcgG() > 0 && ctx.stcgG() < 100 && ctx.ltcgG() <= ltcgRemaining;
         }
         public TacticalSignal evaluate(RebalanceContext ctx) {
-            return ctx.createSignal("EXIT", ctx.holding.getCurrentValue(), List.of(String.format("Tax-Free Exit: All unrealized gains (₹%.0f) are LTCG and fit within remaining FY exemption. Exiting NOW is tax-free.", ctx.holding.getLtcgAmount())));
+            return ctx.createSignal("EXIT", ctx.val(), List.of(String.format("Tax-Free Exit: All unrealized gains (₹%.0f) are LTCG and fit within remaining FY exemption. Exiting NOW is tax-free.", ctx.ltcgG())));
         }
     }
 
     private static class StcgShieldExitStrategy implements RebalanceStrategy {
         public boolean canHandle(RebalanceContext ctx) {
             if (!("DROPPED".equals(ctx.status) || "EXIT".equals(ctx.status))) return false;
-            return ctx.holding.getDaysToNextLtcg() > 0 && ctx.holding.getDaysToNextLtcg() <= 90 && ctx.holding.getStcgValue() > 1000;
+            return ctx.holding.getDaysToNextLtcg() > 0 && ctx.holding.getDaysToNextLtcg() <= 90 && ctx.stcgV() > 1000;
         }
         public TacticalSignal evaluate(RebalanceContext ctx) {
-            if (ctx.holding.getLtcgValue() > 1000) {
-                return ctx.createSignal("EXIT", ctx.holding.getLtcgValue(), List.of(
-                    String.format("Partial Strategic Exit: Selling LTCG portion (₹%,.0f).", ctx.holding.getLtcgValue()),
-                    String.format("STCG Shield: Holding remaining ₹%,.0f for %d days to avoid 20%% tax penalty.", ctx.holding.getStcgValue(), ctx.holding.getDaysToNextLtcg())
+            if (ctx.ltcgV() > 1000) {
+                return ctx.createSignal("EXIT", ctx.ltcgV(), List.of(
+                    String.format("Partial Strategic Exit: Selling LTCG portion (₹%,.0f).", ctx.ltcgV()),
+                    String.format("STCG Shield: Holding remaining ₹%,.0f for %d days to avoid 20%% tax penalty.", ctx.stcgV(), ctx.holding.getDaysToNextLtcg())
                 ));
             }
             return ctx.createSignal("HOLD", 0.0, List.of(String.format("STCG Shield: %d days to LTCG conversion. Holding to avoid 20%% STCG penalty.", ctx.holding.getDaysToNextLtcg())));
@@ -156,7 +162,7 @@ public class RebalanceEngine {
             return "DROPPED".equals(ctx.status) || "EXIT".equals(ctx.status);
         }
         public TacticalSignal evaluate(RebalanceContext ctx) {
-            return ctx.createSignal("EXIT", ctx.holding.getCurrentValue(), List.of("Strategic Exit: Exiting dropped fund."));
+            return ctx.createSignal("EXIT", ctx.val(), List.of("Strategic Exit: Exiting dropped fund."));
         }
     }
 
@@ -164,15 +170,15 @@ public class RebalanceEngine {
         public boolean canHandle(RebalanceContext ctx) {
             if ("ACCUMULATOR".equals(ctx.status)) return false;
             if (ctx.drift <= 2.5) return false;
-            return ctx.holding.getDaysToNextLtcg() > 0 && ctx.holding.getDaysToNextLtcg() <= 90 && ctx.holding.getStcgValue() > 1000;
+            return ctx.holding.getDaysToNextLtcg() > 0 && ctx.holding.getDaysToNextLtcg() <= 90 && ctx.stcgV() > 1000;
         }
         public TacticalSignal evaluate(RebalanceContext ctx) {
             double overweightVal = (ctx.drift / 100.0) * ctx.req.totalPortfolioValue;
-            if (ctx.holding.getLtcgValue() > 1000) {
-                double trimAmt = Math.min(overweightVal, ctx.holding.getLtcgValue());
+            if (ctx.ltcgV() > 1000) {
+                double trimAmt = Math.min(overweightVal, ctx.ltcgV());
                 return ctx.createSignal("SELL", trimAmt, List.of(
                     String.format("Strategic Trim: Reducing overweight position by selling LTCG portion (₹%,.0f).", trimAmt),
-                    String.format("STCG Shield: Protecting ₹%,.0f from STCG tax for %d days.", ctx.holding.getStcgValue(), ctx.holding.getDaysToNextLtcg())
+                    String.format("STCG Shield: Protecting ₹%,.0f from STCG tax for %d days.", ctx.stcgV(), ctx.holding.getDaysToNextLtcg())
                 ));
             }
             return ctx.createSignal("HOLD", 0.0, List.of(String.format("Overweight Shield: Fund is overweight by %.1f%%, but holding to avoid STCG tax on recent lots.", ctx.drift)));
@@ -221,10 +227,10 @@ public class RebalanceEngine {
         public boolean canHandle(RebalanceContext ctx) {
             if (Math.abs(ctx.drift) > 2.5) return false;
             double ltcgRemaining = Math.max(0.0, 125000.0 - ctx.req.fyLtcgAlreadyRealized);
-            return ctx.holding.getLtcgAmount() > 5000 && ctx.holding.getLtcgAmount() <= ltcgRemaining && ctx.holding.getStcgAmount() < 500;
+            return ctx.ltcgG() > 5000 && ctx.ltcgG() <= ltcgRemaining && ctx.stcgG() < 500;
         }
         public TacticalSignal evaluate(RebalanceContext ctx) {
-            return ctx.createSignal("WASH_SALE", ctx.holding.getCurrentValue(), List.of(String.format("Wash Sale Opportunity: Harvest ₹%.0f in tax-free LTCG.", ctx.holding.getLtcgAmount())));
+            return ctx.createSignal("WASH_SALE", ctx.val(), List.of(String.format("Wash Sale Opportunity: Harvest ₹%.0f in tax-free LTCG.", ctx.ltcgG())));
         }
     }
 
@@ -284,7 +290,7 @@ public class RebalanceEngine {
 
         for (StrategyTarget target : req.targets) {
             if (!heldIsins.contains(target.isin()) && target.targetPortfolioPct() > 0) {
-                AggregatedHolding holding = AggregatedHolding.builder().isin(target.isin()).schemeName(target.schemeName()).currentValue(0.0).ltcgAmount(0.0).stcgAmount(0.0).daysToNextLtcg(0).build();
+                AggregatedHolding holding = AggregatedHolding.builder().isin(target.isin()).schemeName(target.schemeName()).currentValue(java.math.BigDecimal.ZERO).ltcgAmount(java.math.BigDecimal.ZERO).stcgAmount(java.math.BigDecimal.ZERO).daysToNextLtcg(0).build();
                 String amfiCode = req.amfiMap.getOrDefault(target.isin(), "");
                 MarketMetrics metrics = req.metrics.getOrDefault(amfiCode, MarketMetrics.fromLegacy(50, 0, 0, 0, 0, 0.5, 0, 0, java.time.LocalDate.of(1970, 1, 1)));
                 
