@@ -152,11 +152,15 @@ public class PortfolioOrchestrator {
         return computeRebalancingTradesFromSignals(pan, evaluateAll(pan));
     }
 
-    private double parseSignalAmount(String amount) {
+    private BigDecimal parseSignalAmount(String amount) {
+        if (amount == null) {
+            return BigDecimal.ZERO;
+        }
         try {
-            return amount != null ? Double.parseDouble(amount.replace(",", "")) : 0.0;
+            return new BigDecimal(amount.trim().replace(",", ""));
         } catch (Exception e) {
-            return 0.0;
+            log.warn("Failed to parse signal amount: {}", amount);
+            return BigDecimal.ZERO;
         }
     }
 
@@ -192,11 +196,11 @@ public class PortfolioOrchestrator {
             log.warn("TLH scan failed: {}", e.getMessage());
         }
 
-        double totalHarvest = harvest.stream().mapToDouble(com.oreki.cas_injector.taxmanagement.dto.TlhOpportunity::estimatedTaxSaving).sum();
+        BigDecimal totalHarvest = BigDecimal.valueOf(harvest.stream().mapToDouble(com.oreki.cas_injector.taxmanagement.dto.TlhOpportunity::estimatedTaxSaving).sum());
 
-        double totalExitValue = exitQueue.stream()
-            .mapToDouble(s -> parseSignalAmount(s.amount()))
-            .sum();
+        BigDecimal totalExitValue = exitQueue.stream()
+            .map(s -> parseSignalAmount(s.amount()))
+            .reduce(BigDecimal.ZERO, BigDecimal::add);
 
         return UnifiedTacticalPayload.builder()
             .sipPlan(sip)
@@ -230,7 +234,7 @@ public class PortfolioOrchestrator {
         double slabRate = (slab != null) ? slab : 0.30;
 
         for (TacticalSignal sell : sells) {
-            double sellAmt = parseSignalAmount(sell.amount());
+            double sellAmt = parseSignalAmount(sell.amount()).doubleValue();
             
             // Accurate Tax Calculation
             List<TaxLot> fundLots = taxLotRepository.findByStatusAndSchemeAmfiCodeAndSchemeFolioInvestorPan(
@@ -251,7 +255,7 @@ public class PortfolioOrchestrator {
             if (!buys.isEmpty()) {
                 TacticalSignal bestBuy = buys.get(0);
                 buys.remove(0); 
-                double buyAmt = Math.min(parseSignalAmount(bestBuy.amount()), proceeds);
+                double buyAmt = Math.min(parseSignalAmount(bestBuy.amount()).doubleValue(), proceeds);
                 double convDelta = bestBuy.convictionScore() - sell.convictionScore();
                 double zDelta    = Math.abs(bestBuy.returnZScore()) - Math.abs(sell.returnZScore());
 
@@ -279,7 +283,9 @@ public class PortfolioOrchestrator {
         List<AggregatedHolding> holdings = aggregationService.aggregate(openLots);
         Map<String, MarketMetrics> metricsMap = metricsRepo.fetchLiveMetricsMap(pan);
         List<StrategyTarget> targets = strategyService.fetchLatestStrategy();
-        double totalValue = holdings.stream().mapToDouble(h -> h.getCurrentValue() != null ? h.getCurrentValue().doubleValue() : 0.0).sum();
+        BigDecimal totalValue = holdings.stream()
+            .map(h -> h.getCurrentValue() != null ? h.getCurrentValue() : BigDecimal.ZERO)
+            .reduce(BigDecimal.ZERO, BigDecimal::add);
 
         Double fyLtcgRealized = jdbcTemplate.queryForObject("""
             SELECT COALESCE(SUM(cg.realized_gain), 0)
@@ -300,6 +306,37 @@ public class PortfolioOrchestrator {
                 return (s != null) ? CommonUtils.SANITIZE_AMFI.apply(s.getAmfiCode()) : "";
             }, (a, b) -> a));
 
+        Map<String, MarketMetrics> mutableMetricsMap = new HashMap<>(metricsMap);
+        List<String> missingAmfiCodes = new ArrayList<>();
+
+        for (AggregatedHolding h : holdings) {
+            String amfi = nameToAmfiMap.get(h.getSchemeName());
+            if (amfi != null && !amfi.isEmpty()) {
+                if (!mutableMetricsMap.containsKey(amfi)) {
+                    mutableMetricsMap.put(amfi, MarketMetrics.defaultInstance());
+                    missingAmfiCodes.add(amfi);
+                }
+            }
+        }
+
+        for (StrategyTarget target : targets) {
+            String isin = target.isin();
+            String amfi = schemeRepository.findByIsin(isin)
+                .map(s -> CommonUtils.SANITIZE_AMFI.apply(s.getAmfiCode()))
+                .orElse("");
+            if (!amfi.isEmpty()) {
+                if (!mutableMetricsMap.containsKey(amfi)) {
+                    mutableMetricsMap.put(amfi, MarketMetrics.defaultInstance());
+                    missingAmfiCodes.add(amfi);
+                }
+            }
+        }
+
+        if (!missingAmfiCodes.isEmpty()) {
+            log.warn("⚠️ MarketMetrics not found in database for amfiCodes: {}. Fell back to default MarketMetrics.", 
+                missingAmfiCodes.stream().distinct().collect(Collectors.joining(", ")));
+        }
+
         String tailRisk = "LOW";
 
         RebalanceEngine.RebalanceRequest rebalanceReq = RebalanceEngine.RebalanceRequest.builder()
@@ -309,7 +346,7 @@ public class PortfolioOrchestrator {
             .tailRiskLevel(tailRisk)
             .holdings(holdings)
             .targets(targets)
-            .metrics(metricsMap)
+            .metrics(mutableMetricsMap)
             .amfiMap(nameToAmfiMap)
             .build();
             

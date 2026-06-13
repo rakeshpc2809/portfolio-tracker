@@ -12,9 +12,13 @@ public class AsyncConfig {
 
     @Bean(name = "mathEngineExecutor")
     public Executor taskExecutor() {
-        org.springframework.core.task.SimpleAsyncTaskExecutor executor = new org.springframework.core.task.SimpleAsyncTaskExecutor();
-        executor.setVirtualThreads(true);
-        executor.setThreadNamePrefix("math-engine-vt-");
+        // Sizing rationale: single-user local deployment; nightly batch jobs do not need high concurrency
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(2);
+        executor.setMaxPoolSize(4);
+        executor.setQueueCapacity(500);
+        executor.setThreadNamePrefix("math-engine-");
+        executor.initialize();
         return executor;
     }
 }

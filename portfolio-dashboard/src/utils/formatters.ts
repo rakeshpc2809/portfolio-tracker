@@ -135,3 +135,13 @@ export const buildReasoningMetadata = (signal: TacticalSignal): ReasoningMetadat
  */
 export const resolveReasoningMetadata = (signal: TacticalSignal): ReasoningMetadata =>
   signal.reasoningMetadata ?? buildReasoningMetadata(signal);
+
+export const formatPercentile = (value: number | null | undefined): string => {
+  if (value === null || value === undefined || isNaN(Number(value))) return "—";
+  return `${Math.round(Number(value) * 100)}%`;
+};
+
+export const formatScore = (value: number | null | undefined): string => {
+  if (value === null || value === undefined || isNaN(Number(value))) return "—";
+  return `${Math.round(Number(value))}`;
+};

@@ -24,7 +24,10 @@ import lombok.EqualsAndHashCode;
 import lombok.NoArgsConstructor;
 import lombok.ToString;
 
+import org.hibernate.annotations.SoftDelete;
+
 @Entity
+@SoftDelete
 @Data
 @NoArgsConstructor // Required by JPA
 @AllArgsConstructor // Required by Lombok @Builder

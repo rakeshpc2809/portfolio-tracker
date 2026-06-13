@@ -34,6 +34,6 @@ public class IndexFundamentals {
     private Double pe;
     private Double pb;
     private Double divYield;
-    @Column(name = "closing_price")
-    private Double closingPrice;
+    @Column(name = "closing_price", precision = 18, scale = 4)
+    private java.math.BigDecimal closingPrice;
 }

@@ -10,6 +10,8 @@ import lombok.Builder;
 import lombok.Data;
 import org.springframework.stereotype.Service;
 
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -23,7 +25,7 @@ public class RebalanceEngine {
     @Builder
     public static class RebalanceRequest {
         private String pan;
-        private double totalPortfolioValue;
+        private BigDecimal totalPortfolioValue;
         private double fyLtcgAlreadyRealized;
         private String tailRiskLevel;
         private List<AggregatedHolding> holdings;
@@ -49,7 +51,7 @@ public class RebalanceEngine {
             this.metrics = metrics;
             this.req = req;
             this.amfiCode = amfiCode;
-            this.actualPct = req.totalPortfolioValue > 0 ? ((holding.getCurrentValue() != null ? holding.getCurrentValue().doubleValue() : 0.0) / req.totalPortfolioValue * 100.0) : 0.0;
+            this.actualPct = req.totalPortfolioValue.compareTo(BigDecimal.ZERO) > 0 ? ((holding.getCurrentValue() != null ? holding.getCurrentValue() : BigDecimal.ZERO).divide(req.totalPortfolioValue, 6, RoundingMode.HALF_UP).multiply(BigDecimal.valueOf(100.0)).doubleValue()) : 0.0;
             this.targetPct = target.targetPortfolioPct();
             this.drift = this.actualPct - this.targetPct;
             
@@ -173,7 +175,7 @@ public class RebalanceEngine {
             return ctx.holding.getDaysToNextLtcg() > 0 && ctx.holding.getDaysToNextLtcg() <= 90 && ctx.stcgV() > 1000;
         }
         public TacticalSignal evaluate(RebalanceContext ctx) {
-            double overweightVal = (ctx.drift / 100.0) * ctx.req.totalPortfolioValue;
+            double overweightVal = (ctx.drift / 100.0) * ctx.req.totalPortfolioValue.doubleValue();
             if (ctx.ltcgV() > 1000) {
                 double trimAmt = Math.min(overweightVal, ctx.ltcgV());
                 return ctx.createSignal("SELL", trimAmt, List.of(
@@ -191,7 +193,7 @@ public class RebalanceEngine {
             return ctx.drift > 2.5;
         }
         public TacticalSignal evaluate(RebalanceContext ctx) {
-            double overweightVal = (ctx.drift / 100.0) * ctx.req.totalPortfolioValue;
+            double overweightVal = (ctx.drift / 100.0) * ctx.req.totalPortfolioValue.doubleValue();
             return ctx.createSignal("SELL", overweightVal, List.of(
                 String.format("Strategic Trim: Fund is overweight by %.1f%%.", ctx.drift),
                 String.format("Target: %.1f%% | Actual: %.1f%%", ctx.targetPct, ctx.actualPct),
@@ -214,7 +216,7 @@ public class RebalanceEngine {
             return ctx.drift < -2.5;
         }
         public TacticalSignal evaluate(RebalanceContext ctx) {
-            double deficitVal = Math.abs(ctx.drift / 100.0) * ctx.req.totalPortfolioValue;
+            double deficitVal = Math.abs(ctx.drift / 100.0) * ctx.req.totalPortfolioValue.doubleValue();
             return ctx.createSignal("BUY", deficitVal, List.of(
                 String.format("Strategic Realignment: Fund is underweight by %.1f%%.", Math.abs(ctx.drift)),
                 String.format("Target: %.1f%% | Actual: %.1f%%", ctx.targetPct, ctx.actualPct),
@@ -239,7 +241,7 @@ public class RebalanceEngine {
             return Math.abs(ctx.drift) <= 2.5 && ctx.metrics.hurstExponent() < 0.45 && ctx.metrics.rollingZScore252() < -1.5;
         }
         public TacticalSignal evaluate(RebalanceContext ctx) {
-            double amount = ctx.req.totalPortfolioValue * 0.01;
+            double amount = ctx.req.totalPortfolioValue.doubleValue() * 0.01;
             return ctx.createSignal("BUY", amount, List.of("Opportunistic Buy: Mean reversion trigger at statistical deep discount."));
         }
     }

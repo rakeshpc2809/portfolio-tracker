@@ -39,7 +39,7 @@ public class TaxLot {
     @JoinColumn(name = "transaction_id")
     private Transaction buyTransaction;
 
-    @ManyToOne(fetch = FetchType.LAZY)
+    @ManyToOne(fetch = FetchType.EAGER)
     @JoinColumn(name = "scheme_id")
     private Scheme scheme;
 

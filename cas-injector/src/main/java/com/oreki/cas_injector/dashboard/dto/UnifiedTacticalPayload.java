@@ -25,7 +25,7 @@ public class UnifiedTacticalPayload {
     private List<TlhOpportunity> harvestOpportunities; // TLH integrated
     private List<RebalancingTrade> rebalancingTrades;
     private List<DroppedFundSummary> droppedFundSummaries;
-    private double totalExitValue;
-    private double totalHarvestValue;                  
+    private java.math.BigDecimal totalExitValue;
+    private java.math.BigDecimal totalHarvestValue;                  
     private int droppedFundsCount;
 }

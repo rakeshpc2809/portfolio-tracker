@@ -122,6 +122,22 @@ public record MarketMetrics(
         ));
     }
 
+    public static MarketMetrics defaultInstance() {
+        return new MarketMetrics(
+            0, 0.0, 0.0, 0.0, 0.0, 0.5, 0.5, 0.0, 0.0, null, null,
+            50.0, 50.0, 50.0, 50.0, 50.0, 50.0, 50.0,
+            0.0, 0.0,
+            0.0,
+            0.5, // hurstExponent
+            0.0, // volatilityTax
+            "RANDOM_WALK", // hurstRegime
+            50.0, // historicalRarityPct
+            0.0, false, // OU defaults
+            "STRESSED_NEUTRAL", 0.33, 0.33, 0.33, // HMM defaults
+            0.0, 1.0, 0.0, 0.0, 0.0 // Attribution defaults
+        );
+    }
+
     private static int getSafeInt(Object obj) {
         if (obj == null) return 0;
         return ((Number) obj).intValue();

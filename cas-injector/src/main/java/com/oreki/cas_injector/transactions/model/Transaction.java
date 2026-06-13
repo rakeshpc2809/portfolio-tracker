@@ -58,7 +58,7 @@ public class Transaction {
     @Column(name = "transaction_type")
     private String transactionType; // BUY, SELL, STAMP_DUTY
 
-    @ManyToOne(fetch = FetchType.LAZY)
+    @ManyToOne(fetch = FetchType.EAGER)
     @JoinColumn(name = "scheme_id")
     @JsonIgnoreProperties({"transactions", "folio"}) // Stop the loop here
     @ToString.Exclude

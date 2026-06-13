@@ -2,6 +2,7 @@ package com.oreki.cas_injector.dashboard.event;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.math.BigDecimal;
 
 import org.springframework.context.event.EventListener;
 import org.springframework.transaction.event.TransactionPhase;
@@ -57,11 +58,11 @@ public class PortfolioSummaryUpdater {
             // 3. Update the Read Model Table
             PortfolioDashboardReadModel readModel = PortfolioDashboardReadModel.builder()
                 .investorPan(pan)
-                .totalValue(dashboard.getCurrentValueAmount().doubleValue())
-                .totalCost(dashboard.getCurrentInvestedAmount().doubleValue())
-                .totalGains(dashboard.getTotalUnrealizedGain().doubleValue())
-                .ltcgGains(dashboard.getTotalLTCG() != null ? dashboard.getTotalLTCG().doubleValue() : 0)
-                .stcgGains(dashboard.getTotalSTCG() != null ? dashboard.getTotalSTCG().doubleValue() : 0)
+                .totalValue(dashboard.getCurrentValueAmount())
+                .totalCost(dashboard.getCurrentInvestedAmount())
+                .totalGains(dashboard.getTotalUnrealizedGain())
+                .ltcgGains(dashboard.getTotalLTCG() != null ? dashboard.getTotalLTCG() : BigDecimal.ZERO)
+                .stcgGains(dashboard.getTotalSTCG() != null ? dashboard.getTotalSTCG() : BigDecimal.ZERO)
                 .content(json)
                 .lastUpdatedAt(LocalDateTime.now())
                 .build();

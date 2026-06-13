@@ -201,7 +201,7 @@ public class PortfolioFullService {
                 scheme.setCvar5(sig.cvar5());
                 scheme.setYieldScore(sig.yieldScore());
                 scheme.setRiskScore(sig.riskScore());
-                scheme.setValueScore(sig.valueScore());
+                scheme.setValueScore(BigDecimal.valueOf(sig.valueScore()));
                 scheme.setPainScore(sig.painScore());
                 scheme.setRegimeScore(sig.regimeScore());
                 scheme.setFrictionScore(sig.frictionScore());
@@ -233,9 +233,9 @@ public class PortfolioFullService {
             .filter(s -> !activeIsins.contains(s.getIsin()) && s.getCurrentValue().doubleValue() > 0)
             .forEach(s -> {
                 String philStatus = isinToStatus.getOrDefault(s.getIsin(), "DROPPED").toUpperCase();
-                double ltcg = s.getLtcgUnrealizedGain();
-                double stcg = s.getStcgUnrealizedGain();
-                double slabGain = s.getSlabRateGain();
+                double ltcg = s.getLtcgUnrealizedGain() != null ? s.getLtcgUnrealizedGain().doubleValue() : 0.0;
+                double stcg = s.getStcgUnrealizedGain() != null ? s.getStcgUnrealizedGain().doubleValue() : 0.0;
+                double slabGain = s.getSlabRateGain() != null ? s.getSlabRateGain().doubleValue() : 0.0;
                 int days = s.getDaysToNextLtcg();
                 double currentValue = s.getCurrentValue().doubleValue();
                 
@@ -328,27 +328,37 @@ public class PortfolioFullService {
 
     private void enrichWithMetricsAndTax(DashboardSummaryDTO summary, String pan) {
         // 1. Fetch Metrics
-        String metricsSql = "SELECT m.amfi_code, m.conviction_score, m.sortino_ratio, m.max_drawdown, " +
-                           "m.cvar_5, m.win_rate, m.nav_percentile_1yr, m.nav_percentile_3yr, m.drawdown_from_ath, m.return_z_score, " +
-                           "m.yield_score, m.risk_score, m.value_score, m.pain_score, m.friction_score, " +
-                           "m.regime_score, m.expense_score, fm.expense_ratio, fm.aum_cr " +
-                           "FROM fund_conviction_metrics m " +
-                           "LEFT JOIN ( " +
-                           "    SELECT DISTINCT ON (scheme_code) scheme_code, expense_ratio, aum_cr " +
-                           "    FROM fund_metrics " +
-                           "    ORDER BY scheme_code, fetch_date DESC " +
-                           ") fm ON LTRIM(fm.scheme_code, '0') = LTRIM(m.amfi_code, '0') " +
-                           "WHERE m.calculation_date = (SELECT MAX(calculation_date) FROM fund_conviction_metrics)";
-        
-        Map<String, Map<String, Object>> metrics = jdbcTemplate.queryForList(metricsSql).stream()
-            .collect(Collectors.toMap(m -> CommonUtils.SANITIZE_AMFI.apply((String) m.get("amfi_code")), m -> m, (m1, m2) -> m1));
+        Map<String, Map<String, Object>> tempMetrics = new HashMap<>();
+        try {
+            String metricsSql = "SELECT m.amfi_code, m.conviction_score, m.sortino_ratio, m.max_drawdown, " +
+                               "m.cvar_5, m.win_rate, m.nav_percentile_1yr, m.nav_percentile_3yr, m.drawdown_from_ath, m.return_z_score, " +
+                               "m.yield_score, m.risk_score, m.value_score, m.pain_score, m.friction_score, " +
+                               "m.regime_score, m.expense_score, fm.expense_ratio, fm.aum_cr " +
+                               "FROM fund_conviction_metrics m " +
+                               "LEFT JOIN ( " +
+                               "    SELECT DISTINCT ON (scheme_code) scheme_code, expense_ratio, aum_cr " +
+                               "    FROM fund_metrics " +
+                               "    ORDER BY scheme_code, fetch_date DESC " +
+                               ") fm ON LTRIM(fm.scheme_code, '0') = LTRIM(m.amfi_code, '0') " +
+                               "WHERE m.calculation_date = (SELECT MAX(calculation_date) FROM fund_conviction_metrics)";
+            
+            tempMetrics = jdbcTemplate.queryForList(metricsSql).stream()
+                .collect(Collectors.toMap(m -> CommonUtils.SANITIZE_AMFI.apply((String) m.get("amfi_code")), m -> m, (m1, m2) -> m1));
+        } catch (Exception e) {
+            log.warn("⚠️ Failed to query fund conviction metrics: {}", e.getMessage());
+        }
+        final Map<String, Map<String, Object>> metrics = tempMetrics;
 
         // 1.1 Fetch Conviction History (Last 30 days)
         Map<String, List<Integer>> historyMap = new HashMap<>();
-        jdbcTemplate.query("SELECT amfi_code, conviction_score FROM fund_conviction_metrics WHERE calculation_date >= CURRENT_DATE - INTERVAL '30 days' ORDER BY amfi_code, calculation_date ASC", (rs) -> {
-            String amfi = CommonUtils.SANITIZE_AMFI.apply(rs.getString("amfi_code"));
-            historyMap.computeIfAbsent(amfi, k -> new ArrayList<>()).add(rs.getInt("conviction_score"));
-        });
+        try {
+            jdbcTemplate.query("SELECT amfi_code, conviction_score FROM fund_conviction_metrics WHERE calculation_date >= CURRENT_DATE - INTERVAL '30 days' ORDER BY amfi_code, calculation_date ASC", (rs) -> {
+                String amfi = CommonUtils.SANITIZE_AMFI.apply(rs.getString("amfi_code"));
+                historyMap.computeIfAbsent(amfi, k -> new ArrayList<>()).add(rs.getInt("conviction_score"));
+            });
+        } catch (Exception e) {
+            log.warn("⚠️ Failed to query conviction history: {}", e.getMessage());
+        }
 
         // 2. Fetch Open Lots for Tax countdown
         List<TaxLot> allLots = taxLotRepository.findByStatusAndSchemeFolioInvestorPan("OPEN", pan);
@@ -382,7 +392,7 @@ public class PortfolioFullService {
                 
                 scheme.setYieldScore(getSafeDouble(fundMetrics.get("yield_score")));
                 scheme.setRiskScore(getSafeDouble(fundMetrics.get("risk_score")));
-                scheme.setValueScore(getSafeDouble(fundMetrics.get("value_score")));
+                scheme.setValueScore(BigDecimal.valueOf(getSafeDouble(fundMetrics.get("value_score"))));
                 scheme.setPainScore(getSafeDouble(fundMetrics.get("pain_score")));
                 scheme.setRegimeScore(getSafeDouble(fundMetrics.get("regime_score")));
                 scheme.setFrictionScore(getSafeDouble(fundMetrics.get("friction_score")));

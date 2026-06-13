@@ -131,164 +131,138 @@ public class DashboardService {
 
         List<TransactionDTO> totalCashFlow = new ArrayList<>();
 
-        List<SchemePerformanceDTO> breakdown = txsBySchemeId.entrySet().stream()
-            .map(entry -> {
-                Long schemeId = entry.getKey();
-                List<PortfolioSummary> txs = entry.getValue();
-                PortfolioSummary info = txs.get(0);
-                
-                String code = CommonUtils.SANITIZE_AMFI.apply(info.getAmfiCode());
-                List<TaxLot> openLots = openLotsBySchemeId.getOrDefault(schemeId, Collections.emptyList());
-                List<CapitalGainAudit> audits = auditMapBySchemeId.getOrDefault(schemeId, Collections.emptyList());
-                Map<LocalDate, BigDecimal> schemeNavHistory = navHistoryMap.getOrDefault(code, Collections.emptyMap());
+        List<SchemePerformanceDTO> breakdown = new ArrayList<>();
+        
+        for (Map.Entry<Long, List<PortfolioSummary>> entry : txsBySchemeId.entrySet()) {
+            Long schemeId = entry.getKey();
+            List<PortfolioSummary> txs = entry.getValue();
+            PortfolioSummary info = txs.get(0);
+            
+            String code = CommonUtils.SANITIZE_AMFI.apply(info.getAmfiCode());
+            List<TaxLot> openLots = openLotsBySchemeId.getOrDefault(schemeId, Collections.emptyList());
+            List<CapitalGainAudit> audits = auditMapBySchemeId.getOrDefault(schemeId, Collections.emptyList());
+            Map<LocalDate, BigDecimal> schemeNavHistory = navHistoryMap.getOrDefault(code, Collections.emptyMap());
 
-                // Value aggregation
-                BigDecimal unitsHeld = openLots.stream()
-                    .map(TaxLot::getRemainingUnits)
-                    .reduce(BigDecimal.ZERO, BigDecimal::add);
+            // Value aggregation
+            BigDecimal unitsHeld = openLots.stream()
+                .map(TaxLot::getRemainingUnits)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
 
-                BigDecimal currentInvested = openLots.stream()
-                    .map(lot -> lot.getRemainingUnits().multiply(lot.getCostBasisPerUnit()))
-                    .reduce(BigDecimal.ZERO, BigDecimal::add);
+            BigDecimal currentInvested = openLots.stream()
+                .map(lot -> lot.getRemainingUnits().multiply(lot.getCostBasisPerUnit()))
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
 
-                SchemeDetailsDTO schemeDetails = navService.getLatestSchemeDetails(info.getAmfiCode());
-                BigDecimal currentNav = schemeDetails.getNav();
-                
-                BigDecimal currentValue = unitsHeld.multiply(currentNav).setScale(2, RoundingMode.HALF_UP);
-                BigDecimal unrealizedGain = currentValue.subtract(currentInvested);
+            SchemeDetailsDTO schemeDetails = navService.getLatestSchemeDetails(info.getAmfiCode());
+            BigDecimal currentNav = schemeDetails.getNav();
+            
+            BigDecimal currentValue = unitsHeld.multiply(currentNav).setScale(2, RoundingMode.HALF_UP);
+            BigDecimal unrealizedGain = currentValue.subtract(currentInvested);
 
-                BigDecimal realizedGain = audits.stream()
-                    .map(CapitalGainAudit::getRealizedGain)
-                    .reduce(BigDecimal.ZERO, BigDecimal::add);
+            BigDecimal realizedGain = audits.stream()
+                .map(CapitalGainAudit::getRealizedGain)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
 
-                // Tax calculations (Simplified for dashboard)
-                String amfiCategory = (schemeDetails.getCategory() != null) ? schemeDetails.getCategory().toUpperCase() : "OTHER";
-                openLots = taxLotRepo.findByStatusAndSchemeAmfiCodeAndSchemeFolioInvestorPan("OPEN", code, pan);
-                double ltcgUnrealized = 0;
-                double stcgUnrealized = 0;
-                double slabRateUnrealized = 0;
-                boolean hasSlabRateLots = false;
+            // Tax calculations (Simplified for dashboard)
+            String amfiCategory = (schemeDetails.getCategory() != null) ? schemeDetails.getCategory().toUpperCase() : "OTHER";
+            openLots = taxLotRepo.findByStatusAndSchemeAmfiCodeAndSchemeFolioInvestorPan("OPEN", code, pan);
+            BigDecimal ltcgUnrealized = BigDecimal.ZERO;
+            BigDecimal stcgUnrealized = BigDecimal.ZERO;
+            BigDecimal slabRateUnrealized = BigDecimal.ZERO;
+            boolean hasSlabRateLots = false;
 
-                for (TaxLot lot : openLots) {
-                    double lotVal = lot.getRemainingUnits().doubleValue() * currentNav.doubleValue();
-                    double lotCost = lot.getRemainingUnits().doubleValue() * lot.getCostBasisPerUnit().doubleValue();
-                    double lotGain = Math.max(0, lotVal - lotCost);
+            for (TaxLot lot : openLots) {
+                BigDecimal lotVal = lot.getRemainingUnits().multiply(currentNav).setScale(4, RoundingMode.HALF_UP);
+                BigDecimal lotCost = lot.getRemainingUnits().multiply(lot.getCostBasisPerUnit()).setScale(4, RoundingMode.HALF_UP);
+                BigDecimal lotGain = lotVal.subtract(lotCost);
+                if (lotGain.compareTo(BigDecimal.ZERO) < 0) {
+                    lotGain = BigDecimal.ZERO;
+                }
 
-                    String taxCat = CommonUtils.DETERMINE_TAX_CATEGORY.apply(lot.getBuyDate(), LocalDate.now(), amfiCategory);
-                    if (taxCat.contains("LTCG")) {
-                        ltcgUnrealized += lotGain;
-                    } else if (taxCat.equals("SLAB_RATE_TAX")) {
-                        slabRateUnrealized += lotGain;
-                        hasSlabRateLots = true;
+                String taxCat = CommonUtils.DETERMINE_TAX_CATEGORY.apply(lot.getBuyDate(), LocalDate.now(), amfiCategory);
+                if (taxCat.contains("LTCG")) {
+                    ltcgUnrealized = ltcgUnrealized.add(lotGain);
+                } else if (taxCat.equals("SLAB_RATE_TAX")) {
+                    slabRateUnrealized = slabRateUnrealized.add(lotGain);
+                    hasSlabRateLots = true;
+                } else {
+                    stcgUnrealized = stcgUnrealized.add(lotGain);
+                }
+            }
+
+            BigDecimal unrealizedGainObj = ltcgUnrealized.add(stcgUnrealized).add(slabRateUnrealized).setScale(2, RoundingMode.HALF_UP);
+
+            // Cash flows for XIRR
+            List<TransactionDTO> cashFlows = txs.stream()
+                .filter(t -> !"DIVIDEND_REINVESTMENT".equalsIgnoreCase(t.getTransactionType()))
+                .map(t -> {
+                    String type = t.getTransactionType().toUpperCase();
+                    boolean isOutflow;
+                    if (t.getUnits() != null && t.getUnits().abs().compareTo(new BigDecimal("0.0001")) > 0) {
+                        isOutflow = t.getUnits().compareTo(BigDecimal.ZERO) > 0;
                     } else {
-                        stcgUnrealized += lotGain;
+                        isOutflow = type.contains("BUY") || type.contains("PURCHASE") || 
+                                   type.contains("SWITCH_IN") || type.contains("STAMP") || 
+                                   type.contains("STT") || type.contains("TDS");
                     }
-                }
 
-                BigDecimal unrealizedGainObj = BigDecimal.valueOf(ltcgUnrealized + stcgUnrealized + slabRateUnrealized);
+                    BigDecimal preciseAmount;
+                    if (t.getUnits() != null && t.getUnits().abs().compareTo(new BigDecimal("0.0001")) > 0) {
+                        preciseAmount = Optional.ofNullable(schemeNavHistory.get(t.getTransactionDate()))
+                            .map(nav -> nav.multiply(t.getUnits().abs()))
+                            .orElse(t.getAmount().abs());
+                    } else {
+                        preciseAmount = t.getAmount().abs();
+                    }
+                    
+                    BigDecimal flow = isOutflow ? preciseAmount.negate() : preciseAmount;
+                    return new TransactionDTO(flow, t.getTransactionDate());
+                })
+                .collect(Collectors.toList());
+                            
+            totalCashFlow.addAll(cashFlows);
+            cashFlows.sort(Comparator.comparing(TransactionDTO::getDate));
 
-                // Cash flows for XIRR
-                List<TransactionDTO> cashFlows = txs.stream()
-                    .filter(t -> !"DIVIDEND_REINVESTMENT".equalsIgnoreCase(t.getTransactionType()))
-                    .map(t -> {
-                        String type = t.getTransactionType().toUpperCase();
-                                // Determine if it's an outflow (investment/cost) or inflow (redemption/gain)
-                        // If units exist and are non-zero, the sign of units tells the story.
-                        // Positive units = Purchase (Outflow from pocket)
-                        // Negative units = Sale (Inflow to pocket)
-                        boolean isOutflow;
-                        if (t.getUnits() != null && t.getUnits().abs().compareTo(new BigDecimal("0.0001")) > 0) {
-                            isOutflow = t.getUnits().compareTo(BigDecimal.ZERO) > 0;
-                        } else {
-                            // Fallback to type for charges (units=0)
-                            isOutflow = type.contains("BUY") || type.contains("PURCHASE") || 
-                                       type.contains("SWITCH_IN") || type.contains("STAMP") || 
-                                       type.contains("STT") || type.contains("TDS");
-                        }
+            FundStatus status = (unitsHeld.compareTo(new BigDecimal("0.001")) > 0) ? FundStatus.ACTIVE : FundStatus.REDEEMED;
+            if (status == FundStatus.ACTIVE) {
+                cashFlows.add(new TransactionDTO(currentValue, LocalDate.now()));
+            }
+          
+            BigDecimal xirrValue = CommonUtils.SOLVE_XIRR.apply(cashFlows);
+            String displayXirr = CommonUtils.SCALE_MONEY.apply(xirrValue).toString() + "%";
 
-                        // Precise amount calculation: NAV * Units if units exist, else fallback to Amount
-                        BigDecimal preciseAmount;
-                        if (t.getUnits() != null && t.getUnits().abs().compareTo(new BigDecimal("0.0001")) > 0) {
-                            preciseAmount = Optional.ofNullable(schemeNavHistory.get(t.getTransactionDate()))
-                                .map(nav -> nav.multiply(t.getUnits().abs()))
-                                .orElse(t.getAmount().abs());
-                        } else {
-                            preciseAmount = t.getAmount().abs();
-                        }
-                        
-                        BigDecimal flow = isOutflow ? preciseAmount.negate() : preciseAmount;
-                        return new TransactionDTO(flow, t.getTransactionDate());
-                    })
-                    .collect(Collectors.toList());
-                                
-                totalCashFlow.addAll(cashFlows);
-                cashFlows.sort(Comparator.comparing(TransactionDTO::getDate));
+            String bucket = "OTHERS";
+            if (amfiCategory.contains("ELSS") || amfiCategory.contains("TAX")) bucket = "TAX_SAVER_ELSS";
+            else if (amfiCategory.contains("GOLD") || info.getSchemeName().toUpperCase().contains("GOLD")) bucket = "GOLD_HEDGE_24M";
+            else if (amfiCategory.contains("EQUITY") || amfiCategory.contains("INDEX") || amfiCategory.contains("GROWTH")) bucket = "AGGRESSIVE_GROWTH";
+            else if (amfiCategory.contains("DEBT") || amfiCategory.contains("LIQUID")) bucket = "DEBT_SLAB_TAXED";
 
-                FundStatus status = (unitsHeld.compareTo(new BigDecimal("0.001")) > 0) ? FundStatus.ACTIVE : FundStatus.REDEEMED;
-                if (status == FundStatus.ACTIVE) {
-                    cashFlows.add(new TransactionDTO(currentValue, LocalDate.now()));
-                }
-              
-                BigDecimal xirrValue = CommonUtils.SOLVE_XIRR.apply(cashFlows);
-                String displayXirr = CommonUtils.SCALE_MONEY.apply(xirrValue).toString() + "%";
+            SchemePerformanceDTO dto = SchemePerformanceDTO.builder()
+                .schemeName(info.getSchemeName())
+                .simpleName(CommonUtils.NORMALIZE_NAME.apply(info.getSchemeName()))
+                .isin(info.getIsin())
+                .amfiCode(info.getAmfiCode())
+                .totalInvested(txs.stream().filter(t -> t.getUnits().compareTo(BigDecimal.ZERO) > 0).map(PortfolioSummary::getAmount).reduce(BigDecimal.ZERO, BigDecimal::add))
+                .currentInvested(currentInvested)
+                .currentValue(currentValue)
+                .realizedGain(realizedGain)
+                .unrealizedGain(unrealizedGainObj)
+                .ltcgUnrealizedGain(ltcgUnrealized.setScale(2, RoundingMode.HALF_UP))
+                .stcgUnrealizedGain(stcgUnrealized.setScale(2, RoundingMode.HALF_UP))
+                .slabRateGain(slabRateUnrealized.setScale(2, RoundingMode.HALF_UP))
+                .stcgValue(stcgUnrealized.setScale(2, RoundingMode.HALF_UP))
+                .ltcgValue(ltcgUnrealized.setScale(2, RoundingMode.HALF_UP))
+                .isSlabRateFund(hasSlabRateLots)
+                .transactionCount(txs.size())
+                .xirr(displayXirr)
+                .status(status)
+                .action("HOLD")
+                .category(amfiCategory)
+                .bucket(bucket)
+                .amc(info.getAmc())
+                .build();
 
-                String bucket = "OTHERS";
-                if (amfiCategory.contains("ELSS") || amfiCategory.contains("TAX")) bucket = "TAX_SAVER_ELSS";
-                else if (amfiCategory.contains("GOLD") || info.getSchemeName().toUpperCase().contains("GOLD")) bucket = "GOLD_HEDGE_24M";
-                else if (amfiCategory.contains("EQUITY") || amfiCategory.contains("INDEX") || amfiCategory.contains("GROWTH")) bucket = "AGGRESSIVE_GROWTH";
-                else if (amfiCategory.contains("DEBT") || amfiCategory.contains("LIQUID")) bucket = "DEBT_SLAB_TAXED";
-
-                Double benchXirr = benchmarkService.getBenchmarkReturn(bucket, amfiCategory, info.getSchemeName());
-                MarketMetrics m = metricsMap.getOrDefault(code, MarketMetrics.fromLegacy(50, 0, 0, 0, 0, 0.5, 0, 0, LocalDate.of(1970, 1, 1)));
-
-                return SchemePerformanceDTO.builder()
-                    .schemeName(info.getSchemeName())
-                    .simpleName(CommonUtils.NORMALIZE_NAME.apply(info.getSchemeName()))
-                    .isin(info.getIsin())
-                    .amfiCode(info.getAmfiCode())
-                    .totalInvested(txs.stream().filter(t -> t.getUnits().compareTo(BigDecimal.ZERO) > 0).map(PortfolioSummary::getAmount).reduce(BigDecimal.ZERO, BigDecimal::add))
-                    .currentInvested(currentInvested)
-                    .currentValue(currentValue)
-                    .realizedGain(realizedGain)
-                    .unrealizedGain(unrealizedGainObj)
-                    .ltcgUnrealizedGain(ltcgUnrealized)
-                    .stcgUnrealizedGain(stcgUnrealized)
-                    .slabRateGain(slabRateUnrealized)
-                    .isSlabRateFund(hasSlabRateLots)
-                    .transactionCount(txs.size())
-                    .xirr(displayXirr)
-                    .benchmarkXirr(benchXirr)
-                    .status(status)
-                    .action("HOLD")
-                    .category(amfiCategory)
-                    .bucket(bucket)
-                    .amc(info.getAmc())
-                    .convictionScore(m.convictionScore())
-                    .sortinoRatio(m.sortinoRatio())
-                    .maxDrawdown(m.maxDrawdown())
-                    .cvar5(m.cvar5())
-                    .navPercentile3yr(m.navPercentile3yr())
-                    .drawdownFromAth(m.drawdownFromAth())
-                    .returnZScore(m.returnZScore())
-                    .lastBuyDate(m.lastBuyDate())
-                    .rollingZScore252(m.rollingZScore252())
-                    .hurstExponent(m.hurstExponent())
-                    .volatilityTax(m.volatilityTax())
-                    .hurstRegime(m.hurstRegime())
-                    .historicalRarityPct(m.historicalRarityPct())
-                    .ouHalfLife(m.ouHalfLife())
-                    .ouValid(m.ouValid())
-                    .hmmState(m.hmmState())
-                    .hmmBullProb(m.hmmBullProb())
-                    .hmmBearProb(m.hmmBearProb())
-                    .alpha(m.alpha())
-                    .betaMkt(m.betaMkt())
-                    .betaSmb(m.betaSmb())
-                    .betaHml(m.betaHml())
-                    .rSquared(m.rSquared())
-                    .build();
-            })
-            .collect(Collectors.toList());
+            breakdown.add(dto);
+        }
 
         // --- MERGE STOCKS ---
         List<StockHoldingDTO> stocks = stockAggSvc.getPortfolio(pan);
@@ -303,8 +277,11 @@ public class DashboardService {
                 .currentValue(stock.getCurrentValue())
                 .realizedGain(BigDecimal.ZERO)
                 .unrealizedGain(stock.getUnrealisedPnl())
-                .ltcgUnrealizedGain(stock.getUnrealisedLtcg() != null ? stock.getUnrealisedLtcg().doubleValue() : 0.0)
-                .stcgUnrealizedGain(stock.getUnrealisedStcg() != null ? stock.getUnrealisedStcg().doubleValue() : 0.0)
+                .ltcgUnrealizedGain(stock.getUnrealisedLtcg() != null ? stock.getUnrealisedLtcg() : BigDecimal.ZERO)
+                .stcgUnrealizedGain(stock.getUnrealisedStcg() != null ? stock.getUnrealisedStcg() : BigDecimal.ZERO)
+                .stcgValue(stock.getUnrealisedStcg() != null ? stock.getUnrealisedStcg() : BigDecimal.ZERO)
+                .ltcgValue(stock.getUnrealisedLtcg() != null ? stock.getUnrealisedLtcg() : BigDecimal.ZERO)
+                .valueScore(BigDecimal.valueOf(60.0))
                 .transactionCount(1) // Aggregated
                 .xirr(CommonUtils.SCALE_MONEY.apply(stock.getXirr() != null ? stock.getXirr() : BigDecimal.ZERO) + "%")
                 .status(FundStatus.ACTIVE)
@@ -316,9 +293,71 @@ public class DashboardService {
                 .build());
         }
 
-        double totalValue = breakdown.stream()
-            .mapToDouble(s -> s.getCurrentValue() != null ? s.getCurrentValue().doubleValue() : 0.0)
-            .sum();
+        // --- ALLOCATION PERCENTAGE & METRICS ENRICHMENT ---
+        BigDecimal totalPortfolioValue = breakdown.stream()
+            .map(SchemePerformanceDTO::getCurrentValue)
+            .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+        for (SchemePerformanceDTO dto : breakdown) {
+            BigDecimal allocatedPct = BigDecimal.ZERO;
+            if (totalPortfolioValue.compareTo(BigDecimal.ZERO) > 0) {
+                allocatedPct = dto.getCurrentValue().multiply(new BigDecimal("100"))
+                    .divide(totalPortfolioValue, 4, RoundingMode.HALF_UP);
+            }
+            dto.setAllocationPercentage(allocatedPct.doubleValue());
+
+            if ("Direct Stock".equals(dto.getCategory())) {
+                continue;
+            }
+            String code = CommonUtils.SANITIZE_AMFI.apply(dto.getAmfiCode());
+
+            // Enrich with Benchmark return
+            Double benchXirr = null;
+            try {
+                benchXirr = benchmarkService.getBenchmarkReturn(dto.getBucket(), dto.getCategory(), dto.getSchemeName());
+            } catch (Exception e) {
+                log.warn("⚠️ Failed to get benchmark return for scheme: {}, error: {}", dto.getSchemeName(), e.getMessage());
+            }
+            dto.setBenchmarkXirr(benchXirr);
+
+            // Enrich with Conviction & Quantitative Metrics
+            try {
+                MarketMetrics m = metricsMap.get(code);
+                if (m != null) {
+                    dto.setValueScore(BigDecimal.valueOf(m.valueScore()));
+                    dto.setConvictionScore(m.convictionScore());
+                    dto.setSortinoRatio(m.sortinoRatio());
+                    dto.setMaxDrawdown(m.maxDrawdown());
+                    dto.setCvar5(m.cvar5());
+                    dto.setNavPercentile3yr(m.navPercentile3yr());
+                    dto.setDrawdownFromAth(m.drawdownFromAth());
+                    dto.setReturnZScore(m.returnZScore());
+                    dto.setLastBuyDate(m.lastBuyDate());
+                    dto.setRollingZScore252(m.rollingZScore252());
+                    dto.setHurstExponent(m.hurstExponent());
+                    dto.setVolatilityTax(m.volatilityTax());
+                    dto.setHurstRegime(m.hurstRegime());
+                    dto.setHistoricalRarityPct(m.historicalRarityPct());
+                    dto.setOuHalfLife(m.ouHalfLife());
+                    dto.setOuValid(m.ouValid());
+                    dto.setHmmState(m.hmmState());
+                    dto.setHmmBullProb(m.hmmBullProb());
+                    dto.setHmmBearProb(m.hmmBearProb());
+                    dto.setAlpha(m.alpha());
+                    dto.setBetaMkt(m.betaMkt());
+                    dto.setBetaSmb(m.betaSmb());
+                    dto.setBetaHml(m.betaHml());
+                    dto.setRSquared(m.rSquared());
+                } else {
+                    dto.setConvictionScore(50); // Default sentinel
+                    dto.setValueScore(BigDecimal.valueOf(50.0));
+                }
+            } catch (Exception e) {
+                log.warn("⚠️ Failed to load conviction/market metrics for scheme: {}, error: {}", code, e.getMessage());
+                dto.setConvictionScore(50); // Default sentinel
+                dto.setValueScore(BigDecimal.valueOf(50.0));
+            }
+        }
 
         BigDecimal aggregateCurrentInvested = breakdown.stream().map(s -> s.getCurrentInvested()).reduce(BigDecimal.ZERO, BigDecimal::add);
         BigDecimal aggregateCurrentValue = breakdown.stream().map(s -> s.getCurrentValue()).reduce(BigDecimal.ZERO, BigDecimal::add);

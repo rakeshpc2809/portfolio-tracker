@@ -54,6 +54,8 @@ public class TaxLossHarvestingService {
     @PostConstruct
     public void loadProxyMap() {
         try {
+            // NOTE: tlh_proxy.json is a static market exposure proxy configuration map, 
+            // not live production transaction/user data, used to map target funds to their proxy/replacement funds.
             InputStream is = new ClassPathResource("tlh_proxy.json").getInputStream();
             Map<String, String> rawMap = objectMapper.readValue(is, new TypeReference<Map<String, String>>() {});
             // Use a Case-Insensitive TreeMap for robust lookups

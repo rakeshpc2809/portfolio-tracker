@@ -7,10 +7,13 @@ import org.springframework.web.bind.annotation.*;
 import java.util.Map;
 import java.util.UUID;
 
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+
 @RestController
 @RequestMapping("/api/aa")
 @RequiredArgsConstructor
 @Slf4j
+@ConditionalOnProperty(name = "fiu.aa.feature.enabled", havingValue = "true")
 public class AccountAggregatorController {
 
     @Value("${fiu.id}")

@@ -65,11 +65,14 @@ public class RebalanceController {
         return ResponseEntity.ok(orchestrator.generateUnifiedPayload(pan, monthlySip, lumpsum));
     }
 
-    private double parseAmount(String amt) {
+    private java.math.BigDecimal parseAmount(String amt) {
+        if (amt == null) {
+            return java.math.BigDecimal.ZERO;
+        }
         try {
-            return Double.parseDouble(amt);
+            return new java.math.BigDecimal(amt.trim().replace(",", ""));
         } catch (Exception e) {
-            return 0;
+            return java.math.BigDecimal.ZERO;
         }
     }
 }

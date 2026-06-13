@@ -1,6 +1,6 @@
 import { motion, AnimatePresence, type Variants } from 'framer-motion';
 import { useMemo, useState } from 'react';
-import AllocationSphere from '../3d/AllocationSphere';
+import { ResponsivePie } from '@nivo/pie';
 import { 
   Zap, 
   Target, 
@@ -71,6 +71,19 @@ export default function TodayBriefView({
   );
 
   const schemeBreakdown = portfolioData.schemeBreakdown || [];
+  
+  const mask = (val: number | string) => isPrivate ? "••••" : String(val);
+  
+  const pieData = useMemo(() => {
+    return schemeBreakdown
+      .filter((s: any) => s.currentValue > 0)
+      .map((s: any) => ({
+        id: s.schemeName,
+        label: s.simpleName || s.schemeName,
+        value: s.currentValue
+      }));
+  }, [schemeBreakdown]);
+
   const bearCount = schemeBreakdown.filter((s: any) => s.hmmState === 'VOLATILE_BEAR').length;
   const bullCount = schemeBreakdown.filter((s: any) => s.hmmState === 'CALM_BULL').length;
   const neutralCount = schemeBreakdown.filter((s: any) => s.hmmState === 'STRESSED_NEUTRAL').length;
@@ -118,7 +131,7 @@ export default function TodayBriefView({
              onClick={() => setView3d(!view3d)}
              className="px-3 py-1.5 rounded-lg border border-white/10 bg-black/40 text-[9px] font-black uppercase tracking-widest text-muted hover:text-primary transition-all cursor-pointer shadow-md flex items-center gap-1.5 active:scale-95"
            >
-             {view3d ? "2D Metrics" : "3D Orbit"}
+             {view3d ? "2D Metrics" : "Allocation Chart"}
            </button>
         </div>
 
@@ -133,21 +146,62 @@ export default function TodayBriefView({
         <div className="space-y-4 relative z-10">
           <div className="flex items-center gap-3">
              <div className="h-px w-8 bg-accent/40" />
-             <h2 className="text-accent text-[10px] font-black uppercase tracking-[0.4em]">Portfolio Orbit</h2>
+             <h2 className="text-accent text-[10px] font-black uppercase tracking-[0.4em]">
+                {view3d ? "Asset Allocation" : "Portfolio Orbit"}
+              </h2>
           </div>
         </div>
 
         <AnimatePresence mode="wait">
           {view3d ? (
             <motion.div
-              key="3d-sphere"
+              key="2d-pie"
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0 }}
               transition={{ duration: 0.4 }}
-              className="w-full flex-1 min-h-[280px] mt-4 z-10"
+              className="w-full flex-1 min-h-[280px] mt-4 z-10 flex items-center justify-center"
             >
-              <AllocationSphere schemes={schemeBreakdown} onFundClick={onFundClick} isPrivate={isPrivate} />
+              <div className="h-[280px] w-full relative">
+                <ResponsivePie
+                  data={pieData}
+                  margin={{ top: 20, right: 20, bottom: 20, left: 20 }}
+                  innerRadius={0.6}
+                  padAngle={2}
+                  cornerRadius={8}
+                  activeOuterRadiusOffset={8}
+                  borderWidth={1}
+                  borderColor={{ from: 'color', modifiers: [['darker', 0.2]] }}
+                  enableArcLinkLabels={false}
+                  arcLabelsSkipAngle={15}
+                  arcLabelsTextColor="#ffffff"
+                  colors={{ scheme: 'pastel1' }}
+                  theme={{
+                    tooltip: {
+                      container: {
+                        background: '#181825',
+                        border: '1px solid rgba(255,255,255,0.1)',
+                        color: '#cdd6f4',
+                        fontSize: 11,
+                        borderRadius: 12,
+                        boxShadow: '0 10px 15px -3px rgba(0,0,0,0.5)',
+                      },
+                    },
+                    labels: {
+                      text: {
+                        fontSize: 10,
+                        fontWeight: 700,
+                      },
+                    },
+                  }}
+                  valueFormat={(value) => mask(formatCurrency(value))}
+                  onClick={(node: any) => {
+                    if (onFundClick) {
+                      onFundClick(String(node.data.id));
+                    }
+                  }}
+                />
+              </div>
             </motion.div>
           ) : (
             <motion.div

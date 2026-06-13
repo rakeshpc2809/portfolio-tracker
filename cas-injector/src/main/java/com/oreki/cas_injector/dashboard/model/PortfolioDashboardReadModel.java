@@ -20,17 +20,23 @@ public class PortfolioDashboardReadModel {
     @Id
     private String investorPan;
 
-    private double totalValue;
-    private double totalCost;
-    private double totalGains;
-    private double ltcgGains;
-    private double stcgGains;
+    @jakarta.persistence.Column(precision = 18, scale = 2)
+    private java.math.BigDecimal totalValue;
+    @jakarta.persistence.Column(precision = 18, scale = 2)
+    private java.math.BigDecimal totalCost;
+    @jakarta.persistence.Column(precision = 18, scale = 2)
+    private java.math.BigDecimal totalGains;
+    @jakarta.persistence.Column(precision = 18, scale = 2)
+    private java.math.BigDecimal ltcgGains;
+    @jakarta.persistence.Column(precision = 18, scale = 2)
+    private java.math.BigDecimal stcgGains;
     private int daysToNextLtcg;
     private int portfolioAgeDays;
-    private double estimatedTax;
+    @jakarta.persistence.Column(precision = 18, scale = 2)
+    private java.math.BigDecimal estimatedTax;
     
     @jakarta.persistence.Column(columnDefinition = "TEXT")
     private String content; // JSON blob of DashboardSummaryDTO
     
-    private LocalDateTime lastUpdatedAt;
+    private java.time.LocalDateTime lastUpdatedAt;
 }

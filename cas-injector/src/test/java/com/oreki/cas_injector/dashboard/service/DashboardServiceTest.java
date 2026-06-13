@@ -29,6 +29,7 @@ import com.oreki.cas_injector.transactions.repository.CapitalGainAuditRepository
 import com.oreki.cas_injector.transactions.repository.TaxLotRepository;
 import com.oreki.cas_injector.transactions.repository.TransactionRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.oreki.cas_injector.stocks.StockAggregationService;
 import java.util.Optional;
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -48,6 +49,7 @@ public class DashboardServiceTest {
     @Mock private JdbcTemplate jdbcTemplate;
     @Mock private PortfolioDashboardReadModelRepository summaryRepo;
     @Mock private ObjectMapper objectMapper;
+    @Mock private StockAggregationService stockAggSvc;
 
     @InjectMocks
     private DashboardService dashboardService;

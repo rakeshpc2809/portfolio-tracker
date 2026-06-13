@@ -10,10 +10,13 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import com.fasterxml.jackson.annotation.JsonInclude;
+
 @Data
 @Builder
 @AllArgsConstructor
 @NoArgsConstructor // Added for better compatibility with some JSON mappers
+@JsonInclude(JsonInclude.Include.ALWAYS)
 public class SchemePerformanceDTO {
     private String schemeName;
     private String isin;
@@ -51,50 +54,50 @@ public class SchemePerformanceDTO {
 
     private String benchmarkIndex;
     private boolean isSlabRateFund;
-    private double slabRateGain;
+    private BigDecimal slabRateGain;
 
     // Conviction & Risk Metrics (Updated for NAV Signals)
-    private int convictionScore;
-    private double sortinoRatio;
-    private double maxDrawdown;
-    private double cvar5; // Added for Bug 1
-    private double winRate; // NEW
+    private Integer convictionScore;
+    private Double sortinoRatio;
+    private Double maxDrawdown;
+    private Double cvar5; // Added for Bug 1
+    private Double winRate; // NEW
     private double allocationPercentage;
-    private double plannedPercentage;
-    private double navPercentile1yr;
-    private double navPercentile3yr;
-    private double drawdownFromAth;
-    private double returnZScore;
+    private Double plannedPercentage;
+    private Double navPercentile1yr;
+    private Double navPercentile3yr;
+    private Double drawdownFromAth;
+    private Double returnZScore;
 
     // Tax Efficiency Metrics (Added for Bug 4)
-    private double ltcgUnrealizedGain;
-    private double stcgUnrealizedGain;
+    private BigDecimal ltcgUnrealizedGain;
+    private BigDecimal stcgUnrealizedGain;
     private int daysToNextLtcg;    // days until oldest STCG lot becomes LTCG-eligible
-    private double stcgValue;      // alias for stcgUnrealizedGain (keep for compat)
-    private double ltcgValue;      // alias for ltcgUnrealizedGain (keep for compat)
+    private BigDecimal stcgValue;      // alias for stcgUnrealizedGain (keep for compat)
+    private BigDecimal ltcgValue;      // alias for ltcgUnrealizedGain (keep for compat)
 
     // Conviction Sub-scores (Revised 7-Factor)
-    private double yieldScore;
-    private double riskScore;
-    private double valueScore;
-    private double painScore;
-    private double frictionScore;
-    private double regimeScore;
-    private double expenseScore;
+    private Double yieldScore;
+    private Double riskScore;
+    private BigDecimal valueScore;
+    private Double painScore;
+    private Double frictionScore;
+    private Double regimeScore;
+    private Double expenseScore;
     
     private String simpleName;
 
     // Advanced Quantitative Metrics (Task 2B/3C)
-    private double rollingZScore252;
-    private double hurstExponent;
-    private double volatilityTax;
+    private Double rollingZScore252;
+    private Double hurstExponent;
+    private Double volatilityTax;
     private String hurstRegime;
-    private double historicalRarityPct;
-    private double ouHalfLife;
-    private boolean ouValid;
+    private Double historicalRarityPct;
+    private Double ouHalfLife;
+    private Boolean ouValid;
     private String hmmState;
-    private double hmmBullProb;
-    private double hmmBearProb;
+    private Double hmmBullProb;
+    private Double hmmBearProb;
 
     // Tactical Signal Details
     private String signalType;
@@ -106,9 +109,9 @@ public class SchemePerformanceDTO {
     private List<Integer> convictionHistory;
     
     // Attribution Fields
-    private double alpha;
-    private double betaMkt;
-    private double betaSmb;
-    private double betaHml;
-    private double rSquared;
+    private Double alpha;
+    private Double betaMkt;
+    private Double betaSmb;
+    private Double betaHml;
+    private Double rSquared;
 }
