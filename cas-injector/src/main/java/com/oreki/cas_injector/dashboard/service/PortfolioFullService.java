@@ -216,7 +216,12 @@ public class PortfolioFullService {
         DashboardSummaryDTO summary = getBasePortfolioCached(pan);
         List<DroppedFundSummary> result = new ArrayList<>();
         
-        Double slab = jdbcTemplate.queryForObject("SELECT tax_slab FROM investor WHERE pan = ?", Double.class, pan);
+        Double slab = null;
+        try {
+            slab = jdbcTemplate.queryForObject("SELECT tax_slab FROM investor WHERE pan = ?", Double.class, pan);
+        } catch (org.springframework.dao.EmptyResultDataAccessException e) {
+            log.info("ℹ️ No investor found for PAN: {}, defaulting tax slab to 0.30", pan);
+        }
         double slabRate = (slab != null) ? slab : 0.30;
 
         // Get strategy to identify dropped funds and their exit philosophy

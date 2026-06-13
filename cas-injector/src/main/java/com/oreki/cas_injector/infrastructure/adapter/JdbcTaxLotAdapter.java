@@ -45,8 +45,13 @@ public class JdbcTaxLotAdapter implements TaxLotPort {
 
     @Override
     public double getInvestorSlabRate(String investorPan) {
-        Double slab = jdbcTemplate.queryForObject(
-            "SELECT tax_slab FROM investor WHERE pan = ?", Double.class, investorPan);
+        Double slab = null;
+        try {
+            slab = jdbcTemplate.queryForObject(
+                "SELECT tax_slab FROM investor WHERE pan = ?", Double.class, investorPan);
+        } catch (org.springframework.dao.EmptyResultDataAccessException e) {
+            // Safe fallback
+        }
         return (slab != null) ? slab : 0.30;
     }
 }

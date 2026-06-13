@@ -48,7 +48,12 @@ public class LtcgExitSchedulerService {
         double remainingThisFY = Math.max(0, LTCG_ANNUAL_EXEMPTION - fyLtcgAlreadyRealized);
         double capacityNextFY  = LTCG_ANNUAL_EXEMPTION; 
 
-        Double slab = jdbcTemplate.queryForObject("SELECT tax_slab FROM investor WHERE pan = ?", Double.class, pan);
+        Double slab = null;
+        try {
+            slab = jdbcTemplate.queryForObject("SELECT tax_slab FROM investor WHERE pan = ?", Double.class, pan);
+        } catch (org.springframework.dao.EmptyResultDataAccessException e) {
+            // Do not log warning, simple log info
+        }
         double slabRate = (slab != null) ? slab : 0.30;
 
         List<ExitScheduleItem> schedule = new ArrayList<>();

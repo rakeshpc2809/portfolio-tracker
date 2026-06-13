@@ -229,8 +229,13 @@ public class PortfolioOrchestrator {
 
         List<com.oreki.cas_injector.rebalancing.dto.RebalancingTrade> trades = new ArrayList<>();
 
-        Double slab = metricsRepo.getJdbcTemplate().queryForObject(
-            "SELECT tax_slab FROM investor WHERE pan = ?", Double.class, pan);
+        Double slab = null;
+        try {
+            slab = metricsRepo.getJdbcTemplate().queryForObject(
+                "SELECT tax_slab FROM investor WHERE pan = ?", Double.class, pan);
+        } catch (org.springframework.dao.EmptyResultDataAccessException e) {
+            log.info("ℹ️ No investor found for PAN: {}, defaulting tax slab to 0.30", pan);
+        }
         double slabRate = (slab != null) ? slab : 0.30;
 
         for (TacticalSignal sell : sells) {

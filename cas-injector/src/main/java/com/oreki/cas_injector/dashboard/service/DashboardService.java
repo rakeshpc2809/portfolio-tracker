@@ -380,7 +380,12 @@ public class DashboardService {
         totalCashFlow.sort(Comparator.comparing(TransactionDTO::getDate));
         BigDecimal totalXirr = CommonUtils.SOLVE_XIRR.apply(totalCashFlow);
 
-        Double investorSlab = jdbcTemplate.queryForObject("SELECT tax_slab FROM investor WHERE pan = ?", Double.class, pan);
+        Double investorSlab = null;
+        try {
+            investorSlab = jdbcTemplate.queryForObject("SELECT tax_slab FROM investor WHERE pan = ?", Double.class, pan);
+        } catch (org.springframework.dao.EmptyResultDataAccessException e) {
+            log.info("ℹ️ No investor found for PAN: {}, defaulting tax slab to 0.30", pan);
+        }
         double slabRate = (investorSlab != null) ? investorSlab : 0.30;
 
         // realized LTCG for current FY (Dashboard Summary)
