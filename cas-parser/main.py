@@ -376,11 +376,28 @@ async def parse_cas(
         elif hasattr(data, "dict"):
             data = data.dict()
         
+        # Extract metadata properly
+        pan = None
+        for folio in data.get("folios", []):
+            if folio.get("PAN"):
+                pan = folio.get("PAN").strip()
+                break
+        if not pan:
+            pan = data.get("statement_period", {}).get("pan")
+
+        name = data.get("investor_info", {}).get("name")
+        if not name:
+            name = data.get("statement_period", {}).get("name")
+
+        email = data.get("investor_info", {}).get("email")
+        if not email:
+            email = data.get("statement_period", {}).get("email")
+
         # Structure the data for the Java backend
         payload = {
-            "pan": data.get("statement_period", {}).get("pan"),
-            "email": data.get("statement_period", {}).get("email"),
-            "name": data.get("statement_period", {}).get("name"),
+            "pan": pan,
+            "email": email,
+            "name": name,
             "folios": []
         }
         logger.info(f"Parsed CAS for PAN: {payload['pan']}, Email: {payload['email']}")
@@ -424,7 +441,12 @@ async def parse_cas(
                     timeout=30.0
                 )
                 if response.status_code == 200:
-                    return {"status": "accepted", "message": "CAS data is being processed asynchronously"}
+                    return {
+                        "status": "accepted", 
+                        "message": "CAS data is being processed asynchronously",
+                        "investor": payload.get("name") or "Unknown Investor",
+                        "pan": payload.get("pan") or "Unknown PAN"
+                    }
                 else:
                     raise HTTPException(status_code=500, detail=f"Backend rejected CAS data: {response.text}")
             except Exception as e:
@@ -449,11 +471,28 @@ async def preview_cas(
         elif hasattr(data, "dict"):
             data = data.dict()
             
+        # Extract metadata properly
+        pan = None
+        for folio in data.get("folios", []):
+            if folio.get("PAN"):
+                pan = folio.get("PAN").strip()
+                break
+        if not pan:
+            pan = data.get("statement_period", {}).get("pan")
+
+        name = data.get("investor_info", {}).get("name")
+        if not name:
+            name = data.get("statement_period", {}).get("name")
+
+        email = data.get("investor_info", {}).get("email")
+        if not email:
+            email = data.get("statement_period", {}).get("email")
+
         # Simplified summary for preview
         summary = {
-            "investor": data.get("statement_period", {}).get("name"),
-            "email": data.get("statement_period", {}).get("email"),
-            "pan": data.get("statement_period", {}).get("pan"),
+            "investor": name,
+            "email": email,
+            "pan": pan,
             "schemes_count": 0,
             "amcs": []
         }
