@@ -16,7 +16,7 @@ public class CapitalGainAudit {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @ManyToOne(fetch = FetchType.LAZY)
+    @ManyToOne(fetch = FetchType.EAGER)
     @JoinColumn(name = "sell_transaction_id")
     private Transaction sellTransaction;
 

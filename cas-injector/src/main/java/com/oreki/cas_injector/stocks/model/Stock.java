@@ -39,7 +39,7 @@ public class Stock {
 
     private String sector;
 
-    @ManyToOne(fetch = FetchType.LAZY)
+    @ManyToOne(fetch = FetchType.EAGER)
     @JoinColumn(name = "folio_id")
     private Folio folio;
 

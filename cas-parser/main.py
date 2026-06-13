@@ -509,7 +509,9 @@ scheduler.add_job(
     name='Nightly Quantitative Metrics Batch Job',
     replace_existing=True
 )
-scheduler.start()
+@app.on_event("startup")
+def startup_event():
+    scheduler.start()
 
 @app.on_event("shutdown")
 def shutdown_event():

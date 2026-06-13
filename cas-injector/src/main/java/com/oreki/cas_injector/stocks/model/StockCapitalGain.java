@@ -17,7 +17,7 @@ public class StockCapitalGain {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @ManyToOne(fetch = FetchType.LAZY)
+    @ManyToOne(fetch = FetchType.EAGER)
     @JoinColumn(name = "stock_id")
     private Stock stock;
 
@@ -25,7 +25,7 @@ public class StockCapitalGain {
     @JoinColumn(name = "buy_lot_id")
     private StockTaxLot buyLot;
 
-    @ManyToOne(fetch = FetchType.LAZY)
+    @ManyToOne(fetch = FetchType.EAGER)
     @JoinColumn(name = "sell_transaction_id")
     private StockTransaction sellTransaction;
 
