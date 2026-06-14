@@ -230,6 +230,7 @@ export default function Dashboard({
             setLumpsum, 
             isPrivate, 
             setSelectedFundName,
+            setIsStrategyOpen,
             pan 
           }}>
             {children || <Outlet />}

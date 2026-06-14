@@ -15,6 +15,7 @@ import com.oreki.cas_injector.backfill.model.HistoricalNav;
 public interface HistoricalNavRepository extends JpaRepository<HistoricalNav, Long> {
 
     List<HistoricalNav> findByAmfiCodeOrderByNavDateDesc(String amfiCode);
+    List<HistoricalNav> findByAmfiCodeOrderByNavDateAsc(String amfiCode);
     
     Optional<HistoricalNav> findByAmfiCodeAndNavDate(String amfiCode, LocalDate navDate);
 

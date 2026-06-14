@@ -26,7 +26,7 @@ import com.oreki.cas_injector.rebalancing.dto.SipLineItem;
 import com.oreki.cas_injector.rebalancing.dto.TacticalSignal;
 import com.oreki.cas_injector.rebalancing.dto.RebalancingTrade;
 import com.oreki.cas_injector.rebalancing.dto.StrategyTarget;
-import com.oreki.cas_injector.rebalancing.service.PortfolioOrchestrator;
+import com.oreki.cas_injector.rebalancing.service.RebalanceOrchestrator;
 import com.oreki.cas_injector.rebalancing.service.HierarchicalRiskParityService;
 import com.oreki.cas_injector.taxmanagement.dto.TlhOpportunity;
 import com.oreki.cas_injector.taxmanagement.service.TaxLossHarvestingService;
@@ -43,7 +43,7 @@ import lombok.extern.slf4j.Slf4j;
 public class PortfolioFullService {
 
     private final DashboardService dashboardService;
-    private final PortfolioOrchestrator orchestrator;
+    private final RebalanceOrchestrator orchestrator;
     private final JdbcTemplate jdbcTemplate;
     private final TaxLossHarvestingService taxLossHarvestingService;
     private final TaxLotRepository taxLotRepository;
@@ -225,7 +225,7 @@ public class PortfolioFullService {
         double slabRate = (slab != null) ? slab : 0.30;
 
         // Get strategy to identify dropped funds and their exit philosophy
-        List<StrategyTarget> targets = orchestrator.getStrategyService().fetchLatestStrategy();
+        List<StrategyTarget> targets = orchestrator.getStrategyService().fetchLatestStrategy(pan);
         Map<String, String> isinToStatus = targets.stream()
             .collect(Collectors.toMap(StrategyTarget::isin, StrategyTarget::status, (a, b) -> a));
         

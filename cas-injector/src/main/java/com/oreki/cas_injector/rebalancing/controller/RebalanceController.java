@@ -13,7 +13,8 @@ import org.springframework.web.bind.annotation.RestController;
 import com.oreki.cas_injector.dashboard.dto.UnifiedTacticalPayload;
 import com.oreki.cas_injector.rebalancing.dto.SipLineItem;
 import com.oreki.cas_injector.rebalancing.dto.TacticalSignal;
-import com.oreki.cas_injector.rebalancing.service.PortfolioOrchestrator;
+import com.oreki.cas_injector.rebalancing.dto.RebalanceActionDTO;
+import com.oreki.cas_injector.rebalancing.service.RebalanceOrchestrator;
 import com.oreki.cas_injector.taxmanagement.dto.TlhOpportunity;
 import com.oreki.cas_injector.taxmanagement.service.TaxLossHarvestingService;
 
@@ -25,7 +26,7 @@ import lombok.AllArgsConstructor;
 @CrossOrigin(origins = "*") // Allows your React frontend to call this endpoint without CORS errors
 public class RebalanceController {
 
-    private final PortfolioOrchestrator orchestrator;
+    private final RebalanceOrchestrator orchestrator;
     private final TaxLossHarvestingService taxLossHarvestingService;
     /**
      * Endpoint to fetch the daily tactical signals for a specific investor.
@@ -64,6 +65,16 @@ public class RebalanceController {
             @RequestParam(defaultValue = "0") double lumpsum) {
         validatePan(pan);
         return ResponseEntity.ok(orchestrator.generateUnifiedPayload(pan, monthlySip, lumpsum));
+    }
+
+    @GetMapping("/{pan}/rebalance-actions")
+    public ResponseEntity<List<RebalanceActionDTO>> getRebalanceActions(@PathVariable("pan") String investorPan) {
+        validatePan(investorPan);
+        List<RebalanceActionDTO> actions = orchestrator.generateRebalanceActions(investorPan);
+        if (actions.isEmpty()) {
+            return ResponseEntity.noContent().build();
+        }
+        return ResponseEntity.ok(actions);
     }
 
     private java.math.BigDecimal parseAmount(String amt) {

@@ -473,6 +473,52 @@ public class DashboardService {
     }
 
 
+    @Transactional(readOnly = true)
+    public Map<String, Double> getVintageReturns(String pan) {
+        log.info("📊 Computing vintage returns for PAN: {}", pan);
+        String sql = """
+            SELECT 
+                TO_CHAR(tl.buy_date, 'YYYY-MM') as vintage,
+                SUM(tl.remaining_units * COALESCE(s2.nav, tl.cost_basis_per_unit)) as current_val,
+                SUM(tl.remaining_units * tl.cost_basis_per_unit) as cost_val
+            FROM tax_lot tl
+            JOIN scheme s ON tl.scheme_id = s.id
+            JOIN folio f ON s.folio_id = f.id
+            LEFT JOIN (
+                SELECT amfi_code, nav
+                FROM fund_history
+                WHERE (amfi_code, nav_date) IN (
+                    SELECT amfi_code, MAX(nav_date)
+                    FROM fund_history
+                    GROUP BY amfi_code
+                )
+            ) s2 ON s2.amfi_code = s.amfi_code
+            WHERE f.investor_pan = ?
+              AND tl.remaining_units > 0
+            GROUP BY TO_CHAR(tl.buy_date, 'YYYY-MM')
+            ORDER BY vintage ASC
+            """;
+
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList(sql, pan);
+        Map<String, Double> result = new LinkedHashMap<>();
+        for (Map<String, Object> row : rows) {
+            String vintage = (String) row.get("vintage");
+            Number currentValNum = (Number) row.get("current_val");
+            Number costValNum = (Number) row.get("cost_val");
+            if (vintage != null && currentValNum != null && costValNum != null) {
+                double currentVal = currentValNum.doubleValue();
+                double costVal = costValNum.doubleValue();
+                if (costVal > 0) {
+                    double ret = ((currentVal - costVal) / costVal) * 100.0;
+                    result.put(vintage, ret);
+                } else {
+                    result.put(vintage, 0.0);
+                }
+            }
+        }
+        return result;
+    }
+
     @Transactional
     public void refreshMaterializedView() {
         jdbcTemplate.execute("REFRESH MATERIALIZED VIEW CONCURRENTLY mv_portfolio_summary");

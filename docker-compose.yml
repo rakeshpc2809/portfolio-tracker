@@ -66,5 +66,17 @@ services:
       - java-backend
     restart: always
 
+  # 5. The Python Quant Engine
+  quant-engine:
+    build: ./cas-parser/quant-engine
+    container_name: cas_quant_engine
+    ports:
+      - "8001:8001"
+    environment:
+      - JAVA_BACKEND_URL=http://java-backend:8080/api
+      - PORTFOLIO_API_KEY=${PORTFOLIO_API_KEY:-dev-secret-key}
+    depends_on:
+      - java-backend
+
 volumes:
   postgres_data:

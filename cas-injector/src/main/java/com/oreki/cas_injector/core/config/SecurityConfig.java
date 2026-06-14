@@ -25,6 +25,7 @@ public class SecurityConfig {
             .authorizeHttpRequests(auth -> auth
                 .requestMatchers("/investor/check/**").permitAll()
                 .requestMatchers("/cas/**").permitAll()
+                .requestMatchers("/market/**", "/history/**").permitAll()
                 .requestMatchers("/error", "/actuator/**", "/health/**", "/status/**", "/ws/**").permitAll()
                 .anyRequest().authenticated()
             )

@@ -82,6 +82,14 @@ public class DashboardController {
         return ResponseEntity.ok(fullService.getPerformanceHistory(cleanPan));
     }
 
+    @GetMapping("/vintage-returns/{pan}")
+    public ResponseEntity<Map<String, Double>> getVintageReturns(@PathVariable String pan) {
+        String cleanPan = pan.trim().toUpperCase();
+        validatePan(cleanPan);
+        log.info("📊 Fetching vintage returns for PAN: {}", cleanPan);
+        return ResponseEntity.ok(dashboardService.getVintageReturns(cleanPan));
+    }
+
     @GetMapping("/correlation/{pan}")
     public ResponseEntity<Map<String, Object>> getCorrelation(@PathVariable String pan) {
         String cleanPan = pan.trim().toUpperCase();
@@ -101,7 +109,7 @@ public class DashboardController {
     public ResponseEntity<List<ExitScheduleItem>> getLtcgSchedule(@PathVariable String pan) {
         String cleanPan = pan.trim().toUpperCase();
         validatePan(cleanPan);
-        List<String> droppedIsins = strategyService.fetchLatestStrategy().stream()
+        List<String> droppedIsins = strategyService.fetchLatestStrategy(cleanPan).stream()
             .filter(t -> "DROPPED".equalsIgnoreCase(t.status()) || "EXIT".equalsIgnoreCase(t.status()))
             .map(StrategyTarget::isin)
             .toList();

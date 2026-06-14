@@ -8,6 +8,7 @@ interface DashboardContextType {
   setLumpsum: (val: number) => void;
   isPrivate: boolean;
   setSelectedFundName: (name: string | null) => void;
+  setIsStrategyOpen?: (val: boolean) => void;
   pan: string;
 }
 

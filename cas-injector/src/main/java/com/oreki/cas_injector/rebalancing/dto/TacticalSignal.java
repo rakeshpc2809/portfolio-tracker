@@ -24,6 +24,7 @@ public record TacticalSignal(
     double navPercentile3yr,
     double drawdownFromAth,
     double returnZScore,
+    double hurstExponent,
     double winRate,
     double cvar5,
     LocalDate lastBuyDate,

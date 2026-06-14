@@ -6,6 +6,7 @@ import {
 import CurrencyValue from '../ui/CurrencyValue';
 import { Target, Clock, ArrowRight, TrendingUp, AlertCircle, ShieldAlert } from 'lucide-react';
 import type { RebalancingTrade } from '../../types/signals';
+import { useDashboardContext } from '../../context/DashboardContext';
 
 export default function RebalanceView({ 
   portfolioData, 
@@ -18,6 +19,7 @@ export default function RebalanceView({
   setSipAmount: (val: number) => void;
   isPrivate: boolean;
 }) {
+  const { setIsStrategyOpen } = useDashboardContext();
   const data = useMemo(() => (portfolioData.schemeBreakdown || [])
     .filter((s: any) => (s.currentValue || 0) > 0) // Only active positions
     .map((s: any) => {
@@ -48,12 +50,12 @@ export default function RebalanceView({
   const timelines = useMemo(() => sipPlan
     .filter((s: any) => s.amount > 0)
     .map((s: any) => {
-      const fund = data.find((f: any) => f.isin === s.isin);
+      const fund = data.find((f: any) => f.amfiCode === s.amfiCode || f.amfiCode === String(s.amfiCode));
       const drift = Math.abs(fund?.drift || 0);
       const gapValue = (drift / 100) * portfolioValue;
       const months = Math.ceil(gapValue / s.amount);
       return {
-        name: s.simpleName || s.schemeName.substring(0, 22),
+        name: s.simpleName || s.schemeName?.substring(0, 22),
         months: months > 36 ? 36 : months, // Cap at 3 years for visual
         actualMonths: months,
         color: months <= 6 ? '#a6e3a1' : months <= 12 ? '#f9e2af' : '#f38ba8'
@@ -63,9 +65,18 @@ export default function RebalanceView({
 
   return (
     <div className="space-y-10 pb-32">
-      <header>
-        <h2 className="text-muted text-[10px] font-black uppercase tracking-[0.2em] mb-1">Target Alignment</h2>
-        <p className="text-xl font-black text-primary tracking-tight">Allocation Drift · Strategic Balance</p>
+      <header className="flex justify-between items-end">
+        <div>
+          <h2 className="text-muted text-[10px] font-black uppercase tracking-[0.2em] mb-1">Target Alignment</h2>
+          <p className="text-xl font-black text-primary tracking-tight">Allocation Drift · Strategic Balance</p>
+        </div>
+        <button
+          onClick={() => setIsStrategyOpen?.(true)}
+          className="px-3 py-1.5 bg-accent/10 border border-accent/20 rounded-xl text-[10px] font-black uppercase tracking-wider text-accent hover:bg-accent/20 transition-all cursor-pointer flex items-center gap-1.5"
+        >
+          <Target size={12} />
+          Edit Target Weights
+        </button>
       </header>
 
       {/* REBALANCING MOVES */}
@@ -161,7 +172,7 @@ export default function RebalanceView({
             />
           </div>
           <div className="flex justify-between items-center px-1">
-            <p className="text-[9px] font-black text-muted uppercase tracking-widest">₹0 Realized</p>
+            <p className="text-[9px] font-black text-muted uppercase tracking-widest">₹{realizedLTCG.toLocaleString('en-IN')} Realized</p>
             <p className="text-[9px] font-black text-muted uppercase tracking-widest">₹1.25L Limit</p>
           </div>
         </div>

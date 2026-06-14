@@ -11,7 +11,7 @@ import java.util.List;
 import java.util.Map;
 
 @RestController
-@RequestMapping("/api/sentiment")
+@RequestMapping("/sentiment")
 @RequiredArgsConstructor
 public class SentimentController {
 

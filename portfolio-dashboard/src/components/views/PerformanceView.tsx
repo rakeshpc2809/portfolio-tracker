@@ -11,7 +11,7 @@ import { formatCurrency } from '../../utils/formatters';
 import { Slider } from '../ui/slider';
 import { usePerformanceHistory } from '../../hooks/usePerformance';
 import { useQuery } from '@tanstack/react-query';
-import { benchmarkService } from '../../services/api';
+import { benchmarkService, fetchVintageReturns } from '../../services/api';
 export default function PerformanceView({ 
   pan, 
   isPrivate,
@@ -127,11 +127,7 @@ export default function PerformanceView({
 
   const { data: vintageData } = useQuery({
     queryKey: ['vintage', pan],
-    queryFn: async () => {
-      const res = await fetch(`/api/dashboard/vintage-returns/${pan}`);
-      if (!res.ok) throw new Error('Failed to fetch vintage returns');
-      return res.json();
-    },
+    queryFn: () => fetchVintageReturns(pan),
     staleTime: 1000 * 60 * 60,
   });
 

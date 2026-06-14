@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Calendar, Save, TrendingUp, AlertTriangle } from 'lucide-react';
 import CurrencyValue from '../ui/CurrencyValue';
 import type { ExitScheduleItem } from '../../types/signals';
+import { fetchLtcgExitSchedule } from '../../services/api';
 
 export default function LtcgPlannerView({ pan, isPrivate }: { pan: string, isPrivate: boolean }) {
   const [schedule, setSchedule] = useState<ExitScheduleItem[]>([]);
@@ -9,8 +10,7 @@ export default function LtcgPlannerView({ pan, isPrivate }: { pan: string, isPri
 
   useEffect(() => {
     setLoading(true);
-    fetch(`/api/dashboard/ltcg-exit-schedule/${pan}`)
-      .then(r => r.json())
+    fetchLtcgExitSchedule(pan)
       .then(data => {
         setSchedule(data);
         setLoading(false);

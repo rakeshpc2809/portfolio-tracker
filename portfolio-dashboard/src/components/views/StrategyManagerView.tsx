@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { fetchStrategyTargets, updateStrategyTarget } from "@/services/api";
-import { AlertTriangle, CheckCircle2, Loader2, ArrowRight } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Loader2 } from "lucide-react";
 
 const StrategyManagerView: React.FC<{ pan: string, schemes: any[] }> = ({ pan, schemes }) => {
   const [targets, setTargets] = useState<any[]>([]);
@@ -21,7 +21,7 @@ const StrategyManagerView: React.FC<{ pan: string, schemes: any[] }> = ({ pan, s
         return {
           ...s,
           targetAllocation: t ? t.targetAllocationPct : (s.allocationPercentage || 0),
-          strategyType: t ? t.strategyType : 'CORE'
+          strategyType: t && t.strategyType && t.strategyType !== 'PROPORTIONAL' ? t.strategyType : 'CORE'
         };
       });
       setTargets(merged);
@@ -32,13 +32,19 @@ const StrategyManagerView: React.FC<{ pan: string, schemes: any[] }> = ({ pan, s
     }
   };
 
-  const handleAllocationChange = (amfiCode: string, value: number) => {
+  const handleAllocationChange = (amfiCode: string, value: any) => {
     setTargets(prev => prev.map(t => 
       t.amfiCode === amfiCode ? { ...t, targetAllocation: value } : t
     ));
   };
 
-  const totalAllocation = targets.reduce((sum, t) => sum + (t.targetAllocation || 0), 0);
+  const handleStrategyTypeChange = (amfiCode: string, value: string) => {
+    setTargets(prev => prev.map(t => 
+      t.amfiCode === amfiCode ? { ...t, strategyType: value } : t
+    ));
+  };
+
+  const totalAllocation = targets.reduce((sum, t) => sum + (parseFloat(t.targetAllocation) || 0), 0);
 
   const handleSave = async (target: any) => {
     setSaving(true);
@@ -46,7 +52,7 @@ const StrategyManagerView: React.FC<{ pan: string, schemes: any[] }> = ({ pan, s
       await updateStrategyTarget({
         pan,
         amfiCode: target.amfiCode,
-        allocation: target.targetAllocation,
+        allocation: parseFloat(target.targetAllocation) || 0,
         strategyType: target.strategyType
       });
       setStatus({ type: 'success', message: `Event emitted for ${target.schemeName}` });
@@ -78,110 +84,124 @@ const StrategyManagerView: React.FC<{ pan: string, schemes: any[] }> = ({ pan, s
   );
 
   return (
-    <div className="max-w-6xl mx-auto space-y-10 pb-20 font-sans">
-      <div className="flex flex-col space-y-2">
-        <h2 className="text-3xl font-black tracking-tight text-white uppercase italic">Strategy Architect</h2>
-        <p className="text-muted text-[10px] font-bold uppercase tracking-[0.3em]">
-          Define your target state • Every change records a domain event
-        </p>
+    <div className="space-y-6 pb-20 font-sans text-slate-100">
+      
+      {/* Compact Header Widget */}
+      <div className="bg-[#181825]/50 border border-white/5 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-md">
+        <div className="space-y-1">
+          <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Total Committed Target Weight</p>
+          <p className={`text-2xl font-black tabular-nums ${totalAllocation > 100 ? 'text-exit' : 'text-buy'}`}>
+            {totalAllocation.toFixed(1)}% / 100%
+          </p>
+        </div>
+        
+        <div className="flex-1 max-w-xs space-y-1.5 w-full">
+          <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden border border-white/10">
+            <div 
+              style={{width: `${Math.min(totalAllocation, 100)}%` }}
+              className={`h-full ${totalAllocation > 100 ? 'bg-exit' : 'bg-buy'} shadow-[0_0_10px_rgba(203,166,247,0.3)] transition-all`}
+            />
+          </div>
+          {totalAllocation !== 100 && (
+            <div className="flex items-center gap-1.5 text-exit">
+              <AlertTriangle size={10} />
+              <p className="text-[8px] font-bold uppercase tracking-wider">
+                Mismatch: {Math.abs(100 - totalAllocation).toFixed(1)}% {totalAllocation > 100 ? 'over' : 'remaining'}
+              </p>
+            </div>
+          )}
+        </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
-        {/* Sidebar Stats */}
-        <div className="space-y-6">
-          <div className="bg-surface border border-white/5 rounded-3xl p-8 space-y-6">
-             <div className="space-y-1">
-                <p className="text-[10px] font-black text-muted uppercase tracking-widest">Total Committed</p>
-                <p className={`text-4xl font-black ${totalAllocation > 100 ? 'text-exit' : 'text-buy'}`}>
-                  {totalAllocation.toFixed(1)}%
-                </p>
-             </div>
-             
-             <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden">
-                <div 
-                  style={{width: `${Math.min(totalAllocation, 100)}%` }}
-                  className={`h-full ${totalAllocation > 100 ? 'bg-exit' : 'bg-buy'} shadow-[0_0_15px_rgba(129,140,248,0.4)]`}
-                />
-             </div>
-
-             {totalAllocation !== 100 && (
-               <div className="flex items-center gap-2 p-3 bg-exit/5 border border-exit/10 rounded-xl text-exit">
-                 <AlertTriangle size={14} />
-                 <p className="text-[9px] font-bold uppercase tracking-wider">Allocation mismatch: {100 - totalAllocation}% remaining</p>
-               </div>
-             )}
-          </div>
-
-          <div className="p-6 bg-white/[0.01] border border-white/5 rounded-3xl space-y-4">
-             <h4 className="text-[10px] font-black uppercase text-muted tracking-widest">System Health</h4>
-             <div className="flex items-center gap-3">
-                <div className="w-2 h-2 rounded-full bg-buy animate-pulse" />
-                <p className="text-[10px] font-bold text-primary uppercase">Event Log Active</p>
-             </div>
-             <div className="flex items-center gap-3">
-                <div className="w-2 h-2 rounded-full bg-buy" />
-                <p className="text-[10px] font-bold text-primary uppercase">Projectors Syncing</p>
-             </div>
-          </div>
-        </div>
-
-        {/* Main List */}
-        <div className="lg:col-span-3 space-y-4">
-          <>
-            {targets.map((target) => (
-              <div
-                key={target.amfiCode}
-                className="bg-surface border border-white/5 p-6 rounded-3xl hover:border-white/10 -all group"
-              >
-                <div className="flex flex-col md:flex-row items-center gap-8">
-                  <div className="flex-1 space-y-1">
-                    <h4 className="text-sm font-black text-primary uppercase truncate max-w-[400px]">{target.schemeName}</h4>
-                    <p className="text-[9px] font-bold text-muted uppercase tracking-[0.2em]">{target.amfiCode} • {target.strategyType}</p>
+      {/* Funds List */}
+      <div className="space-y-3">
+        {targets.map((target) => (
+          <div
+            key={target.amfiCode}
+            className="bg-[#181825]/30 border border-white/5 p-4 rounded-2xl hover:border-white/10 transition-all space-y-3"
+          >
+            {/* Header: Fund Name & AMFI code */}
+            <div className="flex justify-between items-start gap-2">
+              <div className="flex-1 min-w-0">
+                <h4 className="text-xs font-black text-slate-200 uppercase truncate" title={target.schemeName}>
+                  {target.schemeName}
+                </h4>
+                <div className="flex items-center flex-wrap gap-2 mt-0.5">
+                  <span className="text-[8px] font-bold text-slate-500 uppercase tracking-widest">
+                    AMFI: {target.amfiCode}
+                  </span>
+                  <span className="text-slate-700 text-[8px]">•</span>
+                  <div className="flex items-center gap-1">
+                    <span className="text-[8px] font-bold text-slate-500 uppercase tracking-widest">Type:</span>
+                    <select
+                      value={target.strategyType || "CORE"}
+                      onChange={(e) => handleStrategyTypeChange(target.amfiCode, e.target.value)}
+                      className="bg-[#181825]/80 border border-white/10 rounded px-1.5 py-0.5 font-bold text-accent text-[8px] uppercase tracking-wider focus:border-accent focus:outline-none cursor-pointer"
+                    >
+                      <option value="CORE" className="bg-[#11111b] text-primary">CORE</option>
+                      <option value="SATELLITE" className="bg-[#11111b] text-primary">SATELLITE</option>
+                      <option value="TACTICAL" className="bg-[#11111b] text-primary">TACTICAL</option>
+                      <option value="DROPPED" className="bg-[#11111b] text-primary">DROPPED</option>
+                      <option value="EXIT" className="bg-[#11111b] text-primary">EXIT</option>
+                    </select>
                   </div>
-
-                  <div className="w-full md:w-64 space-y-3">
-                    <div className="flex justify-between text-[10px] font-black uppercase tracking-widest text-muted">
-                      <span>Target Weight</span>
-                      <span className="text-accent">{target.targetAllocation}%</span>
-                    </div>
-                    <input 
-                      type="range"
-                      min="0"
-                      max="100"
-                      step="0.5"
-                      value={target.targetAllocation}
-                      onChange={(e) => handleAllocationChange(target.amfiCode, parseFloat(e.target.value))}
-                      className="w-full h-1.5 bg-white/5 rounded-full appearance-none cursor-pointer accent-accent"
-                    />
-                  </div>
-
-                  <button 
-                    onClick={() => handleSave(target)}
-                    disabled={saving}
-                    className="p-4 bg-white/5 hover:bg-accent hover:text-primary border border-white/10 rounded-2xl transition-all"
-                  >
-                    <ArrowRight size={18} />
-                  </button>
                 </div>
               </div>
-            ))}
-          </>
-        </div>
+            </div>
+
+            {/* Target Weight Adjustment & Save Button */}
+            <div className="flex items-center gap-4 justify-between">
+              {/* Slider */}
+              <div className="flex-1">
+                <input 
+                  type="range"
+                  min="0"
+                  max="100"
+                  step="0.5"
+                  value={parseFloat(target.targetAllocation) || 0}
+                  onChange={(e) => handleAllocationChange(target.amfiCode, parseFloat(e.target.value))}
+                  className="w-full h-1.5 bg-white/5 rounded-full appearance-none cursor-pointer accent-accent"
+                />
+              </div>
+
+              {/* Numeric Input % */}
+              <div className="flex items-center gap-1">
+                <input 
+                  type="number"
+                  min="0"
+                  max="100"
+                  step="0.1"
+                  value={target.targetAllocation}
+                  onChange={(e) => handleAllocationChange(target.amfiCode, e.target.value)}
+                  className="w-14 bg-white/5 border border-white/10 rounded px-1.5 py-0.5 text-right font-black text-accent text-xs focus:border-accent focus:outline-none"
+                />
+                <span className="text-accent text-xs font-bold">%</span>
+              </div>
+
+              {/* Save Button */}
+              <button 
+                onClick={() => handleSave(target)}
+                disabled={saving}
+                className="px-3 py-1 bg-accent hover:bg-accent-bright disabled:bg-white/5 text-slate-950 disabled:text-slate-500 rounded font-black text-[9px] uppercase tracking-wider transition-all cursor-pointer"
+              >
+                Save
+              </button>
+            </div>
+          </div>
+        ))}
       </div>
 
       {/* Global Status Toast */}
-      <>
-        {status.message && (
-          <div 
-            className={`fixed bottom-10 left-1/2 -translate-x-1/2 px-8 py-4 rounded-full border shadow-2xl flex items-center gap-3 ${
-              status.type === 'success' ? 'bg-buy/10 border-buy/20 text-buy' : 'bg-/10 border-/20 text-'
-            }`}
-          >
-            {status.type === 'success' ? <CheckCircle2 size={16} /> : <AlertTriangle size={16} />}
-            <p className="text-[10px] font-black uppercase tracking-[0.2em]">{status.message}</p>
-          </div>
-        )}
-      </>
+      {status.message && (
+        <div 
+          className={`fixed bottom-10 left-1/2 -translate-x-1/2 px-8 py-4 rounded-full border shadow-2xl flex items-center gap-3 ${
+            status.type === 'success' ? 'bg-buy/10 border-buy/20 text-buy' : 'bg-exit/10 border-exit/20 text-exit'
+          }`}
+        >
+          {status.type === 'success' ? <CheckCircle2 size={16} /> : <AlertTriangle size={16} />}
+          <p className="text-[10px] font-black uppercase tracking-[0.2em]">{status.message}</p>
+        </div>
+      )}
     </div>
   );
 };

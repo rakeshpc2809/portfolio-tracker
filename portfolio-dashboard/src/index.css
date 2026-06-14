@@ -137,3 +137,45 @@ body {
 .box-glow-exit { @apply shadow-[0_0_15px_rgba(243,139,168,0.2)]; }
 .box-glow-harvest { @apply shadow-[0_0_15px_rgba(180,190,254,0.2)]; }
 .box-glow-accent { @apply shadow-[0_0_15px_rgba(203,166,247,0.2)]; }
+
+/* ── Custom Range Slider Styles ── */
+input[type="range"].appearance-none {
+  -webkit-appearance: none;
+  appearance: none;
+  background: rgba(255, 255, 255, 0.05);
+  height: 6px;
+  border-radius: 9999px;
+  outline: none;
+}
+
+input[type="range"].appearance-none::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #cba6f7; /* --color-accent */
+  cursor: pointer;
+  box-shadow: 0 0 10px rgba(203, 166, 247, 0.5);
+  transition: transform 0.1s ease-in-out;
+}
+
+input[type="range"].appearance-none::-webkit-slider-thumb:hover {
+  transform: scale(1.2);
+}
+
+input[type="range"].appearance-none::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border: none;
+  border-radius: 50%;
+  background: #cba6f7;
+  cursor: pointer;
+  box-shadow: 0 0 10px rgba(203, 166, 247, 0.5);
+  transition: transform 0.1s ease-in-out;
+}
+
+input[type="range"].appearance-none::-moz-range-thumb:hover {
+  transform: scale(1.2);
+}
+

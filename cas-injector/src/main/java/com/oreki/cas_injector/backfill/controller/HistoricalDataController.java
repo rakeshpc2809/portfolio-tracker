@@ -20,6 +20,23 @@ public class HistoricalDataController {
     private final HistoricalNavRepository navRepo;
     private final IndexFundamentalsRepository indexRepo;
 
+    @PostMapping("/nav")
+    public ResponseEntity<String> saveHistoricalNavs(@RequestBody List<HistoricalNav> navs) {
+        for (HistoricalNav nav : navs) {
+            String cleanAmfiCode = nav.getAmfiCode() != null ? nav.getAmfiCode().trim().replaceFirst("^0+(?!$)", "") : "UNKNOWN";
+            nav.setAmfiCode(cleanAmfiCode);
+            navRepo.findByAmfiCodeAndNavDate(cleanAmfiCode, nav.getNavDate())
+                .ifPresentOrElse(
+                    existing -> {
+                        existing.setNav(nav.getNav());
+                        navRepo.save(existing);
+                    },
+                    () -> navRepo.save(nav)
+                );
+        }
+        return ResponseEntity.ok("Successfully synced " + navs.size() + " NAV points.");
+    }
+
     @GetMapping("/fund/{amfiCode}")
     public ResponseEntity<Map<String, Object>> getFundHistory(
             @PathVariable String amfiCode,

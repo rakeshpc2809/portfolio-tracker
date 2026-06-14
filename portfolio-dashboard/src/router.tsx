@@ -32,7 +32,8 @@ const indexRoute = createRoute({
   path: '/',
   component: () => {
     const pan = localStorage.getItem('portfolio_pan');
-    if (pan) return <Navigate to="/dashboard/overview" />;
+    const token = localStorage.getItem('portfolio_token');
+    if (pan && (pan === 'SETUP' || token)) return <Navigate to="/dashboard/overview" />;
     return <LoginScreen 
       onLogin={(newPan) => {
         localStorage.setItem('portfolio_pan', newPan);
@@ -55,6 +56,7 @@ const dashboardRoute = createRoute({
 
 function DashboardLayout() {
   const pan = localStorage.getItem('portfolio_pan');
+  const token = localStorage.getItem('portfolio_token');
   const [sipAmount, setSipAmount] = useState(75000);
   const [lumpsum, setLumpsum] = useState(0);
 
@@ -62,10 +64,15 @@ function DashboardLayout() {
 
   const handleLogout = () => {
     localStorage.removeItem('portfolio_pan');
+    localStorage.removeItem('portfolio_token');
     window.location.href = '/';
   };
 
-  if (!pan) return <Navigate to="/" />;
+  if (!pan || (pan !== 'SETUP' && !token)) {
+    localStorage.removeItem('portfolio_pan');
+    localStorage.removeItem('portfolio_token');
+    return <Navigate to="/" />;
+  }
 
   // Better loader would go here
   if (isLoading && !portfolioData) return <div className="bg-background min-h-screen text-muted flex items-center justify-center font-mono text-[10px] uppercase tracking-[0.4em]">Initializing Portfolio OS...</div>;

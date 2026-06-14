@@ -10,7 +10,7 @@ import org.springframework.web.bind.annotation.*;
 import java.math.BigDecimal;
 
 @RestController
-@RequestMapping("/api/strategy")
+@RequestMapping("/strategy")
 @RequiredArgsConstructor
 public class StrategyController {
 
@@ -21,7 +21,7 @@ public class StrategyController {
     @GetMapping("/{pan}")
     public ResponseEntity<?> getTargets(@PathVariable String pan) {
         validatePan(pan);
-        return ResponseEntity.ok(repository.findAll());
+        return ResponseEntity.ok(repository.findByInvestorPan(pan));
     }
 
     @PostMapping("/target")

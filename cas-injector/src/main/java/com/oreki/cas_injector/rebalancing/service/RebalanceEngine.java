@@ -6,12 +6,25 @@ import com.oreki.cas_injector.core.utils.FundStatus;
 import com.oreki.cas_injector.core.utils.SignalType;
 import com.oreki.cas_injector.rebalancing.dto.StrategyTarget;
 import com.oreki.cas_injector.rebalancing.dto.TacticalSignal;
+import com.oreki.cas_injector.rebalancing.dto.RebalanceActionDTO;
+import com.oreki.cas_injector.backfill.repository.HistoricalNavRepository;
+import com.oreki.cas_injector.backfill.model.HistoricalNav;
+import com.oreki.cas_injector.transactions.repository.TaxLotRepository;
+import com.oreki.cas_injector.transactions.model.TaxLot;
+import com.oreki.cas_injector.backfill.service.NavService;
+
 import lombok.Builder;
 import lombok.Data;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
+import org.springframework.web.client.RestTemplate;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.LocalDate;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -19,7 +32,17 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 @Service
+@Slf4j
+@RequiredArgsConstructor
 public class RebalanceEngine {
+
+    private final HistoricalNavRepository navRepo;
+    private final TaxLotRepository taxLotRepository;
+    private final NavService amfiService;
+    private final RestTemplate restTemplate;
+
+    @Value("${quant.engine.url:http://quant-engine:8001}")
+    private String quantEngineUrl;
 
     @Data
     @Builder
@@ -34,54 +57,468 @@ public class RebalanceEngine {
         private Map<String, String> amfiMap;
     }
 
-    private static class RebalanceContext {
-        AggregatedHolding holding;
-        StrategyTarget target;
-        MarketMetrics metrics;
-        RebalanceRequest req;
-        String amfiCode;
-        double actualPct;
-        double targetPct;
-        double drift;
-        String status;
+    /**
+     * Generates strict quantitative rebalance signals by querying the Python quant engine.
+     */
+    public List<RebalanceActionDTO> generateSignals(RebalanceRequest req) {
+        log.info("🎛️ Generating strict tactical rebalance actions for PAN: {}", req.getPan());
+        List<RebalanceActionDTO> actions = new ArrayList<>();
+        LocalDate currentDate = LocalDate.now();
 
-        RebalanceContext(AggregatedHolding holding, StrategyTarget target, MarketMetrics metrics, RebalanceRequest req, String amfiCode) {
-            this.holding = holding;
-            this.target = target;
-            this.metrics = metrics;
-            this.req = req;
-            this.amfiCode = amfiCode;
-            this.actualPct = req.totalPortfolioValue.compareTo(BigDecimal.ZERO) > 0 ? ((holding.getCurrentValue() != null ? holding.getCurrentValue() : BigDecimal.ZERO).divide(req.totalPortfolioValue, 6, RoundingMode.HALF_UP).multiply(BigDecimal.valueOf(100.0)).doubleValue()) : 0.0;
-            this.targetPct = target.targetPortfolioPct();
-            this.drift = this.actualPct - this.targetPct;
+        BigDecimal headroomRemaining = BigDecimal.valueOf(Math.max(0.0, 125000.0 - req.getFyLtcgAlreadyRealized()));
+
+        Map<String, StrategyTarget> targetMap = req.getTargets().stream()
+            .collect(Collectors.toMap(StrategyTarget::isin, t -> t, (a, b) -> a));
+        
+        Set<String> processedIsins = new java.util.HashSet<>();
+
+        // 1. First Pass: Process Mandatory Exits (DROPPED/EXIT) and Clutter positions
+        for (AggregatedHolding holding : req.getHoldings()) {
+            String isin = holding.getIsin();
+            if (isin == null) continue;
             
-            this.status = target.status();
-            if (this.targetPct == 0.0) {
-                this.status = "DROPPED";
-            } else if (this.targetPct > 0.0 && this.actualPct == 0.0) {
-                this.status = "NEW_ENTRY";
+            StrategyTarget target = targetMap.get(isin);
+            String amfiCode = req.getAmfiMap().getOrDefault(isin, "");
+
+            double actualPct = 0.0;
+            if (req.getTotalPortfolioValue().compareTo(BigDecimal.ZERO) > 0) {
+                BigDecimal holdingVal = holding.getCurrentValue() != null ? holding.getCurrentValue() : BigDecimal.ZERO;
+                actualPct = holdingVal.divide(req.getTotalPortfolioValue(), 6, RoundingMode.HALF_UP)
+                    .multiply(BigDecimal.valueOf(100.0)).doubleValue();
             }
-                
-            if (target.sipPct() > 0.0 && "DROPPED".equals(this.status)) {
-                this.status = "ACTIVE";
+
+            boolean isMandatoryExit = false;
+            boolean isClutter = false;
+
+            if (target != null) {
+                String status = target.status() != null ? target.status().toUpperCase() : "ACTIVE";
+                String bucket = target.bucket() != null ? target.bucket().toUpperCase() : "CORE";
+                if ("DROPPED".equals(status) || "EXIT".equals(status) || "DROPPED".equals(bucket) || "EXIT".equals(bucket)) {
+                    isMandatoryExit = true;
+                }
+            } else {
+                isMandatoryExit = true; // No target weight configured means we want to exit it
+            }
+
+            // Clutter definition: targetPct == 0, and actualPct < 1.0% or value < ₹5000 (and not explicitly active)
+            if (target != null && target.targetPortfolioPct() == 0 && !isMandatoryExit) {
+                BigDecimal val = holding.getCurrentValue() != null ? holding.getCurrentValue() : BigDecimal.ZERO;
+                if (actualPct < 1.0 || val.compareTo(BigDecimal.valueOf(5000.0)) < 0) {
+                    isClutter = true;
+                }
+            } else if (target == null) {
+                BigDecimal val = holding.getCurrentValue() != null ? holding.getCurrentValue() : BigDecimal.ZERO;
+                if (actualPct < 1.0 || val.compareTo(BigDecimal.valueOf(5000.0)) < 0) {
+                    isClutter = true;
+                    isMandatoryExit = false; // prioritize clutter label
+                }
+            }
+
+            if (isMandatoryExit || isClutter) {
+                processedIsins.add(isin);
+                BigDecimal currentNav = BigDecimal.ZERO;
+                if (amfiCode != null && !amfiCode.isEmpty()) {
+                    try {
+                        var details = amfiService.getLatestSchemeDetails(amfiCode);
+                        if (details != null && details.getNav() != null) {
+                            currentNav = details.getNav();
+                        }
+                    } catch (Exception e) {
+                        log.warn("Failed to get NAV for mandatory/clutter exit fund amfi {}: {}", amfiCode, e.getMessage());
+                    }
+                }
+                if (currentNav.compareTo(BigDecimal.ZERO) <= 0) {
+                    currentNav = holding.getNav() != null ? holding.getNav() : BigDecimal.ZERO;
+                }
+
+                BigDecimal totalLtcgGain = BigDecimal.ZERO;
+                BigDecimal totalStcgGain = BigDecimal.ZERO;
+                BigDecimal unitsToSell = holding.getUnits() != null ? holding.getUnits() : BigDecimal.ZERO;
+
+                if (unitsToSell.compareTo(BigDecimal.ZERO) > 0 && amfiCode != null && !amfiCode.isEmpty()) {
+                    try {
+                        List<TaxLot> openLots = taxLotRepository.findByStatusAndSchemeAmfiCodeAndSchemeFolioInvestorPan("OPEN", amfiCode, req.getPan());
+                        for (TaxLot lot : openLots) {
+                            long daysHeld = ChronoUnit.DAYS.between(lot.getBuyDate(), currentDate);
+                            BigDecimal remUnits = lot.getRemainingUnits() != null ? lot.getRemainingUnits() : BigDecimal.ZERO;
+                            BigDecimal costBasis = lot.getCostBasisPerUnit() != null ? lot.getCostBasisPerUnit() : BigDecimal.ZERO;
+                            BigDecimal gainPerUnit = currentNav.subtract(costBasis);
+                            BigDecimal gain = gainPerUnit.multiply(remUnits);
+
+                            if (gain.compareTo(BigDecimal.ZERO) > 0) {
+                                if (daysHeld > 365) {
+                                    totalLtcgGain = totalLtcgGain.add(gain);
+                                } else {
+                                    totalStcgGain = totalStcgGain.add(gain);
+                                }
+                            }
+                        }
+                    } catch (Exception e) {
+                        log.warn("Failed to query open lots for exit scheme amfi {}: {}", amfiCode, e.getMessage());
+                    }
+                }
+
+                // Deduct mandatory exit LTCG from remaining tax headroom
+                headroomRemaining = headroomRemaining.subtract(totalLtcgGain);
+                if (headroomRemaining.compareTo(BigDecimal.ZERO) < 0) {
+                    headroomRemaining = BigDecimal.ZERO;
+                }
+
+                String signal = isClutter ? "SELL" : "EXIT";
+                String reason = isClutter 
+                    ? String.format("Sell (Clutter): Small position (< 1.0%% or < ₹5,000) identified as portfolio clutter. Liquidating entire position. Est. LTCG: ₹%,.0f, STCG: ₹%,.0f.", totalLtcgGain, totalStcgGain)
+                    : String.format("Exit (Mandatory): Fund is marked as DROPPED/EXIT. Liquidating entire position. Est. LTCG: ₹%,.0f, STCG: ₹%,.0f.", totalLtcgGain, totalStcgGain);
+
+                actions.add(RebalanceActionDTO.builder()
+                    .schemeName(holding.getSchemeName() != null ? holding.getSchemeName() : (target != null ? target.schemeName() : "Unknown Fund"))
+                    .amfiCode(amfiCode)
+                    .isin(isin)
+                    .signal(signal)
+                    .unitsToTransact(unitsToSell.setScale(4, RoundingMode.HALF_UP))
+                    .justification(reason)
+                    .zScore(BigDecimal.ZERO)
+                    .hurstExponent(BigDecimal.valueOf(0.5))
+                    .build());
             }
         }
 
-        double val() { return holding.getCurrentValue() != null ? holding.getCurrentValue().doubleValue() : 0.0; }
-        double ltcgG() { return holding.getLtcgAmount() != null ? holding.getLtcgAmount().doubleValue() : 0.0; }
-        double stcgG() { return holding.getStcgAmount() != null ? holding.getStcgAmount().doubleValue() : 0.0; }
-        double ltcgV() { return holding.getLtcgValue() != null ? holding.getLtcgValue().doubleValue() : 0.0; }
-        double stcgV() { return holding.getStcgValue() != null ? holding.getStcgValue().doubleValue() : 0.0; }
+        // 2. Second Pass: Process Active Holdings (held active funds + targets not yet held)
+        List<ActiveEvaluationItem> activeItems = new ArrayList<>();
 
-        TacticalSignal createSignal(String action, double amount, List<String> justifications) {
-            return TacticalSignal.builder()
-                .schemeName(holding.getSchemeName())
+        for (AggregatedHolding holding : req.getHoldings()) {
+            String isin = holding.getIsin();
+            if (isin == null || processedIsins.contains(isin)) continue;
+
+            StrategyTarget target = targetMap.get(isin);
+            if (target == null) continue; 
+
+            activeItems.add(new ActiveEvaluationItem(holding, target));
+            processedIsins.add(isin);
+        }
+
+        for (StrategyTarget target : req.getTargets()) {
+            String isin = target.isin();
+            if (isin == null || processedIsins.contains(isin)) continue;
+
+            if (target.targetPortfolioPct() > 0) {
+                AggregatedHolding holding = AggregatedHolding.builder()
+                    .isin(isin)
+                    .schemeName(target.schemeName())
+                    .currentValue(BigDecimal.ZERO)
+                    .units(BigDecimal.ZERO)
+                    .investedAmount(BigDecimal.ZERO)
+                    .ltcgAmount(BigDecimal.ZERO)
+                    .stcgAmount(BigDecimal.ZERO)
+                    .daysToNextLtcg(0)
+                    .build();
+                activeItems.add(new ActiveEvaluationItem(holding, target));
+                processedIsins.add(isin);
+            }
+        }
+
+        // Evaluate standard rebalancing actions
+        for (ActiveEvaluationItem item : activeItems) {
+            AggregatedHolding holding = item.holding;
+            StrategyTarget target = item.target;
+            String amfiCode = req.getAmfiMap().getOrDefault(target.isin(), "");
+
+            double actualPct = 0.0;
+            if (req.getTotalPortfolioValue().compareTo(BigDecimal.ZERO) > 0) {
+                BigDecimal holdingVal = holding.getCurrentValue() != null ? holding.getCurrentValue() : BigDecimal.ZERO;
+                actualPct = holdingVal.divide(req.getTotalPortfolioValue(), 6, RoundingMode.HALF_UP)
+                    .multiply(BigDecimal.valueOf(100.0)).doubleValue();
+            }
+            double targetPct = target.targetPortfolioPct();
+            double drift = actualPct - targetPct;
+
+            double zScore = 0.0;
+            double hurstExponent = 0.5;
+            
+            if (amfiCode != null && !amfiCode.isBlank()) {
+                try {
+                    List<HistoricalNav> history = navRepo.findByAmfiCodeOrderByNavDateAsc(amfiCode);
+                    if (history != null && history.size() >= 50) {
+                        List<Double> navs = history.stream()
+                            .map(h -> h.getNav().doubleValue())
+                            .collect(Collectors.toList());
+                        
+                        Map<String, Object> payload = Map.of("navs", navs);
+                        Map<?, ?> response = restTemplate.postForObject(
+                            quantEngineUrl + "/api/v1/quant/metrics",
+                            payload,
+                            Map.class
+                        );
+                        
+                        if (response != null) {
+                            Number zVal = (Number) response.get("rolling_z_score_252");
+                            Number hVal = (Number) response.get("hurst_exponent");
+                            if (zVal != null) zScore = zVal.doubleValue();
+                            if (hVal != null) hurstExponent = hVal.doubleValue();
+                        }
+                    }
+                } catch (Exception e) {
+                    log.warn("Failed to retrieve quant metrics from python sidecar for amfi {}: {}", amfiCode, e.getMessage());
+                }
+            }
+
+            BigDecimal currentNav = BigDecimal.ZERO;
+            if (amfiCode != null && !amfiCode.isEmpty()) {
+                try {
+                    var details = amfiService.getLatestSchemeDetails(amfiCode);
+                    if (details != null && details.getNav() != null) {
+                        currentNav = details.getNav();
+                    }
+                } catch (Exception e) {
+                    log.warn("Failed to retrieve latest NAV for active amfi {}: {}", amfiCode, e.getMessage());
+                }
+            }
+            if (currentNav.compareTo(BigDecimal.ZERO) <= 0) {
+                currentNav = holding.getNav() != null ? holding.getNav() : BigDecimal.ZERO;
+            }
+
+            String bucket = target.bucket() != null ? target.bucket().toUpperCase() : "CORE";
+            if ("PROPORTIONAL".equals(bucket)) {
+                bucket = "CORE";
+            }
+            double threshold = 5.0;
+            if ("SATELLITE".equals(bucket)) {
+                threshold = 2.0;
+            } else if ("TACTICAL".equals(bucket)) {
+                threshold = 1.5;
+            }
+
+            String signal = "HOLD";
+            BigDecimal unitsToTransact = BigDecimal.ZERO;
+            String justification = String.format("Hold: Current deviation (%+.2f%%) is within the rebalance threshold for %s funds (%.1f%%).", drift, bucket, threshold);
+
+            if (Math.abs(drift) >= threshold) {
+                if (drift < 0) {
+                    // Underweight (BUY)
+                    if (zScore < -4.0) {
+                        signal = "CRITICAL_REVIEW";
+                        justification = String.format("Critical Review: Z-Score is extremely low (Z=%.2f). Halting buys.", zScore);
+                    } else {
+                        boolean triggerBuy = true;
+                        String condNote = "";
+                        if ("TACTICAL".equals(bucket)) {
+                            if (zScore < -1.5) {
+                                condNote = String.format("Tactical cheapness trigger met (Z=%.2f)", zScore);
+                            } else if (hurstExponent > 0.55 && zScore < 0) {
+                                condNote = String.format("Tactical momentum/trend trigger met (H=%.3f, Z=%.2f)", hurstExponent, zScore);
+                            } else {
+                                triggerBuy = false;
+                                justification = String.format("Hold (Tactical): Underweight by %.2f%%, but tactical buy triggers (Z-Score < -1.5 or positive trend with H > 0.55) are not met (Z=%.2f, H=%.3f).", Math.abs(drift), zScore, hurstExponent);
+                            }
+                        } else if ("SATELLITE".equals(bucket)) {
+                            if (zScore < -1.0) {
+                                condNote = String.format("Satellite cheapness trigger met (Z=%.2f)", zScore);
+                            } else {
+                                triggerBuy = false;
+                                justification = String.format("Hold (Satellite): Underweight by %.2f%%, but cheapness filter Z-Score < -1.0 is not met (Z=%.2f).", Math.abs(drift), zScore);
+                            }
+                        } else {
+                            condNote = String.format("Core allocation underweight by %.2f%%", Math.abs(drift));
+                        }
+
+                        if (triggerBuy && currentNav.compareTo(BigDecimal.ZERO) > 0) {
+                            BigDecimal underweightPct = BigDecimal.valueOf(Math.abs(drift));
+                            BigDecimal deficitValue = underweightPct.divide(BigDecimal.valueOf(100.0), 6, RoundingMode.HALF_UP)
+                                .multiply(req.getTotalPortfolioValue());
+                            unitsToTransact = deficitValue.divide(currentNav, 4, RoundingMode.HALF_UP);
+                            signal = "BUY";
+                            justification = String.format("Buy (%s): Underweight by %.2f%% (exceeds %.1f%% band). %s.", bucket, Math.abs(drift), threshold, condNote);
+                        }
+                    }
+                } else if (drift > 0) {
+                    // Overweight (SELL)
+                    if (hurstExponent > 0.55) {
+                        signal = "HOLD";
+                        unitsToTransact = BigDecimal.ZERO;
+                        justification = String.format("Hold (Wave Rider): Target is overweight by %.2f%% but Hurst Exponent indicates a strong upward trend (H=%.3f). Letting profits run.", drift, hurstExponent);
+                    } else {
+                        boolean triggerSell = false;
+                        String condNote = "";
+                        if ("TACTICAL".equals(bucket)) {
+                            if (zScore > 1.5) {
+                                triggerSell = true;
+                                condNote = String.format("Tactical overheated trigger met (Z=%.2f)", zScore);
+                            } else if (hurstExponent < 0.45) {
+                                triggerSell = true;
+                                condNote = String.format("Tactical trend breakdown trigger met (H=%.3f)", hurstExponent);
+                            } else {
+                                justification = String.format("Hold (Tactical): Overweight by %.2f%%, but tactical sell triggers (Z-Score > 1.5 or trend breakdown with H < 0.45) are not met (Z=%.2f, H=%.3f).", drift, zScore, hurstExponent);
+                            }
+                        } else if ("SATELLITE".equals(bucket)) {
+                            if (zScore > 1.5) {
+                                triggerSell = true;
+                                condNote = String.format("Satellite overheated trigger met (Z=%.2f)", zScore);
+                            } else {
+                                justification = String.format("Hold (Satellite): Overweight by %.2f%%, but sell trigger Z-Score > 1.5 is not met (Z=%.2f).", drift, zScore);
+                            }
+                        } else {
+                            if (zScore > 2.0) {
+                                triggerSell = true;
+                                condNote = String.format("Core overheated trigger met (Z=%.2f)", zScore);
+                            } else {
+                                justification = String.format("Hold (Core): Overweight by %.2f%%, but sell trigger Z-Score > 2.0 is not met (Z=%.2f).", drift, zScore);
+                            }
+                        }
+
+                        if (triggerSell) {
+                            if (currentNav.compareTo(BigDecimal.ZERO) > 0) {
+                                BigDecimal overweightPct = BigDecimal.valueOf(drift);
+                                BigDecimal overweightValue = overweightPct.divide(BigDecimal.valueOf(100.0), 6, RoundingMode.HALF_UP)
+                                    .multiply(req.getTotalPortfolioValue());
+                                BigDecimal desiredUnitsToSell = overweightValue.divide(currentNav, 4, RoundingMode.HALF_UP);
+
+                                List<TaxLot> openLots = java.util.Collections.emptyList();
+                                if (amfiCode != null && !amfiCode.isEmpty()) {
+                                    try {
+                                        openLots = taxLotRepository.findByStatusAndSchemeAmfiCodeAndSchemeFolioInvestorPan("OPEN", amfiCode, req.getPan());
+                                    } catch (Exception e) {
+                                        log.warn("Failed to query open lots for scheme amfi {}: {}", amfiCode, e.getMessage());
+                                    }
+                                }
+                                
+                                BigDecimal ltcgUnitsAvailable = BigDecimal.ZERO;
+                                BigDecimal totalLtcgCost = BigDecimal.ZERO;
+
+                                for (TaxLot lot : openLots) {
+                                    long daysHeld = ChronoUnit.DAYS.between(lot.getBuyDate(), currentDate);
+                                    if (daysHeld > 365) {
+                                        BigDecimal remUnits = lot.getRemainingUnits() != null ? lot.getRemainingUnits() : BigDecimal.ZERO;
+                                        BigDecimal costBasis = lot.getCostBasisPerUnit() != null ? lot.getCostBasisPerUnit() : BigDecimal.ZERO;
+                                        ltcgUnitsAvailable = ltcgUnitsAvailable.add(remUnits);
+                                        totalLtcgCost = totalLtcgCost.add(remUnits.multiply(costBasis));
+                                    }
+                                }
+
+                                BigDecimal avgLtcgCostBasis = BigDecimal.ZERO;
+                                if (ltcgUnitsAvailable.compareTo(BigDecimal.ZERO) > 0) {
+                                    avgLtcgCostBasis = totalLtcgCost.divide(ltcgUnitsAvailable, 6, RoundingMode.HALF_UP);
+                                }
+
+                                BigDecimal gainPerUnit = currentNav.subtract(avgLtcgCostBasis);
+                                BigDecimal unitsToSell = desiredUnitsToSell.min(ltcgUnitsAvailable);
+
+                                if (unitsToSell.compareTo(BigDecimal.ZERO) <= 0) {
+                                    signal = "HOLD";
+                                    unitsToTransact = BigDecimal.ZERO;
+                                    justification = String.format("Hold (%s): Overweight by %.2f%%, but no long-term (LTCG) units are available to sell (preserving short-term lots).", bucket, drift);
+                                } else {
+                                    if (gainPerUnit.compareTo(BigDecimal.ZERO) > 0) {
+                                        BigDecimal estimatedGain = gainPerUnit.multiply(unitsToSell);
+                                        if (estimatedGain.compareTo(headroomRemaining) <= 0) {
+                                            signal = "SELL";
+                                            unitsToTransact = unitsToSell;
+                                            justification = String.format("Sell (%s): Target is overweight by %.2f%%. %s. Est. LTCG: ₹%,.0f fits within remaining tax headroom (₹%,.0f).", bucket, drift, condNote, estimatedGain, headroomRemaining);
+                                            headroomRemaining = headroomRemaining.subtract(estimatedGain);
+                                        } else {
+                                            BigDecimal allowedUnits = headroomRemaining.divide(gainPerUnit, 4, RoundingMode.HALF_UP);
+                                            BigDecimal finalUnits = allowedUnits.min(ltcgUnitsAvailable);
+                                            if (finalUnits.compareTo(BigDecimal.ZERO) > 0) {
+                                                signal = "SELL";
+                                                unitsToTransact = finalUnits;
+                                                justification = String.format("Sell (Capped %s): Target is overweight by %.2f%%. %s. Capped to fit remaining LTCG tax headroom (₹%,.0f).", bucket, drift, condNote, headroomRemaining);
+                                                headroomRemaining = BigDecimal.ZERO;
+                                            } else {
+                                                signal = "HOLD";
+                                                unitsToTransact = BigDecimal.ZERO;
+                                                justification = String.format("Hold (%s): Overweight by %.2f%%, but remaining tax headroom is ₹%,.0f (too low to rebalance long-term units).", bucket, drift, headroomRemaining);
+                                            }
+                                        }
+                                    } else {
+                                        signal = "SELL";
+                                        unitsToTransact = unitsToSell;
+                                        justification = String.format("Sell (%s): Target is overweight by %.2f%%. %s. No capital gain generated (selling at or below cost basis).", bucket, drift, condNote);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            actions.add(RebalanceActionDTO.builder()
+                .schemeName(holding.getSchemeName() != null ? holding.getSchemeName() : target.schemeName())
                 .amfiCode(amfiCode)
-                .action(SignalType.valueOf(action))
+                .isin(holding.getIsin() != null ? holding.getIsin() : target.isin())
+                .signal(signal)
+                .unitsToTransact(unitsToTransact.setScale(4, RoundingMode.HALF_UP))
+                .justification(justification)
+                .zScore(BigDecimal.valueOf(zScore).setScale(2, RoundingMode.HALF_UP))
+                .hurstExponent(BigDecimal.valueOf(hurstExponent).setScale(3, RoundingMode.HALF_UP))
+                .build());
+        }
+
+        return actions;
+    }
+
+    private static class ActiveEvaluationItem {
+        final AggregatedHolding holding;
+        final StrategyTarget target;
+        ActiveEvaluationItem(AggregatedHolding holding, StrategyTarget target) {
+            this.holding = holding;
+            this.target = target;
+        }
+    }
+
+    /**
+     * Backwards-compatibility bridge for computeSignals returning List of TacticalSignals.
+     */
+    public List<TacticalSignal> computeSignals(RebalanceRequest req) {
+        List<RebalanceActionDTO> actions = generateSignals(req);
+        List<TacticalSignal> signals = new ArrayList<>();
+
+        for (RebalanceActionDTO action : actions) {
+            String amfiCode = action.getAmfiCode();
+            MarketMetrics metrics = req.getMetrics().getOrDefault(amfiCode, 
+                MarketMetrics.fromLegacy(50, 0, 0, 0, 0, 0.5, 0, 0, java.time.LocalDate.of(1970, 1, 1)));
+
+            double actualPct = 0.0;
+            double targetPct = 0.0;
+
+            StrategyTarget target = req.getTargets().stream()
+                .filter(t -> t.isin().equals(action.getIsin()))
+                .findFirst().orElse(null);
+            
+            AggregatedHolding holding = req.getHoldings().stream()
+                .filter(h -> h.getIsin().equals(action.getIsin()))
+                .findFirst().orElse(null);
+
+            if (target != null) {
+                targetPct = target.targetPortfolioPct();
+            }
+            if (holding != null && req.getTotalPortfolioValue().compareTo(BigDecimal.ZERO) > 0) {
+                BigDecimal holdingVal = holding.getCurrentValue() != null ? holding.getCurrentValue() : BigDecimal.ZERO;
+                actualPct = holdingVal.divide(req.getTotalPortfolioValue(), 6, RoundingMode.HALF_UP)
+                    .multiply(BigDecimal.valueOf(100.0)).doubleValue();
+            }
+
+            BigDecimal currentNav = amfiService.getLatestSchemeDetails(amfiCode).getNav();
+            if (currentNav == null || currentNav.compareTo(BigDecimal.ZERO) <= 0) {
+                currentNav = holding != null && holding.getNav() != null ? holding.getNav() : BigDecimal.ZERO;
+            }
+            double amount = action.getUnitsToTransact().multiply(currentNav).doubleValue();
+
+            String signalStr = action.getSignal();
+            SignalType signalType = SignalType.HOLD;
+            if ("BUY".equals(signalStr)) signalType = SignalType.BUY;
+            else if ("SELL".equals(signalStr)) signalType = SignalType.SELL;
+            else if ("EXIT".equals(signalStr)) signalType = SignalType.EXIT;
+            else if ("CRITICAL_REVIEW".equals(signalStr)) signalType = SignalType.WATCH;
+
+            String status = "ACTIVE";
+            if (target != null) status = target.status();
+
+            signals.add(TacticalSignal.builder()
+                .schemeName(action.getSchemeName())
+                .amfiCode(action.getAmfiCode())
+                .action(signalType)
                 .amount(String.format(java.util.Locale.US, "%.2f", amount))
                 .plannedPercentage(targetPct)
                 .actualPercentage(actualPct)
-                .justifications(justifications)
+                .justifications(List.of(action.getJustification()))
                 .fundStatus(FundStatus.fromString(status))
                 .convictionScore(metrics.convictionScore())
                 .sortinoRatio(metrics.sortinoRatio())
@@ -89,7 +526,8 @@ public class RebalanceEngine {
                 .navPercentile1yr(metrics.navPercentile1yr())
                 .navPercentile3yr(metrics.navPercentile3yr())
                 .drawdownFromAth(metrics.drawdownFromAth())
-                .returnZScore(metrics.returnZScore())
+                .returnZScore(action.getZScore() != null ? action.getZScore().doubleValue() : metrics.returnZScore())
+                .hurstExponent(action.getHurstExponent() != null ? action.getHurstExponent().doubleValue() : metrics.hurstExponent())
                 .winRate(metrics.winRate())
                 .cvar5(metrics.cvar5())
                 .lastBuyDate(metrics.lastBuyDate())
@@ -104,206 +542,7 @@ public class RebalanceEngine {
                 .aumCr(metrics.aumCr())
                 .ouHalfLife(metrics.ouHalfLife())
                 .ouValid(metrics.ouValid())
-                .build();
-        }
-    }
-
-    private interface RebalanceStrategy {
-        boolean canHandle(RebalanceContext ctx);
-        TacticalSignal evaluate(RebalanceContext ctx);
-    }
-
-    private static class ParkingVehicleStrategy implements RebalanceStrategy {
-        public boolean canHandle(RebalanceContext ctx) {
-            String cat = ctx.target.bucket() != null ? ctx.target.bucket().toUpperCase() : "";
-            return cat.contains("LIQUID") || cat.contains("ARBITRAGE") || "REBALANCER".equals(ctx.status);
-        }
-        public TacticalSignal evaluate(RebalanceContext ctx) {
-            return ctx.createSignal("HOLD", 0.0, List.of("Rebalancer: Liquidity parking vehicle. No tactical signals."));
-        }
-    }
-
-    private static class BetaMitigationStrategy implements RebalanceStrategy {
-        public boolean canHandle(RebalanceContext ctx) {
-            return ("DROPPED".equals(ctx.status) || "EXIT".equals(ctx.status)) && "VOLATILE_BEAR".equals(ctx.metrics.hmmState());
-        }
-        public TacticalSignal evaluate(RebalanceContext ctx) {
-            return ctx.createSignal("EXIT", ctx.val(), List.of("Beta Mitigation: VOLATILE_BEAR regime. Exiting immediately to reduce drawdown exposure."));
-        }
-    }
-
-    private static class TaxFreeExitStrategy implements RebalanceStrategy {
-        public boolean canHandle(RebalanceContext ctx) {
-            if (!("DROPPED".equals(ctx.status) || "EXIT".equals(ctx.status))) return false;
-            double ltcgRemaining = Math.max(0.0, 125000.0 - ctx.req.fyLtcgAlreadyRealized);
-            return ctx.ltcgG() > 0 && ctx.stcgG() < 100 && ctx.ltcgG() <= ltcgRemaining;
-        }
-        public TacticalSignal evaluate(RebalanceContext ctx) {
-            return ctx.createSignal("EXIT", ctx.val(), List.of(String.format("Tax-Free Exit: All unrealized gains (₹%.0f) are LTCG and fit within remaining FY exemption. Exiting NOW is tax-free.", ctx.ltcgG())));
-        }
-    }
-
-    private static class StcgShieldExitStrategy implements RebalanceStrategy {
-        public boolean canHandle(RebalanceContext ctx) {
-            if (!("DROPPED".equals(ctx.status) || "EXIT".equals(ctx.status))) return false;
-            return ctx.holding.getDaysToNextLtcg() > 0 && ctx.holding.getDaysToNextLtcg() <= 90 && ctx.stcgV() > 1000;
-        }
-        public TacticalSignal evaluate(RebalanceContext ctx) {
-            if (ctx.ltcgV() > 1000) {
-                return ctx.createSignal("EXIT", ctx.ltcgV(), List.of(
-                    String.format("Partial Strategic Exit: Selling LTCG portion (₹%,.0f).", ctx.ltcgV()),
-                    String.format("STCG Shield: Holding remaining ₹%,.0f for %d days to avoid 20%% tax penalty.", ctx.stcgV(), ctx.holding.getDaysToNextLtcg())
-                ));
-            }
-            return ctx.createSignal("HOLD", 0.0, List.of(String.format("STCG Shield: %d days to LTCG conversion. Holding to avoid 20%% STCG penalty.", ctx.holding.getDaysToNextLtcg())));
-        }
-    }
-
-    private static class StandardExitStrategy implements RebalanceStrategy {
-        public boolean canHandle(RebalanceContext ctx) {
-            return "DROPPED".equals(ctx.status) || "EXIT".equals(ctx.status);
-        }
-        public TacticalSignal evaluate(RebalanceContext ctx) {
-            return ctx.createSignal("EXIT", ctx.val(), List.of("Strategic Exit: Exiting dropped fund."));
-        }
-    }
-
-    private static class OverweightStcgShieldStrategy implements RebalanceStrategy {
-        public boolean canHandle(RebalanceContext ctx) {
-            if ("ACCUMULATOR".equals(ctx.status)) return false;
-            if (ctx.drift <= 2.5) return false;
-            return ctx.holding.getDaysToNextLtcg() > 0 && ctx.holding.getDaysToNextLtcg() <= 90 && ctx.stcgV() > 1000;
-        }
-        public TacticalSignal evaluate(RebalanceContext ctx) {
-            double overweightVal = (ctx.drift / 100.0) * ctx.req.totalPortfolioValue.doubleValue();
-            if (ctx.ltcgV() > 1000) {
-                double trimAmt = Math.min(overweightVal, ctx.ltcgV());
-                return ctx.createSignal("SELL", trimAmt, List.of(
-                    String.format("Strategic Trim: Reducing overweight position by selling LTCG portion (₹%,.0f).", trimAmt),
-                    String.format("STCG Shield: Protecting ₹%,.0f from STCG tax for %d days.", ctx.stcgV(), ctx.holding.getDaysToNextLtcg())
-                ));
-            }
-            return ctx.createSignal("HOLD", 0.0, List.of(String.format("Overweight Shield: Fund is overweight by %.1f%%, but holding to avoid STCG tax on recent lots.", ctx.drift)));
-        }
-    }
-
-    private static class TrimOverweightStrategy implements RebalanceStrategy {
-        public boolean canHandle(RebalanceContext ctx) {
-            if ("ACCUMULATOR".equals(ctx.status)) return false;
-            return ctx.drift > 2.5;
-        }
-        public TacticalSignal evaluate(RebalanceContext ctx) {
-            double overweightVal = (ctx.drift / 100.0) * ctx.req.totalPortfolioValue.doubleValue();
-            return ctx.createSignal("SELL", overweightVal, List.of(
-                String.format("Strategic Trim: Fund is overweight by %.1f%%.", ctx.drift),
-                String.format("Target: %.1f%% | Actual: %.1f%%", ctx.targetPct, ctx.actualPct),
-                String.format("Suggested sell: ₹%,.0f to reach target allocation.", overweightVal)
-            ));
-        }
-    }
-
-    private static class UnderweightBearMarketStrategy implements RebalanceStrategy {
-        public boolean canHandle(RebalanceContext ctx) {
-            return ctx.drift < -2.5 && "VOLATILE_BEAR".equals(ctx.metrics.hmmState()) && ctx.metrics.hmmTransitionBearProb() > 0.60;
-        }
-        public TacticalSignal evaluate(RebalanceContext ctx) {
-            return ctx.createSignal("WATCH", 0.0, List.of("Market Caution: HMM indicates high probability of bear transition. Suspending buys."));
-        }
-    }
-
-    private static class FillUnderweightStrategy implements RebalanceStrategy {
-        public boolean canHandle(RebalanceContext ctx) {
-            return ctx.drift < -2.5;
-        }
-        public TacticalSignal evaluate(RebalanceContext ctx) {
-            double deficitVal = Math.abs(ctx.drift / 100.0) * ctx.req.totalPortfolioValue.doubleValue();
-            return ctx.createSignal("BUY", deficitVal, List.of(
-                String.format("Strategic Realignment: Fund is underweight by %.1f%%.", Math.abs(ctx.drift)),
-                String.format("Target: %.1f%% | Actual: %.1f%%", ctx.targetPct, ctx.actualPct),
-                String.format("Suggested buy: ₹%,.0f to reach target allocation.", deficitVal)
-            ));
-        }
-    }
-
-    private static class WashSaleStrategy implements RebalanceStrategy {
-        public boolean canHandle(RebalanceContext ctx) {
-            if (Math.abs(ctx.drift) > 2.5) return false;
-            double ltcgRemaining = Math.max(0.0, 125000.0 - ctx.req.fyLtcgAlreadyRealized);
-            return ctx.ltcgG() > 5000 && ctx.ltcgG() <= ltcgRemaining && ctx.stcgG() < 500;
-        }
-        public TacticalSignal evaluate(RebalanceContext ctx) {
-            return ctx.createSignal("WASH_SALE", ctx.val(), List.of(String.format("Wash Sale Opportunity: Harvest ₹%.0f in tax-free LTCG.", ctx.ltcgG())));
-        }
-    }
-
-    private static class MeanReversionBuyStrategy implements RebalanceStrategy {
-        public boolean canHandle(RebalanceContext ctx) {
-            return Math.abs(ctx.drift) <= 2.5 && ctx.metrics.hurstExponent() < 0.45 && ctx.metrics.rollingZScore252() < -1.5;
-        }
-        public TacticalSignal evaluate(RebalanceContext ctx) {
-            double amount = ctx.req.totalPortfolioValue.doubleValue() * 0.01;
-            return ctx.createSignal("BUY", amount, List.of("Opportunistic Buy: Mean reversion trigger at statistical deep discount."));
-        }
-    }
-
-    private static class DefaultHoldStrategy implements RebalanceStrategy {
-        public boolean canHandle(RebalanceContext ctx) {
-            return true;
-        }
-        public TacticalSignal evaluate(RebalanceContext ctx) {
-            return ctx.createSignal("HOLD", 0.0, List.of("Hold: Fund is within target allocation range."));
-        }
-    }
-
-    private final List<RebalanceStrategy> strategies = List.of(
-        new ParkingVehicleStrategy(),
-        new BetaMitigationStrategy(),
-        new TaxFreeExitStrategy(),
-        new StcgShieldExitStrategy(),
-        new StandardExitStrategy(),
-        new OverweightStcgShieldStrategy(),
-        new TrimOverweightStrategy(),
-        new UnderweightBearMarketStrategy(),
-        new FillUnderweightStrategy(),
-        new WashSaleStrategy(),
-        new MeanReversionBuyStrategy(),
-        new DefaultHoldStrategy()
-    );
-
-    public List<TacticalSignal> computeSignals(RebalanceRequest req) {
-        List<TacticalSignal> signals = new ArrayList<>();
-        
-        Map<String, StrategyTarget> targetMap = req.targets.stream().collect(Collectors.toMap(StrategyTarget::isin, t -> t, (a, b) -> a));
-        Set<String> heldIsins = req.holdings.stream().map(AggregatedHolding::getIsin).collect(Collectors.toSet());
-
-        for (AggregatedHolding holding : req.holdings) {
-            StrategyTarget target = targetMap.getOrDefault(holding.getIsin(), new StrategyTarget(holding.getIsin(), holding.getSchemeName(), 0.0, 0.0, "DROPPED", "OTHERS"));
-            String amfiCode = req.amfiMap.getOrDefault(holding.getIsin(), "");
-            MarketMetrics metrics = req.metrics.getOrDefault(amfiCode, MarketMetrics.fromLegacy(50, 0, 0, 0, 0, 0.5, 0, 0, java.time.LocalDate.of(1970, 1, 1)));
-            
-            RebalanceContext ctx = new RebalanceContext(holding, target, metrics, req, amfiCode);
-            for (RebalanceStrategy strategy : strategies) {
-                if (strategy.canHandle(ctx)) {
-                    signals.add(strategy.evaluate(ctx));
-                    break;
-                }
-            }
-        }
-
-        for (StrategyTarget target : req.targets) {
-            if (!heldIsins.contains(target.isin()) && target.targetPortfolioPct() > 0) {
-                AggregatedHolding holding = AggregatedHolding.builder().isin(target.isin()).schemeName(target.schemeName()).currentValue(java.math.BigDecimal.ZERO).ltcgAmount(java.math.BigDecimal.ZERO).stcgAmount(java.math.BigDecimal.ZERO).daysToNextLtcg(0).build();
-                String amfiCode = req.amfiMap.getOrDefault(target.isin(), "");
-                MarketMetrics metrics = req.metrics.getOrDefault(amfiCode, MarketMetrics.fromLegacy(50, 0, 0, 0, 0, 0.5, 0, 0, java.time.LocalDate.of(1970, 1, 1)));
-                
-                RebalanceContext ctx = new RebalanceContext(holding, target, metrics, req, amfiCode);
-                for (RebalanceStrategy strategy : strategies) {
-                    if (strategy.canHandle(ctx)) {
-                        signals.add(strategy.evaluate(ctx));
-                        break;
-                    }
-                }
-            }
+                .build());
         }
 
         return signals;

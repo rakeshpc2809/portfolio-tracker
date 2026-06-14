@@ -5,17 +5,23 @@ const BASE_URL = '/api';
 const PARSER_URL = '/parser';
 const API_KEY = (import.meta.env.VITE_API_KEY as string) || 'dev-secret-key';
 
-const authenticatedFetch = (url: string, options: RequestInit = {}) => {
+export const authenticatedFetch = async (url: string, options: RequestInit = {}) => {
   const token = localStorage.getItem('portfolio_token');
   const headers = new Headers(options.headers);
   headers.set('X-API-KEY', API_KEY);
   if (token) {
     headers.set('Authorization', `Bearer ${token}`);
   }
-  return fetch(url, {
+  const response = await fetch(url, {
     ...options,
     headers,
   });
+  if (response.status === 401 || response.status === 403) {
+    localStorage.removeItem('portfolio_token');
+    localStorage.removeItem('portfolio_pan');
+    window.location.href = '/';
+  }
+  return response;
 };
 
 export const fetchMasterPortfolio = async (investorPan: string, sip: number = 75000, lumpsum: number = 0) => {
@@ -62,6 +68,30 @@ export const fetchTlhOpportunities = async (pan: string) => {
     `${BASE_URL}/portfolio/${pan}/tax-loss-harvesting`
   );
   if (!response.ok) return [];
+  return response.json();
+};
+
+export const fetchPortfolioState = async () => {
+  const response = await authenticatedFetch(`${BASE_URL}/v1/portfolio/state`);
+  if (!response.ok) throw new Error("Failed to fetch portfolio state");
+  return response.json();
+};
+
+export const fetchTaxHeadroom = async () => {
+  const response = await authenticatedFetch(`${BASE_URL}/v1/portfolio/tax-headroom`);
+  if (!response.ok) throw new Error("Failed to fetch tax headroom");
+  return response.json();
+};
+
+export const fetchLtcgExitSchedule = async (pan: string) => {
+  const response = await authenticatedFetch(`${BASE_URL}/dashboard/ltcg-exit-schedule/${pan}`);
+  if (!response.ok) throw new Error("Failed to fetch LTCG exit schedule");
+  return response.json();
+};
+
+export const fetchVintageReturns = async (pan: string) => {
+  const response = await authenticatedFetch(`${BASE_URL}/dashboard/vintage-returns/${pan}`);
+  if (!response.ok) throw new Error("Failed to fetch vintage returns");
   return response.json();
 };
 
@@ -245,6 +275,9 @@ export const fetchAlphaFeed = async () => {
 export const updateStrategyTarget = async (data: { pan: string, amfiCode: string, allocation: number, strategyType: string }) => {
   const response = await authenticatedFetch(`${BASE_URL}/strategy/target`, {
     method: 'POST',
+    headers: {
+      'Content-Type': 'application/json'
+    },
     body: JSON.stringify(data)
   });
   if (!response.ok) throw new Error("Failed to update strategy target");

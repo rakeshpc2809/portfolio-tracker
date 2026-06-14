@@ -25,4 +25,8 @@ public interface TaxLotRepository extends JpaRepository<TaxLot, Long> {
 
     @Query("SELECT tl FROM TaxLot tl JOIN FETCH tl.scheme WHERE tl.status = :status AND tl.scheme.amfiCode = :amfi AND tl.scheme.folio.investor.pan = :pan")
     List<TaxLot> findByStatusAndSchemeAmfiCodeAndSchemeFolioInvestorPan(@Param("status") String status, @Param("amfi") String amfi, @Param("pan") String pan);
+
+    @Query("SELECT tl FROM TaxLot tl JOIN FETCH tl.scheme WHERE tl.status = :status")
+    List<TaxLot> findAllByStatus(@Param("status") String status);
 }
+

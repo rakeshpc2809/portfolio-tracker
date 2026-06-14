@@ -28,7 +28,7 @@ export default function TaxView({
   const stcgFunds = (portfolioData.schemeBreakdown || [])
     .filter((s: any) => (s.stcgUnrealizedGain || 0) > 0 || (s.slabRateGain || 0) > 0)
     .map((s: any) => {
-      const isSlab = s.isSlabRateFund;
+      const isSlab = s.slabRateFund === true;
       const gain = (s.stcgUnrealizedGain || 0) + (s.slabRateGain || 0);
       const taxRate = isSlab ? investorSlab : 0.20;
       return {
