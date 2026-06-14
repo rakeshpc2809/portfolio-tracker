@@ -4,7 +4,6 @@ import { ShieldAlert, ShieldCheck, TrendingDown, ArrowRight, ChartBarStacked, Ca
 import MetricWithTooltip from '../ui/MetricWithTooltip';
 import CurrencyValue from '../ui/CurrencyValue';
 import { fetchTlhOpportunities } from '../../services/api';
-import { motion, AnimatePresence } from 'framer-motion';
 import * as Tooltip from '@radix-ui/react-tooltip';
 import { ResponsiveBar } from '@nivo/bar';
 import LtcgPlannerView from './LtcgPlannerView';
@@ -145,13 +144,10 @@ export default function TaxView({
         </div>
       </header>
 
-      <AnimatePresence mode="wait">
+      <>
         {activeTab === 'OVERVIEW' ? (
-          <motion.div
+          <div
             key="overview"
-            initial={{ opacity: 0, x: -10 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: 10 }}
             className="space-y-10"
           >
             {/* Gain Distribution Chart */}
@@ -243,15 +239,13 @@ export default function TaxView({
                       strokeWidth="8"
                       className="text-white/5"
                     />
-                    <motion.circle
+                    <circle
                       cx="64" cy="64" r="36"
                       fill="transparent"
                       stroke="currentColor"
                       strokeWidth="8"
                       strokeDasharray={circumference}
-                      initial={{ strokeDashoffset: circumference }}
-                      animate={{ strokeDashoffset }}
-                      transition={{ duration: 1.5, ease: "easeOut" }}
+                      strokeDashoffset={strokeDashoffset}
                       strokeLinecap="round"
                       className={`${ltcgPercent > 80 ? 'text-exit' : ltcgPercent > 50 ? 'text-warning' : 'text-buy'}`}
                     />
@@ -421,9 +415,8 @@ export default function TaxView({
                           </div>
                           
                           <div className="h-1 w-full bg-white/5 rounded-full overflow-hidden">
-                            <motion.div 
-                              initial={{ width: 0 }}
-                              animate={{ width: `${waitProgress}%` }}
+                            <div 
+                              style={{width: `${waitProgress}%` }}
                               className={`h-full ${waitColor}`}
                             />
                           </div>
@@ -523,18 +516,15 @@ export default function TaxView({
                 <MetricWithTooltip label="Headroom" value={<CurrencyValue isPrivate={isPrivate} value={Math.max(0, ltcgLimit - realizedLTCG)} />} valueClass="text-buy font-bold" tooltip="Remaining tax-free LTCG limit for this year." />
               </div>
             </section>
-          </motion.div>
+          </div>
         ) : (
-          <motion.div
+          <div
             key="planner"
-            initial={{ opacity: 0, x: 10 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: -10 }}
-          >
+            >
             <LtcgPlannerView pan={pan} isPrivate={isPrivate} />
-          </motion.div>
+          </div>
         )}
-      </AnimatePresence>
+      </>
     </div>
   );
 }

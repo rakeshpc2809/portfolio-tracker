@@ -16,7 +16,6 @@ import com.oreki.cas_injector.dashboard.repository.PortfolioDashboardReadModelRe
 import com.oreki.cas_injector.dashboard.service.DashboardService;
 import com.oreki.cas_injector.dashboard.dto.DashboardSummaryDTO;
 import com.oreki.cas_injector.convictionmetrics.service.ConvictionScoringService;
-import com.oreki.cas_injector.convictionmetrics.service.QuantitativeEngineService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import lombok.RequiredArgsConstructor;
@@ -30,7 +29,6 @@ public class PortfolioSummaryUpdater {
     private final PortfolioDashboardReadModelRepository summaryRepo;
     private final DashboardService dashboardService;
     private final ConvictionScoringService convictionScoringService;
-    private final QuantitativeEngineService quantitativeEngineService;
     private final ObjectMapper objectMapper;
 
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
@@ -44,9 +42,8 @@ public class PortfolioSummaryUpdater {
             log.info("🔄 [CQRS] Refreshing materialized view mv_portfolio_summary...");
             dashboardService.refreshMaterializedView();
 
-            // 1. Run Quantitative Engine and Scoring (The "Intelligence" side)
+            // 1. Run Conviction Scoring (The "Intelligence" side)
             log.info("🧮 [CQRS] Triggering scoring engine for PAN: {}", pan);
-            quantitativeEngineService.runNightlyMathEngine();
             convictionScoringService.calculateAndSaveFinalScores(pan);
 
             // 2. Compute the full dashboard (The "Query" side of the foundation)

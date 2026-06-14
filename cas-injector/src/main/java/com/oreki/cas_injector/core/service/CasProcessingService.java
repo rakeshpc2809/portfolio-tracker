@@ -37,8 +37,6 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import com.fasterxml.jackson.databind.JsonNode;
 
-import com.oreki.cas_injector.convictionmetrics.service.ConvictionScoringService;
-import com.oreki.cas_injector.convictionmetrics.service.QuantitativeEngineService;
 import org.springframework.scheduling.annotation.Async;
 
 @Service
@@ -53,8 +51,6 @@ public class CasProcessingService {
     private final NavService navService;
     private final CacheManager cacheManager;
     private final FifoInventoryService fifoService;
-    private final QuantitativeEngineService quantitativeEngineService;
-    private final ConvictionScoringService convictionScoringService;
     private final JdbcTemplate jdbcTemplate;
     private final PortfolioDashboardReadModelRepository summaryRepo;
     private final org.springframework.context.ApplicationEventPublisher eventPublisher;

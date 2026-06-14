@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react';
-import { motion } from 'framer-motion';
 import { Calendar, Save, TrendingUp, AlertTriangle } from 'lucide-react';
 import CurrencyValue from '../ui/CurrencyValue';
 import type { ExitScheduleItem } from '../../types/signals';
@@ -77,13 +76,10 @@ export default function LtcgPlannerView({ pan, isPrivate }: { pan: string, isPri
 
       {/* SCHEDULE TABLE */}
       <section className="space-y-4">
-        {schedule.map((item, idx) => (
-          <motion.div 
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: idx * 0.05 }}
+        {schedule.map((item) => (
+          <div 
             key={item.schemeName}
-            className={`p-6 rounded-[2rem] border transition-all ${
+            className={`p-6 rounded-[2rem] border -all ${
               item.suggestedFY === 'CURRENT_FY' 
                 ? 'bg-buy/5 border-buy/10 hover:border-buy/30' 
                 : 'bg-warning/5 border-warning/10 hover:border-warning/30'
@@ -156,7 +152,7 @@ export default function LtcgPlannerView({ pan, isPrivate }: { pan: string, isPri
                 </div>
               </div>
             )}
-          </motion.div>
+          </div>
         ))}
 
         {schedule.length === 0 && (

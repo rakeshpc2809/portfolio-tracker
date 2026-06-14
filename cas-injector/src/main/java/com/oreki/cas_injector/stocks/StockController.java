@@ -16,15 +16,14 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class StockController {
     private static final Logger log = LoggerFactory.getLogger(StockController.class);
-    private final StockImportService importSvc;
     private final StockSyncService   syncSvc;
     private final StockAggregationService aggSvc;
 
 
     @DeleteMapping("/purge")
     public ResponseEntity<?> purgeData(@RequestParam("pan") String pan) {
-        importSvc.purgeStockData(pan);
-        return ResponseEntity.ok(Map.of("status", "success", "message", "Stock data purged for " + pan));
+        log.info("Stock purge requested for PAN: {} (No-op as stock importing is disabled)", pan);
+        return ResponseEntity.ok(Map.of("status", "success", "message", "Stock feature is currently read-only"));
     }
 
     @PostMapping("/sync")

@@ -21,7 +21,6 @@ import org.springframework.web.client.RestTemplate;
 import com.oreki.cas_injector.core.model.Investor;
 import com.oreki.cas_injector.core.repository.InvestorRepository;
 import com.oreki.cas_injector.convictionmetrics.service.ConvictionScoringService;
-import com.oreki.cas_injector.convictionmetrics.service.QuantitativeEngineService;
 
 import lombok.extern.slf4j.Slf4j;
 
@@ -31,7 +30,6 @@ public class AmfiDailyDeltaService {
 
     private final JdbcTemplate jdbcTemplate;
     private final RestTemplate restTemplate;
-    private final QuantitativeEngineService quantitativeEngineService;
     private final ConvictionScoringService convictionScoringService;
     private final CacheManager cacheManager;
     private final InvestorRepository investorRepository;
@@ -40,13 +38,11 @@ public class AmfiDailyDeltaService {
     private static final DateTimeFormatter DATE_FORMATTER = DateTimeFormatter.ofPattern("dd-MMM-yyyy");
 
     public AmfiDailyDeltaService(JdbcTemplate jdbcTemplate, RestTemplate restTemplate, 
-                                 QuantitativeEngineService quantitativeEngineService,
                                  ConvictionScoringService convictionScoringService,
                                  CacheManager cacheManager,
                                  InvestorRepository investorRepository) {
         this.jdbcTemplate = jdbcTemplate;
         this.restTemplate = restTemplate;
-        this.quantitativeEngineService = quantitativeEngineService;
         this.convictionScoringService = convictionScoringService;
         this.cacheManager = cacheManager;
         this.investorRepository = investorRepository;
@@ -113,7 +109,6 @@ public class AmfiDailyDeltaService {
             }
 
             // Trigger engines
-            quantitativeEngineService.runNightlyMathEngine();
             investorRepository.findAll().forEach(investor -> {
                 convictionScoringService.calculateAndSaveFinalScores(investor.getPan());
             });

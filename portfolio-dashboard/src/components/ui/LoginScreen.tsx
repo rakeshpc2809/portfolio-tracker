@@ -1,5 +1,4 @@
 import React, { useState } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
 import { ShieldCheck, ArrowRight, Loader2, Lock, Zap, Upload } from 'lucide-react';
 import { checkInvestorExistence } from '../../services/api';
 
@@ -48,20 +47,15 @@ export default function LoginScreen({ onLogin, onSetup }: LoginScreenProps) {
         <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-buy/5 rounded-full blur-[120px]" />
       </div>
 
-      <motion.div 
-        initial={{ opacity: 0, y: 20, scale: 0.95 }}
-        animate={{ opacity: 1, y: 0, scale: 1 }}
+      <div 
         className="w-full max-w-md space-y-10 relative z-10"
       >
         <div className="text-center space-y-4">
-          <motion.div 
-            initial={{ scale: 0 }}
-            animate={{ scale: 1 }}
-            transition={{ type: 'spring', damping: 12, stiffness: 200 }}
+          <div 
             className="w-16 h-16 bg-accent/10 border border-accent/20 rounded-3xl flex items-center justify-center mx-auto shadow-[0_0_30px_rgba(203,166,247,0.2)]"
           >
             <Lock className="text-accent" size={28} />
-          </motion.div>
+          </div>
           <div className="space-y-1">
             <h1 className="text-3xl font-black text-primary tracking-tighter">Portfolio OS</h1>
             <p className="text-muted text-[10px] font-black uppercase tracking-[0.4em] opacity-60">Quant-Driven Wealth Intelligence</p>
@@ -87,18 +81,15 @@ export default function LoginScreen({ onLogin, onSetup }: LoginScreenProps) {
                 />
                 <ShieldCheck className={`absolute right-5 top-1/2 -translate-y-1/2 transition-colors ${pan.length === 10 ? 'text-buy' : 'text-muted/10'}`} size={18} />
               </div>
-              <AnimatePresence mode="wait">
+              <>
                 {error && (
-                  <motion.p 
-                    initial={{ opacity: 0, x: -10 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    exit={{ opacity: 0, x: 10 }}
-                    className="text-[10px] font-bold text-exit uppercase tracking-wider ml-1"
+                  <p 
+                    className="text-[10px] font-bold text-uppercase tracking-wider ml-1"
                   >
                     ⚠️ {error}
-                  </motion.p>
+                  </p>
                 )}
-              </AnimatePresence>
+              </>
             </div>
 
             <button
@@ -141,7 +132,7 @@ export default function LoginScreen({ onLogin, onSetup }: LoginScreenProps) {
         <p className="text-center text-[9px] font-bold text-muted/20 uppercase tracking-[0.3em]">
           End-to-End Encrypted Terminal · Restricted Access
         </p>
-      </motion.div>
+      </div>
     </div>
   );
 }

@@ -1,5 +1,4 @@
 import { useEffect, useState, useMemo } from 'react';
-import { motion, type Variants } from 'framer-motion';
 import { X, Zap, Info, ShieldCheck, Activity } from 'lucide-react';
 import { convictionColor, buildPlainEnglishReason } from '../../utils/formatters';
 import * as Dialog from '@radix-ui/react-dialog';
@@ -147,41 +146,18 @@ export default function FundDetailView({
 
   const radarData = components.map(c => ({ subject: c.label, A: c.score, fullMark: 100 }));
 
-  const container: Variants = {
-    hidden: { opacity: 0 },
-    show: { opacity: 1, transition: { staggerChildren: 0.1 } }
-  };
 
-  const item: Variants = {
-    hidden: { opacity: 0, x: 20 },
-    show: { 
-      opacity: 1, 
-      x: 0, 
-      transition: { 
-        type: "spring" as const, 
-        stiffness: 300, 
-        damping: 24 
-      } 
-    }
-  };
 
   return (
     <Dialog.Root open={isOpen} onOpenChange={onClose}>
       <Dialog.Portal>
         <Dialog.Overlay asChild>
-          <motion.div 
-            initial={{ opacity: 0 }} 
-            animate={{ opacity: 1 }} 
-            exit={{ opacity: 0 }}
+          <div 
             className="fixed inset-0 bg-black/80 backdrop-blur-md z-[100]" 
           />
         </Dialog.Overlay>
         <Dialog.Content asChild>
-          <motion.div 
-            initial={{ x: '100%' }} 
-            animate={{ x: 0 }} 
-            exit={{ x: '100%' }}
-            transition={{ type: 'spring', damping: 30, stiffness: 250 }}
+          <div 
             className="fixed right-0 top-0 bottom-0 w-full max-w-3xl bg-surface/60 backdrop-blur-3xl border-l border-white/5 z-[101] shadow-[0_0_100px_rgba(0,0,0,0.5)] overflow-y-auto focus:outline-none"
           >
             <div className="p-10 space-y-12">
@@ -222,7 +198,7 @@ export default function FundDetailView({
                     {fund.convictionHistory && fund.convictionHistory.length > 1 && (
                       <div className="mt-1 h-4 w-16 ml-auto">
                         <svg viewBox="0 0 100 100" className="w-full h-full overflow-visible" preserveAspectRatio="none">
-                          <motion.path
+                          <path
                             d={(() => {
                               const h = fund.convictionHistory.slice(-30);
                               const mn = Math.min(...h), mx = Math.max(...h);
@@ -234,9 +210,6 @@ export default function FundDetailView({
                             stroke={fund.convictionScore >= 60 ? '#a6e3a1' : fund.convictionScore >= 40 ? '#b4befe' : '#f38ba8'}
                             strokeWidth="12"
                             strokeLinecap="round"
-                            initial={{ pathLength: 0 }}
-                            animate={{ pathLength: 1 }}
-                            transition={{ duration: 1, ease: 'easeOut' }}
                           />
                         </svg>
                       </div>
@@ -374,19 +347,16 @@ export default function FundDetailView({
                     />
                   </div>
                   
-                  <motion.div variants={container} initial="hidden" animate="show" className="space-y-2">
+                  <div className="space-y-2">
                     {components.map((c) => (
-                      <motion.div key={c.label} variants={item} className="bg-white/[0.03] border border-white/5 p-4 rounded-2xl flex items-center gap-6 group hover:bg-white/[0.06] transition-all cursor-default shadow-lg">
+                      <div key={c.label} className="bg-white/[0.03] border border-white/5 p-4 rounded-2xl flex items-center gap-6 group hover:bg-white/[0.06] -all cursor-default shadow-lg">
                         <div className="w-20">
                           <p className="text-[10px] font-black text-secondary uppercase tracking-widest">{c.label}</p>
                           <p className="text-[8px] font-bold opacity-40">RAW SCORE</p>
                         </div>
                         <div className="flex-1 h-1.5 bg-black/20 rounded-full overflow-hidden border border-white/5">
-                          <motion.div 
-                            initial={{ width: 0 }}
-                            animate={{ width: `${c.score}%` }}
-                            transition={{ duration: 1.2, delay: 0.5, type: "spring" }}
-                            style={{ background: convictionColor(c.score) }}
+                          <div 
+                            style={{ width: `${c.score}%`, background: convictionColor(c.score) }}
                             className="h-full rounded-full shadow-[0_0_10px_rgba(0,0,0,0.5)]"
                           />
                         </div>
@@ -407,9 +377,9 @@ export default function FundDetailView({
                             </Tooltip.Root>
                           </Tooltip.Provider>
                         </div>
-                      </motion.div>
+                      </div>
                     ))}
-                  </motion.div>
+                  </div>
                 </section>
               </div>
 
@@ -737,10 +707,8 @@ export default function FundDetailView({
                     <span className="absolute -top-7 left-0 text-[8px] font-black text-muted uppercase tracking-[0.2em] opacity-30">1yr Floor</span>
                     <span className="absolute -top-7 right-0 text-[8px] font-black text-muted uppercase tracking-[0.2em] opacity-30">ATH Peak</span>
                     
-                    <motion.div 
-                      initial={{ left: '50%' }}
-                      animate={{ left: `${Math.min(98, Math.max(2, (fund.navPercentile1yr || 0) * 100))}%` }}
-                      transition={{ type: "spring", stiffness: 100, damping: 20 }}
+                    <div 
+                      style={{left: `${Math.min(98, Math.max(2, (fund.navPercentile1yr || 0) * 100))}%` }}
                       className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-4 h-4 bg-accent rounded-full border-4 border-[#0d0d1a] shadow-[0_0_20px_rgba(129,140,248,0.8)] z-10 cursor-help"
                     />
                     <div className="absolute inset-0 bg-gradient-to-r from-buy/10 via-transparent to-exit/10 rounded-full" />
@@ -779,21 +747,18 @@ export default function FundDetailView({
                     ? fund.justifications
                     : [buildPlainEnglishReason(fund)]
                   ).map((j: string, i: number) => (
-                    <motion.div 
+                    <div 
                       key={i} 
-                      initial={{ opacity: 0, y: 10 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{ delay: i * 0.1 }}
-                      className="flex gap-4 text-[13px] text-secondary leading-relaxed bg-black/20 p-5 rounded-2xl border border-white/5 group/j hover:bg-black/40 hover:border-white/10 transition-all shadow-lg"
+                      className="flex gap-4 text-[13px] text-secondary leading-relaxed bg-black/20 p-5 rounded-2xl border border-white/5 group/j hover:bg-black/40 hover:border-white/10 -all shadow-lg"
                     >
                       <span className="text-accent font-black mt-0.5 tabular-nums opacity-40">0{i+1}</span>
                       <p className="font-medium tracking-tight leading-snug">{j}</p>
-                    </motion.div>
+                    </div>
                   ))}
                 </div>
               </section>
             </div>
-          </motion.div>
+          </div>
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>

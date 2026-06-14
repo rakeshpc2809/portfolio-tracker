@@ -11,7 +11,6 @@ import org.springframework.cache.Cache;
 
 import com.oreki.cas_injector.backfill.service.HistoricalBackfillerService;
 import com.oreki.cas_injector.convictionmetrics.service.ConvictionScoringService;
-import com.oreki.cas_injector.convictionmetrics.service.QuantitativeEngineService;
 import com.oreki.cas_injector.core.repository.InvestorRepository;
 import com.oreki.cas_injector.core.model.Investor;
 
@@ -29,7 +28,6 @@ import org.springframework.beans.factory.annotation.Qualifier;
 public class BackfillController {
 
     private final HistoricalBackfillerService backfillerService;
-    private final QuantitativeEngineService quantitativeEngineService;
     private final ConvictionScoringService convictionScoringService;
     private final CacheManager cacheManager;
     private final InvestorRepository investorRepository;
@@ -38,14 +36,12 @@ public class BackfillController {
 
     public BackfillController(
             HistoricalBackfillerService backfillerService,
-            QuantitativeEngineService quantitativeEngineService,
             ConvictionScoringService convictionScoringService,
             CacheManager cacheManager,
             InvestorRepository investorRepository,
             com.oreki.cas_injector.core.service.MetricsSchedulerService metricsSchedulerService,
             @Qualifier("mathEngineExecutor") Executor taskExecutor) {
         this.backfillerService = backfillerService;
-        this.quantitativeEngineService = quantitativeEngineService;
         this.convictionScoringService = convictionScoringService;
         this.cacheManager = cacheManager;
         this.investorRepository = investorRepository;
@@ -77,15 +73,8 @@ public class BackfillController {
 
     @PostMapping("/force-sync")
     public ResponseEntity<String> forceSync(@RequestParam(required = false) String pan) {
-        if (quantitativeEngineService.getIsRunning().get()) {
-            return ResponseEntity.badRequest().body("Engine sync is already in progress.");
-        }
-        
         taskExecutor.execute(() -> {
-            // Step 1: Run the global quant engine (market-wide metrics)
-            quantitativeEngineService.runNightlyMathEngine();
-            
-            // Step 2: Run per-investor scoring
+            // Step 1: Run per-investor scoring
             List<String> pansToScore = (pan != null && !pan.isBlank())
                 ? List.of(pan.trim().toUpperCase())
                 : investorRepository.findAll().stream()
@@ -101,7 +90,7 @@ public class BackfillController {
                 }
             }
             
-            // Step 3: Evict cache so next dashboard load is fresh
+            // Step 2: Evict cache so next dashboard load is fresh
             cacheManager.getCacheNames().forEach(name -> {
                 Cache c = cacheManager.getCache(name);
                 if (c != null) c.clear();
@@ -129,9 +118,9 @@ public class BackfillController {
                 "message", backfillerService.getLastStatusMessage()
             ),
             "engine", Map.of(
-                "isRunning", quantitativeEngineService.getIsRunning().get(),
-                "step", quantitativeEngineService.getCurrentStep().get(),
-                "message", quantitativeEngineService.getLastStatusMessage()
+                "isRunning", false,
+                "step", 0,
+                "message", "Disabled"
             )
         ));
     }

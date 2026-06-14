@@ -1,5 +1,4 @@
 import { useState, useEffect } from "react";
-import { motion, AnimatePresence } from "framer-motion";
 import Dashboard from "./components/layout/Dashboard";
 import LoginScreen from "./components/ui/LoginScreen";
 import { usePortfolioSummary } from "./hooks/usePortfolio";
@@ -40,21 +39,18 @@ export default function App() {
 
   if (!pan) {
     return (
-      <AnimatePresence mode="wait">
+      <>
         <LoginScreen onLogin={handleLogin} onSetup={handleSetup} />
-      </AnimatePresence>
+      </>
     );
   }
 
   if (pan === 'SETUP') {
     return (
-      <AnimatePresence mode="wait">
-        <motion.div 
+      <>
+        <div 
           key="setup"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ duration: 0.4 }}
-        >
+          >
           <Dashboard 
             portfolioData={{ 
               schemeBreakdown: [], 
@@ -73,19 +69,16 @@ export default function App() {
             pan="NEW_USER"
             onLogout={handleLogout}
           />
-        </motion.div>
-      </AnimatePresence>
+        </div>
+      </>
     );
   }
 
   return (
-    <AnimatePresence mode="wait">
+    <>
       {isLoading && !portfolioData ? (
-        <motion.div
+        <div
           key="loader"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
           className="fixed inset-0 bg-[#1e1e2e] flex flex-col z-[200] overflow-hidden"
         >
           {/* Header skeleton */}
@@ -117,16 +110,14 @@ export default function App() {
           {/* Brand footer */}
           <div className="absolute bottom-8 left-1/2 -translate-x-1/2 flex flex-col items-center gap-2">
             <div className="w-8 h-1 rounded-full bg-accent/30 relative overflow-hidden">
-              <motion.div
+              <div
                 className="absolute inset-y-0 left-0 bg-accent rounded-full"
-                animate={{ x: ['-100%', '100%'] }}
-                transition={{ duration: 1.2, repeat: Infinity, ease: 'easeInOut' }}
                 style={{ width: '60%' }}
               />
             </div>
             <p className="text-[9px] uppercase tracking-[0.4em] text-hint">Loading your portfolio</p>
           </div>
-        </motion.div>
+        </div>
       ) : error ? (
         <div className="fixed inset-0 bg-[#09090f] flex flex-col items-center justify-center gap-4 px-8 text-center">
           <p className="text-red-400 font-medium text-xs uppercase tracking-widest">Unable to initialize dashboard. Please try again later.</p>
@@ -146,12 +137,9 @@ export default function App() {
           </div>
         </div>
       ) : (
-        <motion.div 
+        <div 
           key="dashboard"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ duration: 0.4 }}
-        >
+          >
           <Dashboard 
             portfolioData={portfolioData} 
             sipAmount={sipAmount} 
@@ -161,8 +149,8 @@ export default function App() {
             pan={pan}
             onLogout={handleLogout}
           />
-        </motion.div>
+        </div>
       )}
-    </AnimatePresence>
+    </>
   );
 }

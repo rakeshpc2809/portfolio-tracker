@@ -8,7 +8,6 @@ import { ResponsiveHeatMap } from '@nivo/heatmap';
 import { ResponsiveScatterPlot } from '@nivo/scatterplot';
 import { Activity, Target } from 'lucide-react';
 import { formatCurrency } from '../../utils/formatters';
-import { motion } from 'framer-motion';
 import { Slider } from '../ui/slider';
 import { usePerformanceHistory } from '../../hooks/usePerformance';
 import { useQuery } from '@tanstack/react-query';
@@ -354,19 +353,16 @@ export default function PerformanceView({
     <div className="space-y-10 pb-32">
       {/* Hero Stats */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        {stats.map((s, i) => (
-          <motion.div 
+        {stats.map((s) => (
+          <div 
             key={s.label}
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: i * 0.1 }}
             className="bg-surface/40 backdrop-blur-xl border border-white/5 p-6 rounded-2xl shadow-lg"
           >
             <p className="text-[10px] font-black uppercase tracking-widest text-muted mb-2">{s.label}</p>
             <p className={`text-2xl font-black tabular-nums tracking-tighter ${s.color}`}>
               {isPrivate && s.label.includes('Gain') ? '₹••••' : s.value}
             </p>
-          </motion.div>
+          </div>
         ))}
       </div>
 
@@ -843,9 +839,7 @@ export default function PerformanceView({
             <div className="absolute top-0 left-0 w-full h-1 bg-accent/20" />
             
             {yearsToGoal ? (
-              <motion.div 
-                initial={{ opacity: 0, scale: 0.9 }}
-                animate={{ opacity: 1, scale: 1 }}
+              <div 
                 className="space-y-4"
               >
                 <p className="text-[10px] font-black uppercase tracking-[0.2em] text-muted">Estimated Arrival</p>
@@ -856,7 +850,7 @@ export default function PerformanceView({
                 <p className="text-xs font-bold text-accent uppercase tracking-widest pt-2 px-6 py-2 bg-accent/10 rounded-full">
                   At your current velocity
                 </p>
-              </motion.div>
+              </div>
             ) : (
               <div className="space-y-2">
                 <p className="text-exit font-black uppercase text-[10px] tracking-widest">Goal Out of Range</p>
@@ -870,9 +864,8 @@ export default function PerformanceView({
                 <span>{Math.min(100, (currentValue / goalAmount) * 100).toFixed(1)}%</span>
               </div>
               <div className="h-2 w-full bg-white/5 rounded-full overflow-hidden border border-white/5">
-                <motion.div 
-                  initial={{ width: 0 }}
-                  animate={{ width: `${Math.min(100, (currentValue / goalAmount) * 100)}%` }}
+                <div 
+                  style={{width: `${Math.min(100, (currentValue / goalAmount) * 100)}%` }}
                   className="h-full bg-accent shadow-[0_0_15px_rgba(129,140,248,0.5)]"
                 />
               </div>

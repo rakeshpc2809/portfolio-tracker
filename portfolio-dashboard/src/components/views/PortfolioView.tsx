@@ -7,9 +7,7 @@ import { ResponsivePie } from '@nivo/pie';
 import { ResponsiveBar } from '@nivo/bar';
 import { ResponsiveTreeMap } from '@nivo/treemap';
 import { ResponsiveHeatMap } from '@nivo/heatmap';
-import { ResponsiveRadar } from '@nivo/radar';
 import { Shield, ChartPie, Info, Link } from 'lucide-react';
-import { motion } from 'framer-motion';
 import MetricWithTooltip from '../ui/MetricWithTooltip';
 import LearnTooltip from '../ui/LearnTooltip';
 import { formatCurrency } from '../../utils/formatters';
@@ -106,24 +104,6 @@ export default function PortfolioView({
     }));
   }, [corrData]);
 
-  // Factor Exposure Data
-  const factorExposureData = useMemo(() => {
-    let totalValue = 0;
-    let wMkt = 0, wSmb = 0, wHml = 0;
-    activeBreakdown.forEach((s: any) => {
-      const val = s.currentValue || 0;
-      totalValue += val;
-      wMkt += (s.betaMkt || 0) * val;
-      wSmb += (s.betaSmb || 0) * val;
-      wHml += (s.betaHml || 0) * val;
-    });
-    if (totalValue === 0) return [];
-    return [
-      { factor: "Market (Beta)", Portfolio: Number((wMkt / totalValue).toFixed(2)) },
-      { factor: "Size (SMB)", Portfolio: Number((wSmb / totalValue).toFixed(2)) },
-      { factor: "Value (HML)", Portfolio: Number((wHml / totalValue).toFixed(2)) }
-    ];
-  }, [activeBreakdown]);
 
   return (
     <div className="space-y-12 pb-32">
@@ -381,50 +361,6 @@ export default function PortfolioView({
         </section>
       )}
 
-      {/* Factor Exposure Radar */}
-      {factorExposureData.length > 0 && (
-        <section className="bg-surface/40 backdrop-blur-xl border border-white/5 p-10 rounded-[2.5rem] shadow-2xl space-y-8 group hover:border-accent/20 transition-all">
-          <div className="flex items-center justify-between">
-            <div className="space-y-1">
-              <h3 className="text-primary text-[10px] font-black uppercase tracking-[0.3em]">Factor Exposure Radar</h3>
-              <p className="text-sm font-bold text-secondary">Aggregate Fama-French Risk Factor Bias</p>
-            </div>
-          </div>
-          <div className="h-80 w-full bg-black/20 rounded-3xl border border-white/5 shadow-inner flex items-center justify-center">
-            <ResponsiveRadar
-              data={factorExposureData}
-              keys={['Portfolio']}
-              indexBy="factor"
-              maxValue="auto"
-              margin={{ top: 40, right: 80, bottom: 40, left: 80 }}
-              curve="linearClosed"
-              borderWidth={2}
-              borderColor={{ from: 'color' }}
-              gridLevels={5}
-              gridShape="circular"
-              gridLabelOffset={16}
-              enableDots={true}
-              dotSize={8}
-              dotColor={{ theme: 'background' }}
-              dotBorderWidth={2}
-              dotBorderColor={{ from: 'color' }}
-              enableDotLabel={true}
-              dotLabel="value"
-              dotLabelYOffset={-12}
-              colors={['#cba6f7']}
-              fillOpacity={0.25}
-              blendMode="screen"
-              animate={true}
-              theme={{
-                axis: { ticks: { text: { fill: "#6c7086", fontSize: 11, fontWeight: 900 } } },
-                grid: { line: { stroke: "rgba(255,255,255,0.05)", strokeWidth: 1 } },
-                dots: { text: { fill: "#cdd6f4", fontSize: 10, fontWeight: 700 } },
-                tooltip: { container: { background: "#181825", color: "#cdd6f4", fontSize: 12, borderRadius: 12 } }
-              }}
-            />
-          </div>
-        </section>
-      )}
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
         {/* Vital Signs Pulse */}
@@ -477,9 +413,8 @@ export default function PortfolioView({
                     tooltip="Average time for discount to halve (OU Process)."
                   />
                   <div className="h-2 w-full bg-white/5 rounded-full overflow-hidden border border-white/5 shadow-inner">
-                    <motion.div 
-                      initial={{ width: 0 }}
-                      animate={{ width: `${Math.min(100, avgHalfLife * 2)}%` }}
+                    <div 
+                      style={{width: `${Math.min(100, avgHalfLife * 2)}%` }}
                       className="h-full bg-gradient-to-r from-orange-400 to-amber-300 opacity-80 shadow-[0_0_8px_rgba(251,146,60,0.4)]" 
                     />
                   </div>
@@ -508,9 +443,8 @@ export default function PortfolioView({
                     tooltip="Percentage of funds outperforming their benchmark."
                   />
                   <div className="h-2 w-full bg-white/5 rounded-full overflow-hidden border border-white/5 shadow-inner">
-                    <motion.div 
-                      initial={{ width: 0 }}
-                      animate={{ width: `${pct}%` }}
+                    <div 
+                      style={{width: `${pct}%` }}
                       className="h-full bg-buy shadow-[0_0_8px_rgba(166,227,161,0.4)]" 
                     />
                   </div>

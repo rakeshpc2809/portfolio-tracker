@@ -4,7 +4,6 @@ import {
   BarChart, Bar, Cell, CartesianGrid, ReferenceLine
 } from "recharts";
 import CurrencyValue from '../ui/CurrencyValue';
-import { motion } from 'framer-motion';
 import { Target, Clock, ArrowRight, TrendingUp, AlertCircle, ShieldAlert } from 'lucide-react';
 import type { RebalancingTrade } from '../../types/signals';
 
@@ -82,10 +81,8 @@ export default function RebalanceView({
 
         <div className="grid grid-cols-1 gap-4">
           {rebalancingTrades.map((trade, idx) => (
-            <motion.div 
+            <div 
               key={idx}
-              initial={{ opacity: 0, x: -20 }}
-              animate={{ opacity: 1, x: 0 }}
               className="bg-surface/40 backdrop-blur-xl border border-white/5 p-6 rounded-[2rem] shadow-xl"
             >
               <div className="flex flex-col md:flex-row items-center gap-8">
@@ -132,7 +129,7 @@ export default function RebalanceView({
                 <span>{trade.tradeRationale}</span>
                 <span className="text-secondary font-black">Net Proceeds: <CurrencyValue isPrivate={isPrivate} value={trade.netProceeds} /></span>
               </div>
-            </motion.div>
+            </div>
           ))}
           {rebalancingTrades.length === 0 && (
             <div className="py-12 text-center border border-dashed border-white/10 rounded-[2.5rem] opacity-40">
@@ -158,9 +155,8 @@ export default function RebalanceView({
 
         <div className="space-y-4">
           <div className="h-4 w-full bg-white/5 rounded-full overflow-hidden border border-white/10 p-0.5">
-            <motion.div 
-              initial={{ width: 0 }}
-              animate={{ width: `${ltcgUsedPct}%` }}
+            <div 
+              style={{width: `${ltcgUsedPct}%` }}
               className={`h-full rounded-full ${ltcgUsedPct > 90 ? 'bg-exit' : ltcgUsedPct > 60 ? 'bg-warning' : 'bg-buy'}`}
             />
           </div>
@@ -193,10 +189,8 @@ export default function RebalanceView({
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {(portfolioData.tacticalPayload?.droppedFundSummaries || []).map((s: any) => (
-            <motion.div 
+            <div 
               key={s.amfiCode}
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
               className={`bg-surface/40 backdrop-blur-xl border p-6 rounded-[2rem] shadow-xl space-y-4 ${
                 s.recommendedAction === 'WAIT_FOR_LTCG' ? 'border-warning/20' : 
                 s.recommendedAction === 'EXIT_NOW_TAX_FREE' ? 'border-buy/20' : 'border-white/5'
@@ -251,7 +245,7 @@ export default function RebalanceView({
                   </p>
                 )}
               </div>
-            </motion.div>
+            </div>
           ))}
           {(portfolioData.tacticalPayload?.droppedFundSummaries || []).length === 0 && (
             <div className="col-span-full py-10 text-center border border-dashed border-white/10 rounded-[2rem] opacity-40">
@@ -338,12 +332,9 @@ export default function RebalanceView({
                 </span>
               </div>
               <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden border border-white/5">
-                <motion.div 
-                  initial={{ width: 0 }}
-                  animate={{ width: `${(t.months / 36) * 100}%` }}
-                  transition={{ duration: 1, ease: "easeOut" }}
+                <div 
+                  style={{ width: `${(t.months / 36) * 100}%`, background: t.color, boxShadow: `0 0 10px ${t.color}44` }}
                   className="h-full rounded-full"
-                  style={{ background: t.color, boxShadow: `0 0 10px ${t.color}44` }}
                 />
               </div>
             </div>

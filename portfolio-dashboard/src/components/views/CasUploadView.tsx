@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { uploadCas, previewCas, triggerBackfill, triggerForceSync, fetchAdminStatus, triggerSnapshotBackfill, uploadStockCsv } from "@/services/api";
 import { Upload, AlertCircle, CheckCircle2, Zap, Loader2, TrendingUp, Activity, X, ShieldCheck } from "lucide-react";
-import { motion, AnimatePresence } from "framer-motion";
 import { useEngineWebsocket } from '@/hooks/useEngineWebsocket';
 import ModernCasDropzone from '../ingestion/ModernCasDropzone';
 
@@ -236,17 +235,12 @@ const CasUploadView: React.FC<{ pan: string, portfolioData?: any }> = ({ pan, po
                 </div>
 
                 {/* Instant Preview Bento Modal */}
-                <AnimatePresence>
+                <>
                   {previewData && (
-                    <motion.div 
-                      initial={{ opacity: 0 }}
-                      animate={{ opacity: 1 }}
-                      exit={{ opacity: 0 }}
+                    <div 
                       className="fixed inset-0 z-50 flex items-center justify-center p-6 bg-black/80 backdrop-blur-xl"
                     >
-                      <motion.div 
-                        initial={{ scale: 0.9, opacity: 0, y: 20 }}
-                        animate={{ scale: 1, opacity: 1, y: 0 }}
+                      <div 
                         className="bg-surface border border-white/10 w-full max-w-4xl rounded-[40px] overflow-hidden shadow-2xl"
                       >
                         <div className="p-10 border-b border-white/5 flex justify-between items-center bg-white/[0.01]">
@@ -301,10 +295,10 @@ const CasUploadView: React.FC<{ pan: string, portfolioData?: any }> = ({ pan, po
                             Cancel
                           </button>
                         </div>
-                      </motion.div>
-                    </motion.div>
+                      </div>
+                    </div>
                   )}
-                </AnimatePresence>
+                </>
 
                 {status.type && (
                   <div className={`p-8 rounded-3xl border flex flex-col justify-center gap-4 ${status.type === 'success' ? 'bg-buy/5 border-buy/20' : 'bg-exit/5 border-exit/20'}`}>
@@ -420,9 +414,8 @@ const CasUploadView: React.FC<{ pan: string, portfolioData?: any }> = ({ pan, po
                       <span className="text-accent">{Math.round((adminStatus.engine.step / 7) * 100)}%</span>
                     </div>
                     <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden border border-white/5">
-                      <motion.div 
-                        initial={{ width: 0 }}
-                        animate={{ width: `${(adminStatus.engine.step / 7) * 100}%` }}
+                      <div 
+                        style={{width: `${(adminStatus.engine.step / 7) * 100}%` }}
                         className="h-full bg-buy shadow-[0_0_15px_rgba(166,227,161,0.5)]" 
                       />
                     </div>

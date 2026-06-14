@@ -1,5 +1,4 @@
 import React, { useState, useEffect } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
 import { fetchStrategyTargets, updateStrategyTarget } from "@/services/api";
 import { AlertTriangle, CheckCircle2, Loader2, ArrowRight } from "lucide-react";
 
@@ -99,9 +98,8 @@ const StrategyManagerView: React.FC<{ pan: string, schemes: any[] }> = ({ pan, s
              </div>
              
              <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden">
-                <motion.div 
-                  initial={{ width: 0 }}
-                  animate={{ width: `${Math.min(totalAllocation, 100)}%` }}
+                <div 
+                  style={{width: `${Math.min(totalAllocation, 100)}%` }}
                   className={`h-full ${totalAllocation > 100 ? 'bg-exit' : 'bg-buy'} shadow-[0_0_15px_rgba(129,140,248,0.4)]`}
                 />
              </div>
@@ -129,14 +127,11 @@ const StrategyManagerView: React.FC<{ pan: string, schemes: any[] }> = ({ pan, s
 
         {/* Main List */}
         <div className="lg:col-span-3 space-y-4">
-          <AnimatePresence>
-            {targets.map((target, index) => (
-              <motion.div
+          <>
+            {targets.map((target) => (
+              <div
                 key={target.amfiCode}
-                initial={{ opacity: 0, x: 20 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ delay: index * 0.05 }}
-                className="bg-surface border border-white/5 p-6 rounded-3xl hover:border-white/10 transition-all group"
+                className="bg-surface border border-white/5 p-6 rounded-3xl hover:border-white/10 -all group"
               >
                 <div className="flex flex-col md:flex-row items-center gap-8">
                   <div className="flex-1 space-y-1">
@@ -168,28 +163,25 @@ const StrategyManagerView: React.FC<{ pan: string, schemes: any[] }> = ({ pan, s
                     <ArrowRight size={18} />
                   </button>
                 </div>
-              </motion.div>
+              </div>
             ))}
-          </AnimatePresence>
+          </>
         </div>
       </div>
 
       {/* Global Status Toast */}
-      <AnimatePresence>
+      <>
         {status.message && (
-          <motion.div 
-            initial={{ opacity: 0, y: 50 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: 50 }}
+          <div 
             className={`fixed bottom-10 left-1/2 -translate-x-1/2 px-8 py-4 rounded-full border shadow-2xl flex items-center gap-3 ${
-              status.type === 'success' ? 'bg-buy/10 border-buy/20 text-buy' : 'bg-exit/10 border-exit/20 text-exit'
+              status.type === 'success' ? 'bg-buy/10 border-buy/20 text-buy' : 'bg-/10 border-/20 text-'
             }`}
           >
             {status.type === 'success' ? <CheckCircle2 size={16} /> : <AlertTriangle size={16} />}
             <p className="text-[10px] font-black uppercase tracking-[0.2em]">{status.message}</p>
-          </motion.div>
+          </div>
         )}
-      </AnimatePresence>
+      </>
     </div>
   );
 };

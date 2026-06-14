@@ -1,4 +1,3 @@
-import { motion, AnimatePresence, type Variants } from 'framer-motion';
 import { useMemo, useState } from 'react';
 import { ResponsivePie } from '@nivo/pie';
 import { 
@@ -126,32 +125,12 @@ export default function OverviewView({
     [payload.sipPlan]
   );
 
-  const container: Variants = {
-    hidden: { opacity: 0 },
-    show: {
-      opacity: 1,
-      transition: { staggerChildren: 0.08 }
-    }
-  };
-
-  const bentoItem: Variants = {
-    hidden: { opacity: 0, y: 20 },
-    show: { 
-      opacity: 1, 
-      y: 0, 
-      transition: { type: "spring", damping: 25, stiffness: 120 } 
-    }
-  };
-
   // Profit return values
   const unrealizedGain = portfolioData.currentValueAmount - portfolioData.totalInvestedAmount;
   const unrealizedGainPct = (unrealizedGain / (portfolioData.totalInvestedAmount || 1)) * 100;
 
   return (
-    <motion.div 
-      variants={container}
-      initial="hidden"
-      animate="show"
+    <div 
       className="space-y-8 pb-24"
     >
       {/* HEADER */}
@@ -161,7 +140,7 @@ export default function OverviewView({
       </header>
 
       {/* 1. PORTFOLIO HEALTH STRIP */}
-      <motion.div variants={bentoItem} className="grid grid-cols-1 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         {/* Value Card */}
         <div className="glass-card-premium p-6 flex flex-col justify-between min-h-[110px] relative overflow-hidden group shadow-lg">
           <div className="absolute -right-6 -bottom-6 opacity-5 group-hover:opacity-10 transition-opacity">
@@ -223,10 +202,10 @@ export default function OverviewView({
             </div>
           </div>
         </div>
-      </motion.div>
+      </div>
 
       {/* 2. FUND STATUS GRID */}
-      <motion.div variants={bentoItem} className="space-y-4">
+      <div className="space-y-4">
         <div className="flex items-center gap-2.5 px-2">
           <Layers size={16} className="text-accent" />
           <h3 className="text-primary text-[10px] font-black uppercase tracking-[0.3em]">Active Holdings Breakdowns</h3>
@@ -256,9 +235,8 @@ export default function OverviewView({
               const zPct = Math.min(100, Math.max(0, (s.navPercentile1yr || 0) * 100));
 
               return (
-                <motion.div
+                <div
                   key={s.schemeName}
-                  whileHover={{ scale: 1.02, y: -2 }}
                   onClick={() => onFundClick(s.schemeName)}
                   className="bg-surface/40 hover:bg-[#1f1f2e]/60 border border-white/5 hover:border-accent/20 rounded-3xl p-6 transition-all duration-300 shadow-lg cursor-pointer flex flex-col justify-between space-y-4 min-h-[220px] relative overflow-hidden group"
                 >
@@ -358,15 +336,15 @@ export default function OverviewView({
                       />
                     </div>
                   </div>
-                </motion.div>
+                </div>
               );
             })
           )}
         </div>
-      </motion.div>
+      </div>
 
       {/* PERFORMANCE LEADERBOARD */}
-      <motion.div variants={bentoItem} className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* All-Time Leaderboard */}
         <section className="bg-surface/40 backdrop-blur-xl border border-white/5 p-8 rounded-[2.5rem] shadow-2xl flex flex-col justify-between hover:border-accent/10 transition-all">
           <div className="space-y-1 mb-6">
@@ -500,10 +478,10 @@ export default function OverviewView({
             )}
           </div>
         </section>
-      </motion.div>
+      </div>
 
       {/* 3. PORTFOLIO COMPOSITION */}
-      <motion.div variants={bentoItem} className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Category Allocation Pie Card */}
         <section className="bg-surface/40 backdrop-blur-xl border border-white/5 p-8 rounded-[2.5rem] shadow-2xl h-[360px] flex flex-col hover:border-accent/10 transition-all">
           <div className="flex items-center gap-3 mb-4">
@@ -567,10 +545,10 @@ export default function OverviewView({
             )}
           </div>
         </section>
-      </motion.div>
+      </div>
 
       {/* 4. ACTION QUEUE */}
-      <motion.div variants={bentoItem} className="grid grid-cols-1 md:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         {/* SIP Budget & Deployment */}
         <div className="bg-surface/40 backdrop-blur-xl border border-white/5 p-8 rounded-[2.5rem] shadow-2xl space-y-6 flex flex-col justify-between">
           <div className="space-y-2">
@@ -705,10 +683,10 @@ export default function OverviewView({
             )}
           </div>
         </div>
-      </motion.div>
+      </div>
 
       {/* 5. COLLAPSIBLE SENTIMENT & ALPHA FEED */}
-      <motion.div variants={bentoItem} className="border border-white/5 rounded-[2.5rem] bg-surface/20 shadow-xl overflow-hidden">
+      <div className="border border-white/5 rounded-[2.5rem] bg-surface/20 shadow-xl overflow-hidden">
         <button
           onClick={() => setIsSentimentExpanded(!isSentimentExpanded)}
           className="w-full px-8 py-5 flex items-center justify-between hover:bg-white/[0.02] transition-colors"
@@ -720,12 +698,10 @@ export default function OverviewView({
           {isSentimentExpanded ? <ChevronUp size={16} className="text-muted" /> : <ChevronDown size={16} className="text-muted" />}
         </button>
 
-        <AnimatePresence>
+        <>
           {isSentimentExpanded && (
-            <motion.div
-              initial={{ height: 0 }}
-              animate={{ height: 'auto' }}
-              exit={{ height: 0 }}
+            <div
+              style={{height: 'auto' }}
               className="overflow-hidden border-t border-white/5"
             >
               <div className="p-8 space-y-4">
@@ -761,10 +737,10 @@ export default function OverviewView({
                   <p className="text-center text-muted/40 text-[10px] uppercase font-black py-4">No feeds available</p>
                 )}
               </div>
-            </motion.div>
+            </div>
           )}
-        </AnimatePresence>
-      </motion.div>
-    </motion.div>
+        </>
+      </div>
+    </div>
   );
 }

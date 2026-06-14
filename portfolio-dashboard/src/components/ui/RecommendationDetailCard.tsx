@@ -1,7 +1,6 @@
 // portfolio-dashboard/src/components/ui/RecommendationDetailCard.tsx
 
 import React from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
 import type { TacticalSignal, ReasoningMetadata, UIMetaphor } from '../../types/signals';
 import CurrencyValue from './CurrencyValue';
 import { Info } from 'lucide-react';
@@ -23,15 +22,13 @@ const RubberBandVisual: React.FC<{ zScore: number; rarityPct: number }> = ({ zSc
     <div className="flex flex-col items-center gap-3 py-4">
       <svg width="200" height="60" viewBox="0 0 200 60" className="overflow-visible">
         <circle cx="10" cy="30" r="5" fill="#818cf8" />
-        <motion.path
+        <path
           d={`M 10 30 Q 100 ${30 + stretchPx} 190 30`}
           fill="none"
           stroke="#34d399"
           strokeWidth="2.5"
           className="drop-shadow-[0_0_6px_rgba(52,211,153,0.5)]"
-          animate={{ d: [`M 10 30 Q 100 ${30 + stretchPx} 190 30`, `M 10 30 Q 100 ${30 + stretchPx - 10} 190 30`, `M 10 30 Q 100 ${30 + stretchPx} 190 30`] }}
-          transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
-        />
+          />
         <line x1="10" y1="30" x2="190" y2="30" stroke="rgba(255,255,255,0.1)" strokeWidth="1" strokeDasharray="4 4"/>
         <circle cx="190" cy="30" r="5" fill="#818cf8" />
         <text x="100" y={30 + stretchPx + 18} textAnchor="middle" fill="#34d399" fontSize="13" fontWeight="bold">
@@ -58,13 +55,11 @@ const VolatilityHarvestVisual: React.FC<{
   isPrivate: boolean;
 }> = ({ harvestAmount, volatilityTax, isPrivate }) => (
   <div className="flex flex-col items-center gap-3 py-4">
-    <motion.div 
+    <div 
       className="text-5xl"
-      animate={{ y: [0, -10, 0], rotate: [0, 5, -5, 0] }}
-      transition={{ duration: 3, repeat: Infinity, ease: "easeInOut" }}
-    >
+      >
       🌾
-    </motion.div>
+    </div>
     <div className="text-center">
       <p className="text-[10px] text-muted uppercase tracking-widest mb-1">Rebalancing Bonus Captured</p>
       <div className="text-2xl font-medium text-buy tabular-nums">
@@ -85,12 +80,10 @@ const ThermometerVisual: React.FC<{ zScore: number; rarityPct: number }> = ({ zS
   return (
     <div className="flex flex-col items-center gap-3 py-4">
       <div className="relative w-8 h-24 bg-white/5 rounded-full border border-white/10 overflow-hidden">
-        <motion.div
-          className="absolute bottom-0 left-0 right-0 bg-exit rounded-full shadow-[0_0_12px_rgba(248,113,113,0.6)]"
-          initial={{ height: 0 }}
-          animate={{ height: `${fillPct}%` }}
-          transition={{ duration: 1.2, ease: 'easeOut' }}
-        />
+        <div
+          className="absolute bottom-0 left-0 right-0 bg-rounded-full shadow-[0_0_12px_rgba(248,113,113,0.6)]"
+          style={{height: `${fillPct}%` }}
+          />
         <div className="absolute -bottom-1.5 left-1/2 -translate-x-1/2 w-5 h-5 bg-exit rounded-full shadow-[0_0_8px_rgba(248,113,113,0.6)]" />
       </div>
       <div className="flex items-center gap-2">
@@ -110,22 +103,18 @@ const WaveRiderVisual: React.FC<{ hurstExponent: number }> = ({ hurstExponent })
   <div className="flex flex-col items-center gap-3 py-4">
     <div className="relative w-40 h-16 overflow-hidden">
       <svg viewBox="0 0 160 60" className="w-full h-full">
-        <motion.path
+        <path
           d="M0 40 Q20 20 40 35 Q60 50 80 30 Q100 10 120 25 Q140 40 160 20"
           fill="none"
           stroke="#818cf8"
           strokeWidth="2.5"
           className="drop-shadow-[0_0_6px_rgba(129,140,248,0.5)]"
-          animate={{ pathLength: [0, 1] }}
-          transition={{ duration: 1.5, ease: 'easeInOut' }}
-        />
-        <motion.circle
+          />
+        <circle
           cx="120" cy="25" r="5"
           fill="#fbbf24"
           className="drop-shadow-[0_0_4px_rgba(251,191,36,0.6)]"
-          animate={{ cx: [0, 160], cy: [40, 20, 35, 30, 25] }}
-          transition={{ duration: 4, ease: 'easeInOut', repeat: Infinity }}
-        />
+          />
       </svg>
     </div>
     <div className="flex items-center gap-2">
@@ -263,12 +252,10 @@ const FeatureAttributionChart: React.FC<{ attr: any }> = ({ attr }) => {
           <div key={i} className="flex items-center gap-3">
             <span className="text-[10px] text-secondary w-24 truncate">{item.label}</span>
             <div className="flex-1 h-1.5 bg-white/5 rounded-full overflow-hidden">
-              <motion.div
+              <div
                 className="h-full bg-buy/40"
-                initial={{ width: 0 }}
-                animate={{ width: `${item.value * 100}%` }}
-                transition={{ duration: 1, delay: i * 0.1 }}
-              />
+                style={{width: `${item.value * 100}%` }}
+                />
             </div>
             <span className="text-[9px] text-muted w-8 text-right">{(item.value * 100).toFixed(0)}%</span>
           </div>
@@ -316,9 +303,8 @@ export const RecommendationDetailCard: React.FC<Props> = ({
   }
 
   return (
-    <motion.div
-      layout
-      className={`rounded-xl border p-5 cursor-pointer select-none ${colors} transition-all duration-200`}
+    <div
+      className={`rounded-xl border p-5 cursor-pointer select-none ${colors} -all duration-200`}
       onClick={() => setExpanded(e => !e)}
     >
       <div className="flex items-center justify-between mb-3">
@@ -377,12 +363,9 @@ export const RecommendationDetailCard: React.FC<Props> = ({
         {expanded ? '▲ Less detail' : '▼ Show me why'}
       </button>
 
-      <AnimatePresence>
+      <>
         {expanded && (
-          <motion.div
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: 'auto' }}
-            exit={{ opacity: 0, height: 0 }}
+          <div
             className="mt-4 space-y-4 overflow-hidden"
             onClick={e => e.stopPropagation()}
           >
@@ -409,10 +392,10 @@ export const RecommendationDetailCard: React.FC<Props> = ({
                 <p className="text-[11px] text-secondary leading-relaxed">{meta.harvestExplanation}</p>
               </div>
             )}
-          </motion.div>
+          </div>
         )}
-      </AnimatePresence>
-    </motion.div>
+      </>
+    </div>
   );
 };
 
