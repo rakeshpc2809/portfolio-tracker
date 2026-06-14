@@ -21,7 +21,10 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import org.hibernate.annotations.SoftDelete;
+
 @Entity
+@SoftDelete
 @Table(name = "tax_lot", indexes = {
     @Index(name = "idx_lot_scheme_status", columnList = "scheme_id, status")
 })

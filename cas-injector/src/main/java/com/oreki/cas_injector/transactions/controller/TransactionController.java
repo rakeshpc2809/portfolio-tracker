@@ -35,6 +35,9 @@ public class TransactionController {
             @RequestParam(defaultValue = "20") int size,
             @RequestParam(defaultValue = "transactionDate,desc") String sort
     ) {
+        String cleanPan = (pan != null && !pan.trim().isEmpty()) ? pan.trim().toUpperCase() : getAuthenticatedPan();
+        validatePan(cleanPan);
+
         // 🛠️ Dynamic Sort Parsing: Handles "transactionDate,desc" or "amount,asc"
         // Note: Field names now match PortfolioSummary (e.g. transactionDate instead of date)
         String[] sortParams = sort.split(",");
@@ -51,7 +54,7 @@ public class TransactionController {
         Pageable pageable = PageRequest.of(page, size, Sort.by(direction, sortField));
 
         // 🚀 Execute the lookup on the Materialized View
-        Page<PortfolioSummary> pageSummary = transactionService.getFilteredTransactions(pan, type, pageable);
+        Page<PortfolioSummary> pageSummary = transactionService.getFilteredTransactions(cleanPan, type, pageable);
     
     // Map Read Model to DTO
     Page<TransactionResponseDTO> dtoPage = pageSummary.map(s -> TransactionResponseDTO.builder()
@@ -67,5 +70,21 @@ public class TransactionController {
             .build());
 
     return ResponseEntity.ok(dtoPage);
+    }
+
+    private String getAuthenticatedPan() {
+        org.springframework.security.core.Authentication auth = 
+            org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication();
+        if (auth == null || !auth.isAuthenticated() || "anonymousUser".equals(auth.getPrincipal())) {
+            throw new org.springframework.security.access.AccessDeniedException("User is not authenticated");
+        }
+        return auth.getName();
+    }
+
+    private void validatePan(String pan) {
+        String authPan = getAuthenticatedPan();
+        if (!authPan.equalsIgnoreCase(pan)) {
+            throw new org.springframework.security.access.AccessDeniedException("Unauthorized access to PAN: " + pan);
+        }
     }
 }

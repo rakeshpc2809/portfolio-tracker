@@ -20,11 +20,13 @@ public class StrategyController {
 
     @GetMapping("/{pan}")
     public ResponseEntity<?> getTargets(@PathVariable String pan) {
+        validatePan(pan);
         return ResponseEntity.ok(repository.findAll());
     }
 
     @PostMapping("/target")
     public ResponseEntity<Void> updateTarget(@RequestBody StrategyRequest request) {
+        validatePan(request.getPan());
         strategyService.updateTarget(
             request.getPan(),
             request.getAmfiCode(),
@@ -43,5 +45,13 @@ public class StrategyController {
         private String amfiCode;
         private BigDecimal allocation;
         private String strategyType;
+    }
+
+    private void validatePan(String pan) {
+        org.springframework.security.core.Authentication auth = 
+            org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication();
+        if (auth == null || !auth.isAuthenticated() || "anonymousUser".equals(auth.getPrincipal()) || !auth.getName().equalsIgnoreCase(pan)) {
+            throw new org.springframework.security.access.AccessDeniedException("Unauthorized access to PAN: " + pan);
+        }
     }
 }

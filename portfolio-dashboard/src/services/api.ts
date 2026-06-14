@@ -6,12 +6,15 @@ const PARSER_URL = '/parser';
 const API_KEY = (import.meta.env.VITE_API_KEY as string) || 'dev-secret-key';
 
 const authenticatedFetch = (url: string, options: RequestInit = {}) => {
+  const token = localStorage.getItem('portfolio_token');
+  const headers = new Headers(options.headers);
+  headers.set('X-API-KEY', API_KEY);
+  if (token) {
+    headers.set('Authorization', `Bearer ${token}`);
+  }
   return fetch(url, {
     ...options,
-    headers: {
-      ...options.headers,
-      'X-API-KEY': API_KEY,
-    },
+    headers,
   });
 };
 

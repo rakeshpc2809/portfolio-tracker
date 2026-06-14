@@ -22,12 +22,14 @@ public class StockController {
 
     @DeleteMapping("/purge")
     public ResponseEntity<?> purgeData(@RequestParam("pan") String pan) {
+        validatePan(pan);
         log.info("Stock purge requested for PAN: {} (No-op as stock importing is disabled)", pan);
         return ResponseEntity.ok(Map.of("status", "success", "message", "Stock feature is currently read-only"));
     }
 
     @PostMapping("/sync")
     public ResponseEntity<?> syncPrices(@RequestParam("pan") String pan) {
+        validatePan(pan);
         int updated = syncSvc.syncLivePrices(pan);
         Map<String, Object> resp = new HashMap<>();
         resp.put("synced", updated);
@@ -36,6 +38,15 @@ public class StockController {
 
     @GetMapping("/portfolio")
     public ResponseEntity<List<StockHoldingDTO>> getPortfolio(@RequestParam("pan") String pan) {
+        validatePan(pan);
         return ResponseEntity.ok(aggSvc.getPortfolio(pan));
+    }
+
+    private void validatePan(String pan) {
+        org.springframework.security.core.Authentication auth = 
+            org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication();
+        if (auth == null || !auth.isAuthenticated() || "anonymousUser".equals(auth.getPrincipal()) || !auth.getName().equalsIgnoreCase(pan)) {
+            throw new org.springframework.security.access.AccessDeniedException("Unauthorized access to PAN: " + pan);
+        }
     }
 }

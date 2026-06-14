@@ -27,6 +27,9 @@ export default function LoginScreen({ onLogin, onSetup }: LoginScreenProps) {
     try {
       const result = await checkInvestorExistence(cleanPan);
       if (result && result.pan) {
+        if (result.token) {
+          localStorage.setItem('portfolio_token', result.token);
+        }
         onLogin(cleanPan);
       } else {
         setError('Investor account not found. Please upload a CAS file first.');

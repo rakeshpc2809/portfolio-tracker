@@ -91,15 +91,27 @@ public class CasProcessingService {
             
             // Post-Batch: Apply FIFO logic. 
             // We need to fetch transactions back to get IDs for FIFO linking.
-            pendingTransactions.forEach(tx -> {
-                txnRepo.findByTxnHash(tx.getTxnHash()).ifPresent(savedTx -> {
-                    String category = "UNKNOWN";
-                    String type = savedTx.getTransactionType().toUpperCase();
-                    if (type.contains("SELL") || type.contains("REDEMPTION") || type.contains("SWITCH_OUT") || type.contains("STAMP_DUTY")) {
-                         category = navService.getLatestSchemeDetails(savedTx.getScheme().getAmfiCode()).getCategory();
-                    }
-                    fifoService.applyInventoryRules(savedTx, category);
-                });
+            List<String> hashes = pendingTransactions.stream().map(Transaction::getTxnHash).toList();
+            List<Transaction> savedTxns = txnRepo.findByTxnHashIn(hashes);
+
+            List<Transaction> buyTxns = savedTxns.stream()
+                .filter(tx -> {
+                    String type = tx.getTransactionType().toUpperCase();
+                    return type.contains("BUY") || type.contains("PURCHASE") || type.contains("SWITCH_IN");
+                })
+                .toList();
+
+            if (!buyTxns.isEmpty()) {
+                batchInsertTaxLots(buyTxns);
+            }
+
+            savedTxns.forEach(savedTx -> {
+                String category = "UNKNOWN";
+                String type = savedTx.getTransactionType().toUpperCase();
+                if (type.contains("SELL") || type.contains("REDEMPTION") || type.contains("SWITCH_OUT") || type.contains("STAMP_DUTY")) {
+                     category = navService.getLatestSchemeDetails(savedTx.getScheme().getAmfiCode()).getCategory();
+                     fifoService.applyInventoryRules(savedTx, category);
+                }
             });
         }
 
@@ -201,6 +213,30 @@ public class CasProcessingService {
         });
     }
 
+    private void batchInsertTaxLots(List<Transaction> buyTxns) {
+        log.info("📦 Batch inserting {} TaxLot records", buyTxns.size());
+        String sql = "INSERT INTO tax_lot (transaction_id, scheme_id, buy_date, original_units, remaining_units, cost_basis_per_unit, status, deleted) VALUES (?, ?, ?, ?, ?, ?, ?, false)";
+        
+        jdbcTemplate.batchUpdate(sql, new BatchPreparedStatementSetter() {
+            @Override
+            public void setValues(PreparedStatement ps, int i) throws SQLException {
+                Transaction tx = buyTxns.get(i);
+                ps.setLong(1, tx.getId());
+                ps.setLong(2, tx.getScheme().getId());
+                ps.setObject(3, java.sql.Date.valueOf(tx.getDate()));
+                ps.setBigDecimal(4, tx.getUnits());
+                ps.setBigDecimal(5, tx.getUnits());
+                ps.setBigDecimal(6, CommonUtils.CALC_NAV.apply(tx.getAmount(), tx.getUnits()));
+                ps.setString(7, "OPEN");
+            }
+
+            @Override
+            public int getBatchSize() {
+                return buyTxns.size();
+            }
+        });
+    }
+
     @Transactional
     public void reprocessPortfolio(String pan) {
         log.info("🔄 Reprocessing portfolio tax lots for PAN: {}", pan);
@@ -229,14 +265,26 @@ public class CasProcessingService {
         List<Transaction> transactions = txnRepo.findBySchemeFolioInvestorPanOrderByDateAsc(pan);
         log.info("📊 Re-applying FIFO rules to {} transactions", transactions.size());
 
+        // Batch insert all BUY lots first
+        List<Transaction> buyTxns = transactions.stream()
+            .filter(tx -> {
+                String type = tx.getTransactionType().toUpperCase();
+                return type.contains("BUY") || type.contains("PURCHASE") || type.contains("SWITCH_IN");
+            })
+            .toList();
+
+        if (!buyTxns.isEmpty()) {
+            batchInsertTaxLots(buyTxns);
+        }
+
         // 3. Re-apply FIFO
         for (Transaction tx : transactions) {
             String category = "UNKNOWN";
             String type = tx.getTransactionType().toUpperCase();
             if (type.contains("SELL") || type.contains("REDEMPTION") || type.contains("SWITCH_OUT") || type.contains("STAMP_DUTY")) {
                  category = navService.getLatestSchemeDetails(tx.getScheme().getAmfiCode()).getCategory();
+                 fifoService.applyInventoryRules(tx, category);
             }
-            fifoService.applyInventoryRules(tx, category);
         }
 
         // 4. Refresh Read Model

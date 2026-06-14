@@ -24,8 +24,9 @@ public class SecurityConfig {
             .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .authorizeHttpRequests(auth -> auth
                 .requestMatchers("/investor/check/**").permitAll()
+                .requestMatchers("/cas/**").permitAll()
                 .requestMatchers("/error", "/actuator/**", "/health/**", "/status/**", "/ws/**").permitAll()
-                .anyRequest().permitAll() // Permit other routes for local fallback/tracing if needed, or secure them
+                .anyRequest().authenticated()
             )
             .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class);
 

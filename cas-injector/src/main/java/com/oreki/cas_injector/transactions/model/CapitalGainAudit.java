@@ -20,7 +20,7 @@ public class CapitalGainAudit {
     @JoinColumn(name = "sell_transaction_id")
     private Transaction sellTransaction;
 
-    @ManyToOne(fetch = FetchType.LAZY)
+    @ManyToOne(fetch = FetchType.EAGER)
     @JoinColumn(name = "tax_lot_id")
     private TaxLot taxLot;
 

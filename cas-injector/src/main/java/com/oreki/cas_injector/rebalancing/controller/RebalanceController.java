@@ -36,7 +36,7 @@ public class RebalanceController {
             @PathVariable("pan") String investorPan,
             @RequestParam(value = "monthlySip", defaultValue = "75000") double monthlySip,
             @RequestParam(value = "lumpsum", defaultValue = "0") double lumpsum) {
-        
+        validatePan(investorPan);
         UnifiedTacticalPayload payload = orchestrator.generateUnifiedPayload(investorPan, monthlySip, lumpsum);
         
         java.util.List<TacticalSignal> combined = new java.util.ArrayList<>();
@@ -53,6 +53,7 @@ public class RebalanceController {
 
     @GetMapping("/{pan}/tax-loss-harvesting")
         public List<TlhOpportunity> getTlhOpportunities(@PathVariable String pan) {
+            validatePan(pan);
             return taxLossHarvestingService.scanForOpportunities(pan);
         }
 
@@ -61,7 +62,7 @@ public class RebalanceController {
             @PathVariable String pan,
             @RequestParam(defaultValue = "75000") double monthlySip,
             @RequestParam(defaultValue = "0") double lumpsum) {
-        
+        validatePan(pan);
         return ResponseEntity.ok(orchestrator.generateUnifiedPayload(pan, monthlySip, lumpsum));
     }
 
@@ -73,6 +74,14 @@ public class RebalanceController {
             return new java.math.BigDecimal(amt.trim().replace(",", ""));
         } catch (Exception e) {
             return java.math.BigDecimal.ZERO;
+        }
+    }
+
+    private void validatePan(String pan) {
+        org.springframework.security.core.Authentication auth = 
+            org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication();
+        if (auth == null || !auth.isAuthenticated() || "anonymousUser".equals(auth.getPrincipal()) || !auth.getName().equalsIgnoreCase(pan)) {
+            throw new org.springframework.security.access.AccessDeniedException("Unauthorized access to PAN: " + pan);
         }
     }
 }

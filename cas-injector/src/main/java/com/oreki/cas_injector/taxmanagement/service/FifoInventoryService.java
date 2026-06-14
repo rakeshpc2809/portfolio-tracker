@@ -31,18 +31,13 @@ public class FifoInventoryService {
         String type = tx.getTransactionType().toUpperCase();
 
         if (type.contains("BUY") || type.contains("PURCHASE") || type.contains("SWITCH_IN")) {
-            taxLotRepo.save(TaxLot.builder()
-                .buyTransaction(tx)
-                .scheme(tx.getScheme())
-                .buyDate(tx.getDate())
-                .originalUnits(tx.getUnits())
-                .remainingUnits(tx.getUnits())
-                .costBasisPerUnit(CommonUtils.CALC_NAV.apply(tx.getAmount(), tx.getUnits()))
-                .status("OPEN")
-                .build());
+            // Skip saving individual TaxLot here since they are batch-inserted in CasProcessingService!
         } 
         else if (type.contains("STAMP_DUTY") || type.contains("STAMP")) {
-            taxLotRepo.findFirstBySchemeAndStatusOrderByBuyDateDesc(tx.getScheme(), "OPEN")
+            List<TaxLot> activeLots = taxLotRepo.findBySchemeAndStatusOrderByBuyDateAsc(tx.getScheme(), "OPEN");
+            activeLots.stream()
+                .filter(lot -> !lot.getBuyDate().isAfter(tx.getDate()))
+                .reduce((first, second) -> second)
                 .ifPresent(lot -> {
                     BigDecimal currentTotalCost = lot.getCostBasisPerUnit().multiply(lot.getOriginalUnits());
                     BigDecimal newTotalCost = currentTotalCost.add(tx.getAmount().abs());
@@ -61,7 +56,9 @@ public class FifoInventoryService {
 
     public void consumeLotsFIFO(Transaction sellTx, String category) {
         BigDecimal unitsToRedeem = sellTx.getUnits().abs();
-        List<TaxLot> activeLots = taxLotRepo.findBySchemeAndStatusOrderByBuyDateAsc(sellTx.getScheme(), "OPEN");
+        List<TaxLot> activeLots = taxLotRepo.findBySchemeAndStatusOrderByBuyDateAsc(sellTx.getScheme(), "OPEN").stream()
+            .filter(lot -> !lot.getBuyDate().isAfter(sellTx.getDate()))
+            .toList();
 
         BigDecimal sellPrice = sellTx.getAmount().abs().divide(sellTx.getUnits().abs(), 4, RoundingMode.HALF_UP);
 
