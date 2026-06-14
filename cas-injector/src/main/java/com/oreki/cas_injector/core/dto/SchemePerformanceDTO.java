@@ -114,4 +114,5 @@ public class SchemePerformanceDTO {
     private Double betaSmb;
     private Double betaHml;
     private Double rSquared;
+    private Double oneMonthReturn;
 }

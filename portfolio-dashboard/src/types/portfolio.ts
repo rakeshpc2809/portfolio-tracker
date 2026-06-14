@@ -38,6 +38,7 @@ export const SchemePerformanceSchema = z.object({
   betaMkt: z.number().nullable().optional(),
   betaSmb: z.number().nullable().optional(),
   betaHml: z.number().nullable().optional(),
+  oneMonthReturn: z.number().nullable().optional(),
 });
 
 export const DashboardSummarySchema = z.object({

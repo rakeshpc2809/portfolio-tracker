@@ -2,7 +2,6 @@ import { motion, AnimatePresence, type Variants } from 'framer-motion';
 import { useMemo, useState } from 'react';
 import { ResponsivePie } from '@nivo/pie';
 import { 
-  Zap, 
   Target, 
   Scissors, 
   ShieldAlert, 
@@ -10,15 +9,17 @@ import {
   Activity,
   Layers,
   Wallet,
-  ArrowRight
+  ChevronDown,
+  ChevronUp,
+  Newspaper
 } from 'lucide-react';
+import { useQuery } from '@tanstack/react-query';
 import CurrencyValue from '../ui/CurrencyValue';
-import { RecommendationDetailCard } from '../ui/RecommendationDetailCard';
 import { Progress } from '../ui/progress';
-import { resolveReasoningMetadata, formatCurrency } from '../../utils/formatters';
-import type { TacticalSignal } from '../../types/signals';
+import { formatCurrency, formatCurrencyShort } from '../../utils/formatters';
+import { fetchAlphaFeed } from '../../services/api';
 
-export default function TodayBriefView({ 
+export default function OverviewView({ 
   portfolioData, 
   sipAmount, 
   setSipAmount, 
@@ -35,8 +36,35 @@ export default function TodayBriefView({
   onFundClick: (schemeName: string) => void;
   isPrivate: boolean;
 }) {
-  const [view3d, setView3d] = useState(false);
+  const [isSentimentExpanded, setIsSentimentExpanded] = useState(false);
+
+  // Fetch Alpha Sentiment Feed
+  const { data: alphaFeed } = useQuery({
+    queryKey: ['alphaFeed'],
+    queryFn: fetchAlphaFeed,
+    staleTime: 1000 * 60 * 10, // 10 minutes
+  });
+
   if (!portfolioData) return null;
+
+  const schemeBreakdown = portfolioData.schemeBreakdown || [];
+  const activeFunds = useMemo(() => schemeBreakdown.filter((s: any) => s.currentValue > 0), [schemeBreakdown]);
+
+  const allTimePerformers = useMemo(() => {
+    return [...activeFunds]
+      .filter((s: any) => s.xirr && s.xirr !== '0%' && s.xirr !== '0.0%')
+      .map((s: any) => {
+        const val = parseFloat(s.xirr.replace('%', ''));
+        return { ...s, parsedXirr: isNaN(val) ? 0 : val };
+      })
+      .sort((a, b) => b.parsedXirr - a.parsedXirr);
+  }, [activeFunds]);
+
+  const monthlyPerformers = useMemo(() => {
+    return [...activeFunds]
+      .filter((s: any) => s.oneMonthReturn !== undefined && s.oneMonthReturn !== null)
+      .sort((a, b) => (b.oneMonthReturn || 0) - (a.oneMonthReturn || 0));
+  }, [activeFunds]);
 
   const payload = portfolioData.tacticalPayload || { 
     sipPlan: [], 
@@ -52,504 +80,690 @@ export default function TodayBriefView({
   const exitCount = payload.exitQueue?.length || 0;
   const sellCount = payload.activeSellSignals?.length || 0;
   const harvestCount = payload.harvestOpportunities?.length || 0;
-  const sipTotal = payload.sipPlan?.reduce((a: number, s: any) => a + s.amount, 0) || 0;
   const rebalancingTrades = payload.rebalancingTrades || [];
-  const droppedFundSummaries = payload.droppedFundSummaries || [];
 
-  const totalRebalanceSell = rebalancingTrades.reduce((acc: number, t: any) => acc + t.sellAmount, 0);
-  const totalRebalanceTax = rebalancingTrades.reduce((acc: number, t: any) => acc + t.estimatedSellTax, 0);
-  const totalRebalanceBuy = rebalancingTrades.reduce((acc: number, t: any) => acc + t.buyAmount, 0);
+  const bearCount = activeFunds.filter((s: any) => s.hmmState === 'VOLATILE_BEAR').length;
+  const bullCount = activeFunds.filter((s: any) => s.hmmState === 'CALM_BULL').length;
+  const neutralCount = activeFunds.filter((s: any) => s.hmmState === 'STRESSED_NEUTRAL').length;
 
+  const mask = (val: number | string) => isPrivate ? "••••" : String(val);
+
+  // 1. Category Allocation Pie Data
+  const categoryData = useMemo(() => {
+    const cats: Record<string, number> = {};
+    activeFunds.forEach((s: any) => {
+      const cat = s.category || 'Equity';
+      cats[cat] = (cats[cat] || 0) + s.currentValue;
+    });
+    return Object.entries(cats)
+      .map(([name, value]) => ({ id: name, label: name, value }))
+      .sort((a, b) => b.value - a.value);
+  }, [activeFunds]);
+
+  // 2. AMC Concentration Data
+  const amcConcentration = useMemo(() => {
+    const amcs: Record<string, number> = {};
+    let total = 0;
+    activeFunds.forEach((s: any) => {
+      const amc = s.amc || 'Other AMC';
+      amcs[amc] = (amcs[amc] || 0) + s.currentValue;
+      total += s.currentValue;
+    });
+    if (total === 0) total = 1;
+    return Object.entries(amcs)
+      .map(([name, value]) => ({
+        name,
+        value,
+        pct: (value / total) * 100
+      }))
+      .sort((a, b) => b.value - a.value)
+      .slice(0, 5);
+  }, [activeFunds]);
+
+  // Standing SIPs
   const standingSips = useMemo(() => 
     (payload.sipPlan || []).filter((s: any) => s.amount > 0 && s.mode === "SIP_STANDING"),
     [payload.sipPlan]
   );
 
-  const additionalSips = useMemo(() => 
-    (payload.sipPlan || []).filter((s: any) => s.amount > 0 && s.mode === "SIP_ADDITIONAL"),
-    [payload.sipPlan]
-  );
-
-  const schemeBreakdown = portfolioData.schemeBreakdown || [];
-  
-  const mask = (val: number | string) => isPrivate ? "••••" : String(val);
-  
-  const pieData = useMemo(() => {
-    return schemeBreakdown
-      .filter((s: any) => s.currentValue > 0)
-      .map((s: any) => ({
-        id: s.schemeName,
-        label: s.simpleName || s.schemeName,
-        value: s.currentValue
-      }));
-  }, [schemeBreakdown]);
-
-  const bearCount = schemeBreakdown.filter((s: any) => s.hmmState === 'VOLATILE_BEAR').length;
-  const bullCount = schemeBreakdown.filter((s: any) => s.hmmState === 'CALM_BULL').length;
-  const neutralCount = schemeBreakdown.filter((s: any) => s.hmmState === 'STRESSED_NEUTRAL').length;
-
-  const hasDeepBuys = payload.opportunisticSignals?.some((s: any) => s.action === 'BUY' && (s.returnZScore ?? 0) <= -2.0);
-  const arbitrageFund = schemeBreakdown.find((s: any) => s.category?.toUpperCase() === 'ARBITRAGE');
-  const canDeployArbitrage = hasDeepBuys && arbitrageFund && parseFloat(arbitrageFund.currentValue) > 1000;
-
   const container: Variants = {
     hidden: { opacity: 0 },
     show: {
       opacity: 1,
-      transition: { staggerChildren: 0.1 }
+      transition: { staggerChildren: 0.08 }
     }
   };
 
   const bentoItem: Variants = {
-    hidden: { opacity: 0, y: 30, scale: 0.98 },
+    hidden: { opacity: 0, y: 20 },
     show: { 
       opacity: 1, 
       y: 0, 
-      scale: 1, 
-      transition: { 
-        type: "spring", 
-        damping: 25, 
-        stiffness: 120 
-      } 
+      transition: { type: "spring", damping: 25, stiffness: 120 } 
     }
   };
+
+  // Profit return values
+  const unrealizedGain = portfolioData.currentValueAmount - portfolioData.totalInvestedAmount;
+  const unrealizedGainPct = (unrealizedGain / (portfolioData.totalInvestedAmount || 1)) * 100;
 
   return (
     <motion.div 
       variants={container}
       initial="hidden"
       animate="show"
-      className="grid grid-cols-1 md:grid-cols-12 gap-6 pb-24"
+      className="space-y-8 pb-24"
     >
-      {/* 1. PORTFOLIO HERO CARD (4x2 or similar) */}
-      <motion.div 
-        variants={bentoItem}
-        className="md:col-span-8 glass-card-premium p-10 flex flex-col justify-between relative overflow-hidden group min-h-[360px]"
-      >
-        <div className="absolute top-6 right-6 z-20 flex gap-2">
-           <button 
-             onClick={() => setView3d(!view3d)}
-             className="px-3 py-1.5 rounded-lg border border-white/10 bg-black/40 text-[9px] font-black uppercase tracking-widest text-muted hover:text-primary transition-all cursor-pointer shadow-md flex items-center gap-1.5 active:scale-95"
-           >
-             {view3d ? "2D Metrics" : "Allocation Chart"}
-           </button>
+      {/* HEADER */}
+      <header className="px-2">
+        <h2 className="text-muted text-[10px] font-black uppercase tracking-[0.3em] mb-1 opacity-60">System Dashboard</h2>
+        <p className="text-2xl font-black text-primary tracking-tighter">Portfolio Pulse Overview</p>
+      </header>
+
+      {/* 1. PORTFOLIO HEALTH STRIP */}
+      <motion.div variants={bentoItem} className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        {/* Value Card */}
+        <div className="glass-card-premium p-6 flex flex-col justify-between min-h-[110px] relative overflow-hidden group shadow-lg">
+          <div className="absolute -right-6 -bottom-6 opacity-5 group-hover:opacity-10 transition-opacity">
+            <Wallet size={80} />
+          </div>
+          <p className="text-[9px] font-black uppercase tracking-widest text-muted/60">Current Value</p>
+          <p className="text-2xl font-black text-primary tracking-tight mt-2">
+            <CurrencyValue isPrivate={isPrivate} value={portfolioData.currentValueAmount} />
+          </p>
         </div>
 
-        <div className="absolute top-0 right-0 p-8 opacity-5 group-hover:opacity-10 transition-opacity">
-          <TrendingUp size={160} />
-        </div>
-        
-        {/* Abstract Gradient Orbs for Hero */}
-        <div className="absolute -top-24 -left-24 w-64 h-64 bg-accent/10 rounded-full blur-[100px] pointer-events-none" />
-        <div className="absolute -bottom-24 -right-24 w-64 h-64 bg-buy/5 rounded-full blur-[100px] pointer-events-none" />
-
-        <div className="space-y-4 relative z-10">
-          <div className="flex items-center gap-3">
-             <div className="h-px w-8 bg-accent/40" />
-             <h2 className="text-accent text-[10px] font-black uppercase tracking-[0.4em]">
-                {view3d ? "Asset Allocation" : "Portfolio Orbit"}
-              </h2>
+        {/* Return Card */}
+        <div className="glass-card-premium p-6 flex flex-col justify-between min-h-[110px] relative overflow-hidden group shadow-lg">
+          <div className="absolute -right-6 -bottom-6 opacity-5 group-hover:opacity-10 transition-opacity">
+            <TrendingUp size={80} />
+          </div>
+          <p className="text-[9px] font-black uppercase tracking-widest text-muted/60">Unrealized Gain / Loss</p>
+          <div className="mt-2 flex items-baseline gap-2">
+            <span className={`text-xl font-black tracking-tight ${unrealizedGain >= 0 ? 'text-buy' : 'text-exit'}`}>
+              {unrealizedGain >= 0 ? '+' : ''}{isPrivate ? '••••' : formatCurrencyShort(unrealizedGain)}
+            </span>
+            <span className={`text-xs font-bold ${unrealizedGain >= 0 ? 'text-buy' : 'text-exit'}`}>
+              ({unrealizedGainPct.toFixed(1)}%)
+            </span>
           </div>
         </div>
 
-        <AnimatePresence mode="wait">
-          {view3d ? (
-            <motion.div
-              key="2d-pie"
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.4 }}
-              className="w-full flex-1 min-h-[280px] mt-4 z-10 flex items-center justify-center"
-            >
-              <div className="h-[280px] w-full relative">
-                <ResponsivePie
-                  data={pieData}
-                  margin={{ top: 20, right: 20, bottom: 20, left: 20 }}
-                  innerRadius={0.6}
-                  padAngle={2}
-                  cornerRadius={8}
-                  activeOuterRadiusOffset={8}
-                  borderWidth={1}
-                  borderColor={{ from: 'color', modifiers: [['darker', 0.2]] }}
-                  enableArcLinkLabels={false}
-                  arcLabelsSkipAngle={15}
-                  arcLabelsTextColor="#ffffff"
-                  colors={{ scheme: 'pastel1' }}
-                  theme={{
-                    tooltip: {
-                      container: {
-                        background: '#181825',
-                        border: '1px solid rgba(255,255,255,0.1)',
-                        color: '#cdd6f4',
-                        fontSize: 11,
-                        borderRadius: 12,
-                        boxShadow: '0 10px 15px -3px rgba(0,0,0,0.5)',
-                      },
-                    },
-                    labels: {
-                      text: {
-                        fontSize: 10,
-                        fontWeight: 700,
-                      },
-                    },
-                  }}
-                  valueFormat={(value) => mask(formatCurrency(value))}
-                  onClick={(node: any) => {
-                    if (onFundClick) {
-                      onFundClick(String(node.data.id));
-                    }
-                  }}
-                />
-              </div>
-            </motion.div>
+        {/* XIRR Card */}
+        <div className="glass-card-premium p-6 flex flex-col justify-between min-h-[110px] relative overflow-hidden group shadow-lg">
+          <div className="absolute -right-6 -bottom-6 opacity-5 group-hover:opacity-10 transition-opacity">
+            <Activity size={80} />
+          </div>
+          <p className="text-[9px] font-black uppercase tracking-widest text-muted/60">Overall XIRR</p>
+          <p className={`text-2xl font-black mt-2 tracking-tight ${parseFloat(portfolioData.overallXirr) >= 0 ? 'text-buy' : 'text-exit'}`}>
+            {portfolioData.overallXirr}
+          </p>
+        </div>
+
+        {/* Tax Exemption Card */}
+        <div className="glass-card-premium p-6 flex flex-col justify-between min-h-[110px] relative overflow-hidden group shadow-lg">
+          <div className="absolute -right-6 -bottom-6 opacity-5 group-hover:opacity-10 transition-opacity">
+            <Scissors size={80} />
+          </div>
+          <div className="flex justify-between items-center">
+            <p className="text-[9px] font-black uppercase tracking-widest text-muted/60">LTCG Headroom</p>
+            <span className="text-[8px] font-black text-harvest/60">₹1.25L Cap</span>
+          </div>
+          <div className="space-y-1.5 mt-2">
+            <Progress 
+              value={Math.min(100, (portfolioData.fyLtcgAlreadyRealized / 125000) * 100)} 
+              className="h-1.5 bg-white/5 border border-white/5" 
+              indicatorClassName="bg-gradient-to-r from-harvest to-accent shadow-[0_0_8px_rgba(180,190,254,0.3)]" 
+            />
+            <div className="flex justify-between items-baseline text-[10px]">
+              <span className="text-harvest font-black">
+                {isPrivate ? '••••' : formatCurrency(125000 - portfolioData.fyLtcgAlreadyRealized)} left
+              </span>
+              <span className="text-[8px] font-bold text-muted/30">FY 25-26</span>
+            </div>
+          </div>
+        </div>
+      </motion.div>
+
+      {/* 2. FUND STATUS GRID */}
+      <motion.div variants={bentoItem} className="space-y-4">
+        <div className="flex items-center gap-2.5 px-2">
+          <Layers size={16} className="text-accent" />
+          <h3 className="text-primary text-[10px] font-black uppercase tracking-[0.3em]">Active Holdings Breakdowns</h3>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+          {activeFunds.length === 0 ? (
+            <div className="col-span-full py-16 text-center border border-dashed border-white/10 rounded-[2.5rem] opacity-40">
+              <Activity size={32} className="mx-auto mb-4" />
+              <p className="text-[10px] font-black uppercase tracking-widest">No active mutual funds in portfolio</p>
+            </div>
           ) : (
-            <motion.div
-              key="2d-metrics"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.4 }}
-              className="flex-1 flex flex-col justify-between mt-4 z-10"
-            >
-              <div className="space-y-1">
-                <p className="text-[11px] font-black uppercase tracking-widest text-muted/60">Current Liquidity Value</p>
-                <div className="text-6xl font-black text-primary tracking-tighter tabular-nums flex items-baseline gap-4">
-                  <CurrencyValue isPrivate={isPrivate} value={portfolioData.currentValueAmount} />
-                  <span className={`text-sm font-black tracking-widest uppercase px-3 py-1 rounded-lg bg-black/20 border border-white/5 ${parseFloat(portfolioData.overallReturn) >= 0 ? 'text-buy' : 'text-exit'}`}>
-                    {portfolioData.overallReturn}
-                  </span>
-                </div>
-              </div>
+            activeFunds.map((s: any) => {
+              const personalXirr = parseFloat(s.xirr || '0');
+              const benchmarkXirr = s.benchmarkXirr || 0;
+              const alpha = personalXirr - benchmarkXirr;
+              const isWinning = alpha >= 0;
+              const deltaStr = s.benchmarkXirr != null ? `${isWinning ? '+' : ''}${alpha.toFixed(1)}% vs ${s.benchmarkIndex || 'Bench'}` : 'No Bench';
 
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-8 pt-10 border-t border-white/5 relative z-10">
-                <div className="space-y-1">
-                  <p className="text-[9px] font-black uppercase tracking-widest text-muted/40 mb-1">Overall XIRR</p>
-                  <p className={`text-2xl font-black tabular-nums tracking-tight ${parseFloat(portfolioData.overallXirr) >= 0 ? 'text-buy' : 'text-exit'}`}>
-                    {portfolioData.overallXirr}
-                  </p>
-                </div>
-                <div className="space-y-1">
-                  <p className="text-[9px] font-black uppercase tracking-widest text-muted/40 mb-1">Capital Invested</p>
-                  <p className="text-2xl font-black tabular-nums text-primary tracking-tight">
-                    <CurrencyValue isPrivate={isPrivate} value={portfolioData.currentInvestedAmount} />
-                  </p>
-                </div>
-                <div className="group cursor-help relative space-y-2">
-                  <div className="flex justify-between items-center">
-                    <p className="text-[9px] font-black uppercase tracking-widest text-muted/40 group-hover:text-harvest transition-colors">Tax Headroom</p>
-                    <span className="text-[8px] font-black text-harvest/60 tabular-nums">₹1.25L Cap</span>
+              const activeDots = Math.max(1, Math.min(5, Math.round(s.convictionScore / 20)));
+
+              // HMM Badge
+              const isBull = s.hmmState === 'CALM_BULL';
+              const isBear = s.hmmState === 'VOLATILE_BEAR';
+
+              // Z-Score Percentile
+              const zPct = Math.min(100, Math.max(0, (s.navPercentile1yr || 0) * 100));
+
+              return (
+                <motion.div
+                  key={s.schemeName}
+                  whileHover={{ scale: 1.02, y: -2 }}
+                  onClick={() => onFundClick(s.schemeName)}
+                  className="bg-surface/40 hover:bg-[#1f1f2e]/60 border border-white/5 hover:border-accent/20 rounded-3xl p-6 transition-all duration-300 shadow-lg cursor-pointer flex flex-col justify-between space-y-4 min-h-[220px] relative overflow-hidden group"
+                >
+                  {/* Subtle top decoration card highlight */}
+                  <div className="absolute top-0 inset-x-0 h-[2px] bg-gradient-to-r from-transparent via-accent/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+                  
+                  {/* Fund Name and Category */}
+                  <div className="space-y-1">
+                    <div className="flex justify-between items-start">
+                      <span className="text-[8px] font-black uppercase tracking-[0.15em] text-muted opacity-50 truncate max-w-[120px]">
+                        {s.category}
+                      </span>
+                      {/* Action Badge */}
+                      <span className={`px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-widest border ${
+                        s.action === 'BUY' ? 'text-buy bg-buy/10 border-buy/20' : 
+                        s.action === 'EXIT' || s.action === 'SELL' ? 'text-exit bg-exit/10 border-exit/20' : 
+                        s.action === 'WATCH' ? 'text-warning bg-warning/10 border-warning/20' :
+                        'text-[#89b4fa] bg-[#89b4fa]/10 border-[#89b4fa]/20'
+                      }`}>
+                        {s.action}
+                      </span>
+                    </div>
+                    <h4 className="text-xs font-black text-primary group-hover:text-white transition-colors tracking-tight leading-snug line-clamp-2">
+                      {s.simpleName || s.schemeName}
+                    </h4>
                   </div>
-                  <Progress 
-                    value={Math.min(100, (portfolioData.fyLtcgAlreadyRealized / 125000) * 100)} 
-                    className="h-1.5 bg-white/5 border border-white/5" 
-                    indicatorClassName="bg-gradient-to-r from-harvest to-accent shadow-[0_0_8px_rgba(180,190,254,0.3)]" 
-                  />
-                  <div className="flex justify-between items-baseline">
-                     <p className="text-[10px] font-black text-harvest tabular-nums">
-                      {isPrivate ? '••••' : formatCurrency(125000 - portfolioData.fyLtcgAlreadyRealized)} <span className="text-[8px] opacity-40">LEFT</span>
-                    </p>
-                    <span className="text-[8px] font-bold text-muted/30">FY 25-26</span>
+
+                  {/* Pricing and Performance */}
+                  {/* Pricing and Performance */}
+                  <div className="grid grid-cols-3 gap-2">
+                    <div className="space-y-0.5 min-w-0">
+                      <p className="text-[8px] font-bold text-muted/50 uppercase tracking-widest truncate">Holding Value</p>
+                      <p className="text-sm font-black text-primary tracking-tight truncate">
+                        <CurrencyValue isPrivate={isPrivate} value={s.currentValue} />
+                      </p>
+                    </div>
+                    <div className="space-y-0.5 text-center min-w-0">
+                      <p className="text-[8px] font-bold text-muted/50 uppercase tracking-widest truncate">30D Return</p>
+                      <p className={`text-sm font-black tracking-tight truncate ${s.oneMonthReturn != null && s.oneMonthReturn >= 0 ? 'text-buy' : 'text-exit'}`}>
+                        {isPrivate ? '••••' : (s.oneMonthReturn != null ? `${s.oneMonthReturn >= 0 ? '+' : ''}${s.oneMonthReturn.toFixed(2)}%` : '—')}
+                      </p>
+                    </div>
+                    <div className="text-right space-y-0.5 min-w-0">
+                      <p className="text-[8px] font-bold text-muted/50 uppercase tracking-widest truncate">Personal XIRR</p>
+                      <p className={`text-sm font-black tracking-tight truncate ${personalXirr >= 0 ? 'text-buy' : 'text-exit'}`}>
+                        {s.xirr || '0%'}
+                      </p>
+                      <p className={`text-[8px] font-black uppercase tracking-tighter truncate ${isWinning ? 'text-buy' : 'text-exit'}`}>
+                        {deltaStr}
+                      </p>
+                    </div>
                   </div>
-                </div>
-              </div>
-            </motion.div>
+
+                  {/* Quantitative features: Conviction & Regime */}
+                  <div className="grid grid-cols-2 gap-3 pt-3 border-t border-white/5">
+                    {/* Conviction Dots */}
+                    <div className="space-y-1">
+                      <p className="text-[8px] font-bold text-muted/50 uppercase tracking-widest">Conviction</p>
+                      <div className="flex items-center gap-1.5 h-3">
+                        <div className="flex gap-1 items-center">
+                          {[1, 2, 3, 4, 5].map(dot => {
+                            const filled = dot <= activeDots;
+                            let dotBg = 'bg-white/10';
+                            if (filled) {
+                              dotBg = s.convictionScore >= 65 ? 'bg-buy shadow-[0_0_5px_rgba(166,227,161,0.5)]' : s.convictionScore >= 45 ? 'bg-warning shadow-[0_0_5px_rgba(251,146,60,0.5)]' : 'bg-exit shadow-[0_0_5px_rgba(243,139,168,0.5)]';
+                            }
+                            return <span key={dot} className={`w-1.5 h-1.5 rounded-full ${dotBg}`} />;
+                          })}
+                        </div>
+                        <span className="text-[9px] font-black text-secondary">({s.convictionScore})</span>
+                      </div>
+                    </div>
+
+                    {/* HMM Regime Badge */}
+                    <div className="space-y-1">
+                      <p className="text-[8px] font-bold text-muted/50 uppercase tracking-widest">Regime</p>
+                      <div className="flex items-center gap-1.5">
+                        <span className={`w-1.5 h-1.5 rounded-full ${isBull ? 'bg-buy' : isBear ? 'bg-exit' : 'bg-warning'} animate-pulse`} />
+                        <span className="text-[9px] font-black uppercase text-secondary tracking-widest">
+                          {isBull ? 'Bull' : isBear ? 'Bear' : 'Neutral'}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Z-Score Percentile Indicator */}
+                  <div className="space-y-1 pt-1">
+                    <div className="flex justify-between text-[7px] font-bold text-muted/40 uppercase tracking-widest">
+                      <span>Cheap</span>
+                      <span>Expensive</span>
+                    </div>
+                    <div className="h-1 w-full bg-white/5 rounded-full relative overflow-visible border border-white/5">
+                      <div className="absolute inset-0 bg-gradient-to-r from-buy/20 via-warning/5 to-exit/20 rounded-full" />
+                      <div 
+                        className="absolute top-1/2 -translate-y-1/2 w-1.5 h-1.5 rounded-full bg-accent border border-[#11111b] shadow-[0_0_5px_rgba(129,140,248,0.8)]" 
+                        style={{ left: `${zPct}%` }}
+                      />
+                    </div>
+                  </div>
+                </motion.div>
+              );
+            })
           )}
-        </AnimatePresence>
+        </div>
       </motion.div>
 
-      {/* 2. TACTICAL OVERVIEW CARD (4x2) */}
-      <motion.div 
-        variants={bentoItem}
-        className="md:col-span-4 bg-surface/40 backdrop-blur-2xl border border-white/[0.04] rounded-[2.5rem] p-10 flex flex-col shadow-2xl relative overflow-hidden group"
-      >
-        <h2 className="text-warning text-[10px] font-black uppercase tracking-[0.4em] mb-8">System Signals</h2>
-        <div className="space-y-6 flex-1">
-          {[
-            { label: 'Critical Actions', value: `${exitCount + sellCount} Assets`, icon: <ShieldAlert size={18}/>, color: exitCount + sellCount > 0 ? 'text-exit' : 'text-buy', bg: exitCount + sellCount > 0 ? 'bg-exit/10' : 'bg-buy/10' },
-            { label: 'Budget Ready', value: formatCurrency(sipTotal), icon: <Zap size={18} className="fill-current"/>, color: 'text-accent', bg: 'bg-accent/10' },
-            { label: 'Tax Optimized', value: `${harvestCount} Signals`, icon: <Scissors size={18}/>, color: 'text-harvest', bg: 'bg-harvest/10' }
-          ].map((stat) => (
-            <div key={stat.label} className="flex items-center gap-5 group/stat">
-              <div className={`p-4 rounded-2xl ${stat.bg} ${stat.color} group-hover/stat:scale-110 transition-transform`}>
-                {stat.icon}
-              </div>
-              <div>
-                <p className="text-[9px] font-black uppercase tracking-widest text-muted opacity-60 mb-0.5">{stat.label}</p>
-                <p className={`text-lg font-black tabular-nums ${stat.color}`}>{isPrivate && stat.label.includes('Budget') ? '••••' : stat.value}</p>
-              </div>
-            </div>
-          ))}
-        </div>
-        <div className="pt-6 border-t border-white/5 mt-6 space-y-4">
-          <div className="flex items-center gap-3 text-muted">
-            <Activity size={12} className="animate-pulse text-buy" />
-            <span className="text-[9px] font-bold uppercase tracking-[0.2em]">Engine Pulse Nominal</span>
+      {/* PERFORMANCE LEADERBOARD */}
+      <motion.div variants={bentoItem} className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* All-Time Leaderboard */}
+        <section className="bg-surface/40 backdrop-blur-xl border border-white/5 p-8 rounded-[2.5rem] shadow-2xl flex flex-col justify-between hover:border-accent/10 transition-all">
+          <div className="space-y-1 mb-6">
+            <h3 className="text-primary text-[10px] font-black uppercase tracking-[0.3em] flex items-center gap-2">
+              <TrendingUp size={14} className="text-buy" /> All-Time Performance Leaders
+            </h3>
+            <p className="text-[9px] font-bold text-muted/40 uppercase tracking-widest">Ranked by Annualized XIRR</p>
           </div>
-          {schemeBreakdown.length > 0 && (
-            <div className="bg-black/20 border border-white/5 rounded-xl p-4">
-              <p className="text-[8px] font-black uppercase tracking-[0.2em] text-muted mb-3">Portfolio Regime Consensus</p>
-              <div className="flex w-full h-2 rounded-full overflow-hidden mb-2">
-                <div style={{ width: `${(bullCount / schemeBreakdown.length) * 100}%` }} className="bg-buy" />
-                <div style={{ width: `${(neutralCount / schemeBreakdown.length) * 100}%` }} className="bg-warning/50" />
-                <div style={{ width: `${(bearCount / schemeBreakdown.length) * 100}%` }} className="bg-exit" />
-              </div>
-              <div className="flex justify-between text-[8px] font-black uppercase tracking-widest text-muted/60">
-                <span>{bullCount} Bull</span>
-                <span>{neutralCount} Neutral</span>
-                <span>{bearCount} Bear</span>
-              </div>
+
+          <div className={`grid grid-cols-1 ${allTimePerformers.length >= 4 ? 'md:grid-cols-2' : ''} gap-6 flex-1`}>
+            {/* Top All-Time */}
+            <div className="space-y-3">
+              <p className="text-[9px] font-black uppercase tracking-widest text-buy border-b border-buy/10 pb-2">Top Performers</p>
+              {allTimePerformers.length === 0 ? (
+                <p className="text-[10px] text-muted/40 uppercase font-black py-4">No data available</p>
+              ) : (
+                allTimePerformers.slice(0, 3).map((s: any, idx: number) => (
+                  <div 
+                    key={s.schemeName}
+                    onClick={() => onFundClick(s.schemeName)}
+                    className="flex justify-between items-center p-3 bg-buy/5 hover:bg-buy/10 rounded-2xl border border-buy/10 cursor-pointer transition-all"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <p className="text-[10px] font-black text-primary truncate leading-tight">
+                        {idx + 1}. {s.simpleName || s.schemeName}
+                      </p>
+                      <p className="text-[8px] font-bold text-muted/50 uppercase tracking-widest mt-1">
+                        {s.category}
+                      </p>
+                    </div>
+                    <span className="text-xs font-black text-buy ml-2 shrink-0">
+                      {s.xirr}
+                    </span>
+                  </div>
+                ))
+              )}
             </div>
-          )}
-        </div>
+
+            {/* Worst All-Time (Only show if total funds >= 4 to avoid overlap) */}
+            {allTimePerformers.length >= 4 && (
+              <div className="space-y-3">
+                <p className="text-[9px] font-black uppercase tracking-widest text-exit border-b border-exit/10 pb-2">Underperformers</p>
+                {[...allTimePerformers].reverse().slice(0, 3).map((s: any, idx: number) => (
+                  <div 
+                    key={s.schemeName}
+                    onClick={() => onFundClick(s.schemeName)}
+                    className="flex justify-between items-center p-3 bg-exit/5 hover:bg-exit/10 rounded-2xl border border-exit/10 cursor-pointer transition-all"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <p className="text-[10px] font-black text-primary truncate leading-tight">
+                        {idx + 1}. {s.simpleName || s.schemeName}
+                      </p>
+                      <p className="text-[8px] font-bold text-muted/50 uppercase tracking-widest mt-1">
+                        {s.category}
+                      </p>
+                    </div>
+                    <span className="text-xs font-black text-exit ml-2 shrink-0">
+                      {s.xirr}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </section>
+
+        {/* Monthly Leaderboard */}
+        <section className="bg-surface/40 backdrop-blur-xl border border-white/5 p-8 rounded-[2.5rem] shadow-2xl flex flex-col justify-between hover:border-accent/10 transition-all">
+          <div className="space-y-1 mb-6">
+            <h3 className="text-primary text-[10px] font-black uppercase tracking-[0.3em] flex items-center gap-2">
+              <Activity size={14} className="text-accent" /> Monthly Performance Leaders
+            </h3>
+            <p className="text-[9px] font-bold text-muted/40 uppercase tracking-widest">Ranked by 30-Day Absolute Return</p>
+          </div>
+
+          <div className={`grid grid-cols-1 ${monthlyPerformers.length >= 4 ? 'md:grid-cols-2' : ''} gap-6 flex-1`}>
+            {/* Top Monthly */}
+            <div className="space-y-3">
+              <p className="text-[9px] font-black uppercase tracking-widest text-buy border-b border-buy/10 pb-2">Top Performers</p>
+              {monthlyPerformers.length === 0 ? (
+                <div className="py-6 text-center border border-dashed border-white/5 rounded-2xl opacity-40 h-full flex items-center justify-center">
+                  <p className="text-[8px] font-black uppercase tracking-widest">No 30-day price history</p>
+                </div>
+              ) : (
+                monthlyPerformers.slice(0, 3).map((s: any, idx: number) => (
+                  <div 
+                    key={s.schemeName}
+                    onClick={() => onFundClick(s.schemeName)}
+                    className="flex justify-between items-center p-3 bg-buy/5 hover:bg-buy/10 rounded-2xl border border-buy/10 cursor-pointer transition-all"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <p className="text-[10px] font-black text-primary truncate leading-tight">
+                        {idx + 1}. {s.simpleName || s.schemeName}
+                      </p>
+                      <p className="text-[8px] font-bold text-muted/50 uppercase tracking-widest mt-1">
+                        {s.category}
+                      </p>
+                    </div>
+                    <span className="text-xs font-black text-buy ml-2 shrink-0">
+                      {s.oneMonthReturn !== undefined && s.oneMonthReturn !== null ? `+${s.oneMonthReturn.toFixed(1)}%` : '0%'}
+                    </span>
+                  </div>
+                ))
+              )}
+            </div>
+
+            {/* Worst Monthly (Only show if total funds >= 4 to avoid overlap) */}
+            {monthlyPerformers.length >= 4 && (
+              <div className="space-y-3">
+                <p className="text-[9px] font-black uppercase tracking-widest text-exit border-b border-exit/10 pb-2">Underperformers</p>
+                {[...monthlyPerformers].reverse().slice(0, 3).map((s: any, idx: number) => (
+                  <div 
+                    key={s.schemeName}
+                    onClick={() => onFundClick(s.schemeName)}
+                    className="flex justify-between items-center p-3 bg-exit/5 hover:bg-exit/10 rounded-2xl border border-exit/10 cursor-pointer transition-all"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <p className="text-[10px] font-black text-primary truncate leading-tight">
+                        {idx + 1}. {s.simpleName || s.schemeName}
+                      </p>
+                      <p className="text-[8px] font-bold text-muted/50 uppercase tracking-widest mt-1">
+                        {s.category}
+                      </p>
+                    </div>
+                    <span className="text-xs font-black text-exit ml-2 shrink-0">
+                      {s.oneMonthReturn !== undefined && s.oneMonthReturn !== null ? `${s.oneMonthReturn.toFixed(1)}%` : '0%'}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </section>
       </motion.div>
 
-      {/* 3. STRUCTURAL DEPLOYMENT CARD (8x4 or 12x4) */}
-      <motion.div 
-        variants={bentoItem}
-        className="md:col-span-12 bg-surface/40 backdrop-blur-2xl border border-white/[0.04] rounded-[2.5rem] p-10 shadow-2xl space-y-10"
-      >
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-8">
+      {/* 3. PORTFOLIO COMPOSITION */}
+      <motion.div variants={bentoItem} className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Category Allocation Pie Card */}
+        <section className="bg-surface/40 backdrop-blur-xl border border-white/5 p-8 rounded-[2.5rem] shadow-2xl h-[360px] flex flex-col hover:border-accent/10 transition-all">
+          <div className="flex items-center gap-3 mb-4">
+            <TrendingUp size={16} className="text-accent" />
+            <h3 className="text-primary text-[10px] font-black uppercase tracking-[0.3em]">Category Diversification</h3>
+          </div>
+          <div className="flex-1 min-h-0 relative">
+            {categoryData.length === 0 ? (
+              <div className="absolute inset-0 flex items-center justify-center text-muted/40 text-[10px] uppercase font-black">
+                No composition data
+              </div>
+            ) : (
+              <ResponsivePie
+                data={categoryData}
+                margin={{ top: 20, right: 40, bottom: 20, left: 40 }}
+                innerRadius={0.65}
+                padAngle={2}
+                cornerRadius={10}
+                activeOuterRadiusOffset={8}
+                borderWidth={1}
+                borderColor={{ from: 'color', modifiers: [['darker', 0.2]] }}
+                enableArcLinkLabels={false}
+                arcLabelsSkipAngle={10}
+                arcLabelsTextColor="#ffffff"
+                colors={{ scheme: 'category10' }}
+                theme={{
+                  tooltip: { container: { background: '#181825', border: '1px solid rgba(255,255,255,0.1)', color: '#cdd6f4', fontSize: 11, borderRadius: 12, boxShadow: '0 10px 15px -3px rgba(0,0,0,0.5)' } },
+                  labels: { text: { fontSize: 10, fontWeight: 700 } }
+                }}
+                valueFormat={(value) => mask(formatCurrency(value))}
+              />
+            )}
+          </div>
+        </section>
+
+        {/* AMC Concentration Card */}
+        <section className="bg-surface/40 backdrop-blur-xl border border-white/5 p-8 rounded-[2.5rem] shadow-2xl h-[360px] flex flex-col justify-between hover:border-accent/10 transition-all">
+          <div className="space-y-1">
+            <h3 className="text-primary text-[10px] font-black uppercase tracking-[0.3em]">AMC Concentration</h3>
+            <p className="text-[9px] font-bold text-muted/40 uppercase tracking-widest">Top 5 AMC exposure limits</p>
+          </div>
+          
+          <div className="space-y-4 flex-1 flex flex-col justify-center">
+            {amcConcentration.length === 0 ? (
+              <p className="text-center text-muted/40 text-[10px] uppercase font-black">No AMC data</p>
+            ) : (
+              amcConcentration.map((item) => (
+                <div key={item.name} className="space-y-1">
+                  <div className="flex justify-between text-[10px] font-black text-secondary">
+                    <span className="truncate max-w-[200px]">{item.name}</span>
+                    <span>{item.pct.toFixed(1)}%</span>
+                  </div>
+                  <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden border border-white/5">
+                    <div 
+                      className="h-full bg-accent opacity-80 rounded-full" 
+                      style={{ width: `${item.pct}%` }} 
+                    />
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </section>
+      </motion.div>
+
+      {/* 4. ACTION QUEUE */}
+      <motion.div variants={bentoItem} className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        {/* SIP Budget & Deployment */}
+        <div className="bg-surface/40 backdrop-blur-xl border border-white/5 p-8 rounded-[2.5rem] shadow-2xl space-y-6 flex flex-col justify-between">
           <div className="space-y-2">
-            <h2 className="text-buy text-[10px] font-black uppercase tracking-[0.4em]">SIP This Month</h2>
-            <p className="text-2xl font-black text-primary tracking-tighter tabular-nums flex items-center gap-3">
-              <Target size={24} className="text-accent" /> Standing Instructions
+            <h3 className="text-buy text-[10px] font-black uppercase tracking-[0.3em]">Active Monthly Deployment</h3>
+            <p className="text-lg font-black text-primary tracking-tight flex items-center gap-2">
+              <Target size={18} className="text-accent" /> SIP Standing Instructions
             </p>
           </div>
 
-          <div className="flex flex-wrap items-center gap-8 bg-black/20 p-6 rounded-[2rem] border border-white/5">
-            <div className="space-y-2">
-              <div className="flex justify-between text-[9px] font-black uppercase tracking-widest text-muted">
-                <span>Monthly Budget</span>
-                <span className="text-accent font-black tracking-tighter"><CurrencyValue isPrivate={isPrivate} value={sipAmount} /></span>
-              </div>
-              <input 
-                type="range" min="0" max="1000000" step="10000" 
-                value={sipAmount} 
-                onChange={(e) => setSipAmount(parseInt(e.target.value) || 0)}
-                className="w-48 h-1.5 bg-white/10 rounded-full appearance-none cursor-pointer accent-accent hover:accent-accent-bright transition-all"
-              />
-            </div>
-            <div className="h-10 w-px bg-white/5 hidden sm:block" />
-            <div className="space-y-2">
+          <div className="bg-black/20 p-4 rounded-2xl border border-white/5 flex items-center justify-between">
+            <div className="space-y-1">
               <label className="text-[9px] font-black uppercase tracking-widest text-muted">Tactical Lumpsum</label>
               <input 
                 type="number" 
                 value={lumpsum || ''} 
                 onChange={(e) => setLumpsum(parseInt(e.target.value) || 0)}
                 placeholder="₹0"
-                className="bg-black/40 border border-white/10 rounded-xl px-4 py-2 text-sm text-primary tabular-nums font-black focus:outline-none focus:border-accent/50 transition-all w-32 shadow-inner"
+                className="bg-black/40 border border-white/10 rounded-xl px-4 py-2 text-xs text-primary tabular-nums font-black focus:outline-none focus:border-accent/50 transition-all w-28 shadow-inner"
+              />
+            </div>
+            <div className="h-10 w-px bg-white/5" />
+            <div className="space-y-1">
+              <div className="flex justify-between text-[9px] font-black uppercase tracking-widest text-muted">
+                <span>Budget</span>
+                <span className="text-accent font-black tracking-tighter ml-2"><CurrencyValue isPrivate={isPrivate} value={sipAmount} /></span>
+              </div>
+              <input 
+                type="range" min="0" max="500000" step="10000" 
+                value={sipAmount} 
+                onChange={(e) => setSipAmount(parseInt(e.target.value) || 0)}
+                className="w-36 h-1 bg-white/10 rounded-full appearance-none cursor-pointer accent-accent transition-all"
               />
             </div>
           </div>
-        </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {standingSips.length === 0 ? (
-            <div className="col-span-full py-16 text-center border border-dashed border-white/10 rounded-[2.5rem] opacity-40">
-              <Target size={40} className="mx-auto mb-4" />
-              <p className="text-[10px] font-black uppercase tracking-widest">No standing SIP targets</p>
-            </div>
-          ) : (
-            standingSips.map((s: any) => (
-              <motion.div
-                key={s.isin}
-                whileHover={{ scale: 1.02 }}
-                onClick={() => onFundClick(s.schemeName)}
-                className="flex flex-col justify-between p-8 bg-surface/60 border border-white/5 rounded-[2rem] hover:border-accent/30 cursor-pointer transition-all group shadow-xl relative overflow-hidden"
-              >
-                <div className="flex justify-between items-start mb-6">
-                  <div className={`w-3 h-3 rounded-full shadow-lg ${s.deployFlag === 'DEPLOY' ? 'bg-buy animate-pulse' : 'bg-warning'}`} />
-                  <div className={`text-[8px] font-black uppercase tracking-[0.2em] px-3 py-1 rounded-full border ${
-                    s.deployFlag === 'DEPLOY' ? 'bg-buy/10 text-buy border-buy/20' : 'bg-warning/10 text-warning border-warning/20'
-                  }`}>
-                    {s.deployFlag === 'DEPLOY' ? 'EXECUTE' : 'AWAIT PULSE'}
-                  </div>
-                </div>
-                <div>
-                  <p className="text-lg text-primary font-black tracking-tight leading-tight mb-1 group-hover:text-white transition-colors">
-                    {s.simpleName || s.schemeName}
-                  </p>
-                  <p className="text-[9px] text-muted font-bold uppercase tracking-widest opacity-60">Target: {s.sipPct}% Allocation</p>
-                </div>
-                <div className="mt-8 flex items-baseline gap-1">
-                  <p className={`text-2xl font-black tabular-nums tracking-tighter ${s.deployFlag === 'DEPLOY' ? 'text-buy' : 'text-warning'}`}>
-                    {isPrivate ? '••••' : `₹${(s.amount / 1000).toFixed(1)}k`}
-                  </p>
-                  <span className="text-[10px] font-black text-muted opacity-40 uppercase tracking-widest">Deploy</span>
-                </div>
-              </motion.div>
-            ))
-          )}
-        </div>
-      </motion.div>
-
-      {/* 4. REBALANCING & OPPORTUNISTIC (6x...) */}
-      <motion.div 
-        variants={bentoItem}
-        className="md:col-span-6 space-y-6"
-      >
-        <div className="flex items-center justify-between px-2">
-          <div className="flex items-center gap-3">
-            <Layers size={16} className="text-warning" />
-            <h3 className="text-muted text-[10px] font-black uppercase tracking-[0.3em]">Portfolio Rebalancing</h3>
-          </div>
-          {totalRebalanceSell > 0 && (
-            <span className="text-[9px] font-black text-muted uppercase tracking-widest">
-              Tax Cost: <span className={totalRebalanceTax > 5000 ? 'text-exit' : 'text-buy'}><CurrencyValue isPrivate={isPrivate} value={totalRebalanceTax} /></span>
-            </span>
-          )}
-        </div>
-
-        {rebalancingTrades.length > 0 && (
-          <div className="bg-surface/40 backdrop-blur-xl border border-white/5 p-6 rounded-[2rem] shadow-xl space-y-4">
-             <p className="text-[10px] font-black text-muted uppercase tracking-widest leading-relaxed">
-              Sell <span className="text-exit"><CurrencyValue isPrivate={isPrivate} value={totalRebalanceSell} /></span> and redeploy <span className="text-buy"><CurrencyValue isPrivate={isPrivate} value={totalRebalanceBuy} /></span> to optimize allocation.
-            </p>
-            <div className="space-y-3">
-              {rebalancingTrades.map((trade: any, idx: number) => (
-                <div key={idx} className="flex items-center gap-3 p-3 bg-black/20 rounded-xl border border-white/5">
-                  <div className="flex-1 min-w-0">
-                    <p className="text-[10px] font-black text-primary truncate">{trade.sellFundName.split(' ')[0]}... → {trade.buyFundName.split(' ')[0]}...</p>
-                    <p className="text-[8px] font-bold text-muted uppercase tracking-widest">Rotate <CurrencyValue isPrivate={isPrivate} value={trade.buyAmount} /></p>
-                  </div>
-                  <ArrowRight size={12} className="text-muted" />
-                  <div className="bg-buy/10 px-2 py-0.5 rounded text-[8px] font-black text-buy uppercase tracking-widest">
-                    +{trade.convictionDelta.toFixed(0)} Conv.
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        <div className="flex items-center gap-3 px-2 pt-4">
-          <Zap size={16} className="text-warning" />
-          <h3 className="text-muted text-[10px] font-black uppercase tracking-[0.3em]">Optional Top-ups</h3>
-        </div>
-        <div className="space-y-4">
-          {canDeployArbitrage && (
-            <div className="flex items-center justify-between p-6 bg-accent/5 border border-accent/20 rounded-[2rem] hover:border-accent/40 cursor-pointer transition-all shadow-xl">
-               <div className="min-w-0">
-                  <div className="flex items-center gap-2 mb-1">
-                    <Zap size={14} className="text-accent fill-accent" />
-                    <p className="text-[11px] font-black text-primary tracking-tight">Deploy Arbitrage Capital</p>
-                  </div>
-                  <p className="text-[9px] font-bold text-muted mt-1 leading-relaxed">Deep BUY signals detected in equities. Consider deploying from <span className="text-primary font-black">{arbitrageFund.simpleName || arbitrageFund.schemeName}</span> (Value: <span className="text-accent font-black"><CurrencyValue isPrivate={isPrivate} value={parseFloat(arbitrageFund.currentValue)} /></span>).</p>
-                </div>
-            </div>
-          )}
-          {additionalSips.map((s: any) => (
-            <div key={s.isin} className="flex items-center justify-between p-6 bg-surface/40 border border-white/5 rounded-[2rem] hover:border-accent/30 cursor-pointer transition-all group shadow-xl">
-               <div className="min-w-0">
-                  <p className="text-[11px] font-black text-primary truncate tracking-tight">{s.simpleName || s.schemeName}</p>
-                  <p className="text-[8px] font-black text-muted uppercase tracking-widest mt-0.5">Strategy Gap: <CurrencyValue isPrivate={isPrivate} value={s.amount} /></p>
-                </div>
-                <div className="text-right pl-4">
-                   <div className="bg-accent/10 px-3 py-1 rounded-full text-[9px] font-black text-accent uppercase tracking-widest">Additional</div>
-                </div>
-            </div>
-          ))}
-          {payload.opportunisticSignals.map((signal: TacticalSignal) => (
-            <RecommendationDetailCard
-              key={signal.schemeName}
-              signal={{
-                ...signal,
-                reasoningMetadata: resolveReasoningMetadata(signal)
-              }}
-              isPrivate={isPrivate}
-              defaultExpanded={signal.action === 'BUY' && (signal.returnZScore ?? 0) <= -2.0}
-            />
-          ))}
-          {payload.opportunisticSignals.length === 0 && additionalSips.length === 0 && (
-            <div className="p-8 bg-surface/20 border border-dashed border-white/10 rounded-[2rem] text-center opacity-40">
-              <p className="text-[10px] font-black uppercase tracking-widest">No opportunistic signals today</p>
-            </div>
-          )}
-        </div>
-      </motion.div>
-
-      {/* 5. TAX & ACTIVE REBALANCE (6x...) */}
-      <motion.div 
-        variants={bentoItem}
-        className="md:col-span-6 space-y-6"
-      >
-        <div className="flex items-center gap-3 px-2">
-          <Wallet size={16} className="text-harvest" />
-          <h3 className="text-muted text-[10px] font-black uppercase tracking-[0.3em]">Optimization Stream</h3>
-        </div>
-        
-        {/* Active Sells */}
-        {payload.activeSellSignals?.length > 0 && (
-          <div className="space-y-4">
-            {payload.activeSellSignals.map((signal: TacticalSignal) => (
-              <RecommendationDetailCard 
-                key={signal.schemeName}
-                signal={{
-                  ...signal,
-                  reasoningMetadata: resolveReasoningMetadata(signal)
-                }}
-                isPrivate={isPrivate}
-              />
-            ))}
-          </div>
-        )}
-
-        {/* Harvest Summary */}
-        {payload.harvestOpportunities?.length > 0 && (
-          <div className="bg-harvest/5 border border-harvest/20 rounded-[2rem] p-8 space-y-4 shadow-xl">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <Scissors size={18} className="text-harvest" />
-                <span className="text-[11px] font-black uppercase tracking-widest text-harvest">Tax Harvest Ready</span>
+          <div className="space-y-3">
+            {standingSips.length === 0 ? (
+              <div className="p-6 text-center border border-dashed border-white/5 rounded-2xl opacity-40">
+                <span className="text-[9px] font-black uppercase tracking-widest">No active SIP standing targets</span>
               </div>
-              <span className="px-3 py-1 bg-harvest/10 text-harvest rounded-full text-[9px] font-black tracking-widest">
-                {harvestCount} SIGNALS
-              </span>
-            </div>
-            <p className="text-xl font-black text-primary tracking-tight">
-              Unlock <span className="text-harvest"><CurrencyValue isPrivate={isPrivate} value={payload.totalHarvestValue} /></span> in harvestable losses.
-            </p>
-            <button className="w-full py-3 bg-harvest/10 hover:bg-harvest/20 text-harvest border border-harvest/20 rounded-xl text-[10px] font-black uppercase tracking-[0.2em] transition-all">
-              View Optimization Matrix
-            </button>
-          </div>
-        )}
-
-        {/* Exit Queue */}
-        {droppedFundSummaries.length > 0 && (
-          <div className="bg-exit/5 border border-exit/20 rounded-[2rem] p-8 space-y-6 shadow-xl">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <ShieldAlert size={18} className="text-exit" />
-                <span className="text-[11px] font-black uppercase tracking-widest text-exit">Dropped Fund Decisions</span>
-              </div>
-            </div>
-            
-            <div className="space-y-4">
-              {droppedFundSummaries.map((s: any) => (
-                <div key={s.amfiCode} className="flex items-center justify-between p-4 bg-black/20 rounded-2xl border border-white/5">
+            ) : (
+              standingSips.slice(0, 3).map((s: any) => (
+                <div 
+                  key={s.isin} 
+                  onClick={() => onFundClick(s.schemeName)}
+                  className="flex justify-between items-center p-3 bg-black/20 rounded-xl border border-white/5 hover:border-accent/20 cursor-pointer transition-all"
+                >
                   <div className="min-w-0">
-                    <p className="text-[11px] font-black text-primary truncate tracking-tight">{s.schemeName}</p>
-                    <p className="text-[8px] font-bold text-muted uppercase tracking-widest mt-0.5">Value: <CurrencyValue isPrivate={isPrivate} value={s.currentValue} /></p>
+                    <p className="text-[10px] font-black text-secondary truncate">{s.simpleName || s.schemeName}</p>
+                    <p className="text-[8px] font-bold text-muted uppercase tracking-widest mt-0.5">Target: {s.sipPct}% Allocation</p>
                   </div>
-                  <div className="flex flex-col items-end gap-2">
-                    {s.recommendedAction === 'EXIT_NOW_TAX_FREE' && <span className="px-2 py-0.5 bg-buy/10 text-buy border border-buy/20 rounded text-[8px] font-black">Tax-Free Exit</span>}
-                    {s.recommendedAction === 'WAIT_FOR_LTCG' && <span className="px-2 py-0.5 bg-warning/10 text-warning border border-warning/20 rounded text-[8px] font-black">Wait {s.daysToNextLtcg}d</span>}
-                    {s.recommendedAction === 'HOLD_WAVE_RIDER' && <span className="px-2 py-0.5 bg-violet-500/10 text-violet-400 border border-violet-500/20 rounded text-[8px] font-black">Momentum Hold</span>}
-                    {s.recommendedAction === 'EXIT_NOW' && <span className="px-2 py-0.5 bg-exit/10 text-exit border border-exit/20 rounded text-[8px] font-black">Exit Recommended</span>}
-                  </div>
+                  <span className="text-xs font-black text-buy tabular-nums">
+                    {isPrivate ? '••••' : `₹${(s.amount / 1000).toFixed(1)}k`}
+                  </span>
                 </div>
-              ))}
+              ))
+            )}
+            {standingSips.length > 3 && (
+              <p className="text-[8px] font-bold text-muted/40 uppercase tracking-widest text-center">
+                + {standingSips.length - 3} more standing instructions
+              </p>
+            )}
+          </div>
+        </div>
+
+        {/* Optimizations & Actions Queue */}
+        <div className="bg-surface/40 backdrop-blur-xl border border-white/5 p-8 rounded-[2.5rem] shadow-2xl space-y-6 flex flex-col justify-between">
+          <div className="space-y-2">
+            <h3 className="text-warning text-[10px] font-black uppercase tracking-[0.3em]">Optimizations Queue</h3>
+            <p className="text-lg font-black text-primary tracking-tight">Pending System Signals</p>
+          </div>
+
+          {/* Regime consensus indicators */}
+          <div className="bg-black/20 border border-white/5 rounded-2xl p-4 space-y-2">
+            <p className="text-[8px] font-black uppercase tracking-[0.2em] text-muted">Portfolio Regime Consensus</p>
+            <div className="flex w-full h-1.5 rounded-full overflow-hidden">
+              <div style={{ width: `${(bullCount / Math.max(1, activeFunds.length)) * 100}%` }} className="bg-buy" />
+              <div style={{ width: `${(neutralCount / Math.max(1, activeFunds.length)) * 100}%` }} className="bg-warning/50" />
+              <div style={{ width: `${(bearCount / Math.max(1, activeFunds.length)) * 100}%` }} className="bg-exit" />
+            </div>
+            <div className="flex justify-between text-[8px] font-black uppercase tracking-widest text-muted/60">
+              <span>{bullCount} Bull</span>
+              <span>{neutralCount} Neutral</span>
+              <span>{bearCount} Bear</span>
             </div>
           </div>
-        )}
 
-        {payload.harvestOpportunities?.length === 0 && droppedFundSummaries.length === 0 && payload.activeSellSignals?.length === 0 && (
-          <div className="p-8 bg-surface/20 border border-dashed border-white/10 rounded-[2rem] text-center opacity-40">
-            <p className="text-[10px] font-black uppercase tracking-widest">Orbit is clean. No active optimizations.</p>
+          <div className="space-y-3">
+            {/* Exit Signals */}
+            {exitCount + sellCount > 0 && (
+              <div className="flex items-center justify-between p-3.5 bg-exit/5 border border-exit/20 rounded-2xl">
+                <div className="flex items-center gap-3">
+                  <ShieldAlert size={16} className="text-exit" />
+                  <span className="text-[10px] font-black uppercase tracking-widest text-exit">Dropped / Trim Candidates</span>
+                </div>
+                <span className="px-2 py-0.5 bg-exit/10 border border-exit/20 rounded text-[8px] font-black text-exit">
+                  {exitCount + sellCount} SIGNALS
+                </span>
+              </div>
+            )}
+
+            {/* Tax Harvest Signals */}
+            {harvestCount > 0 && (
+              <div className="flex items-center justify-between p-3.5 bg-harvest/5 border border-harvest/20 rounded-2xl">
+                <div className="flex items-center gap-3">
+                  <Scissors size={16} className="text-harvest" />
+                  <span className="text-[10px] font-black uppercase tracking-widest text-harvest">Tax Harvest Opportunities</span>
+                </div>
+                <span className="px-2 py-0.5 bg-harvest/10 border border-harvest/20 rounded text-[8px] font-black text-harvest">
+                  {harvestCount} SIGNALS
+                </span>
+              </div>
+            )}
+
+            {/* Rebalance Paired Trades */}
+            {rebalancingTrades.length > 0 && (
+              <div className="flex items-center justify-between p-3.5 bg-accent/5 border border-accent/20 rounded-2xl">
+                <div className="flex items-center gap-3">
+                  <Layers size={16} className="text-accent" />
+                  <span className="text-[10px] font-black uppercase tracking-widest text-accent">Strategic Rebalance Moves</span>
+                </div>
+                <span className="px-2 py-0.5 bg-accent/10 border border-accent/20 rounded text-[8px] font-black text-accent">
+                  {rebalancingTrades.length} TRADES
+                </span>
+              </div>
+            )}
+
+            {exitCount + sellCount === 0 && harvestCount === 0 && rebalancingTrades.length === 0 && (
+              <div className="p-8 bg-surface/20 border border-dashed border-white/5 rounded-2xl text-center opacity-40">
+                <p className="text-[9px] font-black uppercase tracking-widest">Orbit is clean. No active optimization tasks.</p>
+              </div>
+            )}
           </div>
-        )}
+        </div>
+      </motion.div>
+
+      {/* 5. COLLAPSIBLE SENTIMENT & ALPHA FEED */}
+      <motion.div variants={bentoItem} className="border border-white/5 rounded-[2.5rem] bg-surface/20 shadow-xl overflow-hidden">
+        <button
+          onClick={() => setIsSentimentExpanded(!isSentimentExpanded)}
+          className="w-full px-8 py-5 flex items-center justify-between hover:bg-white/[0.02] transition-colors"
+        >
+          <div className="flex items-center gap-3.5">
+            <Newspaper size={18} className="text-accent" />
+            <h3 className="text-primary text-[10px] font-black uppercase tracking-[0.3em]">Market Intelligence & Sentiment Feed</h3>
+          </div>
+          {isSentimentExpanded ? <ChevronUp size={16} className="text-muted" /> : <ChevronDown size={16} className="text-muted" />}
+        </button>
+
+        <AnimatePresence>
+          {isSentimentExpanded && (
+            <motion.div
+              initial={{ height: 0 }}
+              animate={{ height: 'auto' }}
+              exit={{ height: 0 }}
+              className="overflow-hidden border-t border-white/5"
+            >
+              <div className="p-8 space-y-4">
+                {alphaFeed && alphaFeed.length > 0 ? (
+                  alphaFeed.map((feedItem: any, index: number) => (
+                    <div 
+                      key={index} 
+                      className="p-4 bg-black/20 rounded-2xl border border-white/5 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 hover:border-white/10 transition-all"
+                    >
+                      <div className="space-y-1 flex-1">
+                        <p className="text-xs font-black text-primary leading-snug tracking-tight">
+                          {feedItem.title}
+                        </p>
+                        <p className="text-[8px] font-bold text-muted/40 uppercase tracking-widest">
+                          {new Date(feedItem.timestamp).toLocaleString()}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-3.5">
+                        <span className={`px-2.5 py-0.5 rounded-full text-[8px] font-black uppercase tracking-widest ${
+                          feedItem.sentiment === 'positive' ? 'text-buy bg-buy/10 border border-buy/20' : 
+                          feedItem.sentiment === 'negative' ? 'text-exit bg-exit/10 border border-exit/20' :
+                          'text-muted bg-white/5 border border-white/10'
+                        }`}>
+                          {feedItem.sentiment}
+                        </span>
+                        <span className="text-[9px] font-bold text-muted/60 uppercase tracking-widest">
+                          Conf: {Math.round(feedItem.confidence * 100)}%
+                        </span>
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <p className="text-center text-muted/40 text-[10px] uppercase font-black py-4">No feeds available</p>
+                )}
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </motion.div>
     </motion.div>
   );

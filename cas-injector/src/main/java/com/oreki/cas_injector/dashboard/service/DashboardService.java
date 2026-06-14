@@ -129,6 +129,25 @@ public class DashboardService {
 
         Map<String, MarketMetrics> metricsMap = metricsRepo.fetchLiveMetricsMap(pan);
 
+        LocalDate targetDate = LocalDate.now().minusDays(30);
+        Map<String, BigDecimal> nav30DaysAgoMap = new HashMap<>();
+        if (!amfiCodes.isEmpty()) {
+            try {
+                String placeholders = amfiCodes.stream().map(c -> "?").collect(Collectors.joining(","));
+                String query = "SELECT DISTINCT ON (amfi_code) amfi_code, nav FROM fund_history WHERE nav_date <= ? AND amfi_code IN (" + placeholders + ") ORDER BY amfi_code, nav_date DESC";
+                List<Object> params = new ArrayList<>();
+                params.add(java.sql.Date.valueOf(targetDate));
+                params.addAll(amfiCodes);
+                jdbcTemplate.query(query, rs -> {
+                    String amfi = CommonUtils.SANITIZE_AMFI.apply(rs.getString("amfi_code"));
+                    BigDecimal navVal = rs.getBigDecimal("nav");
+                    nav30DaysAgoMap.put(amfi, navVal);
+                }, params.toArray());
+            } catch (Exception e) {
+                log.warn("⚠️ Failed to fetch NAVs from 30 days ago: {}", e.getMessage());
+            }
+        }
+
         List<TransactionDTO> totalCashFlow = new ArrayList<>();
 
         List<SchemePerformanceDTO> breakdown = new ArrayList<>();
@@ -236,6 +255,15 @@ public class DashboardService {
             else if (amfiCategory.contains("EQUITY") || amfiCategory.contains("INDEX") || amfiCategory.contains("GROWTH")) bucket = "AGGRESSIVE_GROWTH";
             else if (amfiCategory.contains("DEBT") || amfiCategory.contains("LIQUID")) bucket = "DEBT_SLAB_TAXED";
 
+            Double oneMonthReturn = null;
+            BigDecimal nav30d = nav30DaysAgoMap.get(code);
+            if (nav30d != null && nav30d.compareTo(BigDecimal.ZERO) > 0 && currentNav != null) {
+                oneMonthReturn = currentNav.subtract(nav30d)
+                    .divide(nav30d, 4, RoundingMode.HALF_UP)
+                    .multiply(new BigDecimal("100"))
+                    .doubleValue();
+            }
+
             SchemePerformanceDTO dto = SchemePerformanceDTO.builder()
                 .schemeName(info.getSchemeName())
                 .simpleName(CommonUtils.NORMALIZE_NAME.apply(info.getSchemeName()))
@@ -259,6 +287,7 @@ public class DashboardService {
                 .category(amfiCategory)
                 .bucket(bucket)
                 .amc(info.getAmc())
+                .oneMonthReturn(oneMonthReturn)
                 .build();
 
             breakdown.add(dto);
@@ -266,7 +295,35 @@ public class DashboardService {
 
         // --- MERGE STOCKS ---
         List<StockHoldingDTO> stocks = stockAggSvc.getPortfolio(pan);
+        List<String> tickers = stocks.stream().map(StockHoldingDTO::getTicker).distinct().toList();
+        Map<String, BigDecimal> stockPrice30DaysAgoMap = new HashMap<>();
+        if (!tickers.isEmpty()) {
+            try {
+                String placeholders = tickers.stream().map(t -> "?").collect(Collectors.joining(","));
+                String query = "SELECT DISTINCT ON (ticker) ticker, close_price FROM stock_price_eod WHERE price_date <= ? AND ticker IN (" + placeholders + ") ORDER BY ticker, price_date DESC";
+                List<Object> params = new ArrayList<>();
+                params.add(java.sql.Date.valueOf(targetDate));
+                params.addAll(tickers);
+                jdbcTemplate.query(query, rs -> {
+                    String ticker = rs.getString("ticker");
+                    BigDecimal priceVal = rs.getBigDecimal("close_price");
+                    stockPrice30DaysAgoMap.put(ticker, priceVal);
+                }, params.toArray());
+            } catch (Exception e) {
+                log.warn("⚠️ Failed to fetch stock prices from 30 days ago: {}", e.getMessage());
+            }
+        }
+
         for (StockHoldingDTO stock : stocks) {
+            BigDecimal price30d = stockPrice30DaysAgoMap.get(stock.getTicker());
+            Double stockOneMonthReturn = null;
+            if (price30d != null && price30d.compareTo(BigDecimal.ZERO) > 0 && stock.getCurrentPrice() != null) {
+                stockOneMonthReturn = stock.getCurrentPrice().subtract(price30d)
+                    .divide(price30d, 4, RoundingMode.HALF_UP)
+                    .multiply(new BigDecimal("100"))
+                    .doubleValue();
+            }
+
             breakdown.add(SchemePerformanceDTO.builder()
                 .schemeName(stock.getCompanyName() + " (" + stock.getTicker() + ")")
                 .simpleName(stock.getCompanyName())
@@ -290,6 +347,7 @@ public class DashboardService {
                 .amc("NSE/BSE")
                 .action("HOLD")
                 .convictionScore(60) // Default for stocks
+                .oneMonthReturn(stockOneMonthReturn)
                 .build());
         }
 

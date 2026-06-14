@@ -10,7 +10,6 @@ import {
   Unlock,
   Upload,
   Settings,
-  Target,
   BarChart3,
   Menu,
   X
@@ -56,7 +55,6 @@ export default function Dashboard({
     { id: 'overview', label: 'Overview', icon: <Zap size={16}/>, path: '/dashboard/overview' },
     { id: 'portfolio', label: 'Portfolio', icon: <LayoutDashboard size={16}/>, path: '/dashboard/portfolio' },
     { id: 'performance', label: 'Performance', icon: <TrendingUp size={16}/>, path: '/dashboard/performance' },
-    { id: 'sip-allocation', label: 'SIP Allocation', icon: <Target size={16}/>, path: '/dashboard/sip-allocation' },
     { id: 'rebalance', label: 'Rebalance', icon: <ArrowLeftRight size={16}/>, path: '/dashboard/rebalance' },
     { id: 'tax', label: 'Tax', icon: <ShieldCheck size={16}/>, path: '/dashboard/tax' },
     { id: 'ledger', label: 'Ledger', icon: <Receipt size={16}/>, path: '/dashboard/ledger' },

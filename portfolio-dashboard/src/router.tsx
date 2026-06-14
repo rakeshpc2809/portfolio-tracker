@@ -15,7 +15,6 @@ import { useDashboardContext } from './context/DashboardContext';
 import OverviewView from './components/views/OverviewView';
 import PortfolioView from './components/views/PortfolioView';
 import PerformanceView from './components/views/PerformanceView';
-import SipAllocationView from './components/views/SipAllocationView';
 import RebalanceView from './components/views/RebalanceView';
 import TaxView from './components/views/TaxView';
 import LedgerView from './components/views/LedgerView';
@@ -122,14 +121,7 @@ const performanceRoute = createRoute({
   },
 });
 
-const sipAllocationRoute = createRoute({
-  getParentRoute: () => dashboardRoute,
-  path: 'sip-allocation',
-  component: () => {
-    const { portfolioData, sipAmount, isPrivate } = useDashboardContext();
-    return <SipAllocationView portfolioData={portfolioData} sipAmount={sipAmount} isPrivate={isPrivate} />;
-  },
-});
+
 
 const rebalanceRoute = createRoute({
   getParentRoute: () => dashboardRoute,
@@ -183,7 +175,6 @@ const routeTree = rootRoute.addChildren([
     overviewRoute,
     portfolioRoute,
     performanceRoute,
-    sipAllocationRoute,
     rebalanceRoute,
     taxRoute,
     ledgerRoute,

@@ -34,6 +34,7 @@ async def run_attribution_analysis(pool):
 
         df_indices = pd.DataFrame(index_data_rows, columns=["index_name", "date", "closing_price"])
         df_indices['date'] = pd.to_datetime(df_indices['date'])
+        df_indices['closing_price'] = df_indices['closing_price'].astype(float)
         
         # Pivot to have dates as index and index names as columns
         df_pivoted = df_indices.pivot(index='date', columns='index_name', values='closing_price').ffill()
@@ -79,6 +80,7 @@ async def run_attribution_analysis(pool):
 
         df_funds = pd.DataFrame(fund_nav_rows, columns=["amfi_code", "nav", "date"])
         df_funds['date'] = pd.to_datetime(df_funds['date'])
+        df_funds['nav'] = df_funds['nav'].astype(float)
         
         unique_funds = df_funds['amfi_code'].unique()
         logger.info(f"Analyzing {len(unique_funds)} funds...")

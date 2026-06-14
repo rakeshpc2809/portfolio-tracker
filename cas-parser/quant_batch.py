@@ -124,7 +124,7 @@ async def fetch_all_navs(pool, days=253) -> Dict[str, Dict[str, List[float]]]:
         }
     return result
 
-async def process_single_fund_metrics(conn, amfi: str, series: Dict[str, List[float]]):
+async def process_single_fund_metrics(pool, amfi: str, series: Dict[str, List[float]]):
     """Worker to compute metrics for a single fund and update DB."""
     try:
         # These are CPU intensive, but they use numpy which releases GIL sometimes.
@@ -152,11 +152,12 @@ async def process_single_fund_metrics(conn, amfi: str, series: Dict[str, List[fl
             WHERE LTRIM(amfi_code, '0') = $9
             AND calculation_date = (SELECT MAX(calculation_date) FROM fund_conviction_metrics WHERE LTRIM(amfi_code, '0') = $10)
         """
-        await conn.execute(update_query, 
-            hurst, h_regime, ou["half_life"], ou["valid"],
-            hmm_state_str, bull, bear, trans,
-            amfi, amfi
-        )
+        async with pool.acquire() as conn:
+            await conn.execute(update_query, 
+                hurst, h_regime, ou["half_life"], ou["valid"],
+                hmm_state_str, bull, bear, trans,
+                amfi, amfi
+            )
     except Exception as e:
         logger.error(f"Error computing advanced metrics for {amfi}: {e}")
 
@@ -170,9 +171,8 @@ async def run_batch_job():
         
         # 1. Update Hurst, OU, HMM (Parallel execution)
         logger.info("🧮 Computing HMM/Hurst/OU in parallel...")
-        async with pool.acquire() as conn:
-            tasks = [process_single_fund_metrics(conn, amfi, series) for amfi, series in nav_data.items()]
-            await asyncio.gather(*tasks)
+        tasks = [process_single_fund_metrics(pool, amfi, series) for amfi, series in nav_data.items()]
+        await asyncio.gather(*tasks)
         
         logger.info("✅ Finished updating advanced metrics.")
         
@@ -198,7 +198,7 @@ async def run_batch_job():
                 amfi = str(m["amfi_code"]).lstrip('0')
                 
                 tx_rows = await conn.fetch("""
-                    SELECT t.transaction_date, t.total_amount, t.transaction_type, t.units
+                    SELECT t.transaction_date, t.amount as total_amount, t.transaction_type, t.units
                     FROM transaction t
                     JOIN scheme s ON t.scheme_id = s.id
                     WHERE LTRIM(s.amfi_code, '0') = $1

@@ -360,21 +360,19 @@ export default function FundDetailView({
                     {!hasRealScores && <span className="text-[9px] text-muted font-bold italic opacity-40 uppercase">Mode: Heuristic Estimate</span>}
                   </div>
 
-                  {hasRealScores && (
-                    <div className="bg-white/[0.02] border border-white/5 p-6 rounded-[2.5rem] shadow-2xl">
-                      <p className="text-[9px] font-black uppercase tracking-[0.2em] text-muted mb-4 opacity-60">Weighted Contribution Bridge</p>
-                      <ConvictionScoreWaterfall 
-                        yieldScore={fund.yieldScore}
-                        riskScore={fund.riskScore}
-                        valueScore={fund.valueScore}
-                        painScore={fund.painScore}
-                        regimeScore={fund.regimeScore}
-                        frictionScore={fund.frictionScore}
-                        expenseScore={fund.expenseScore}
-                        finalScore={fund.convictionScore}
-                      />
-                    </div>
-                  )}
+                  <div className="bg-white/[0.02] border border-white/5 p-6 rounded-[2.5rem] shadow-2xl">
+                    <p className="text-[9px] font-black uppercase tracking-[0.2em] text-muted mb-4 opacity-60">Weighted Contribution Bridge</p>
+                    <ConvictionScoreWaterfall 
+                      yieldScore={fund.yieldScore ?? 50}
+                      riskScore={fund.riskScore ?? 50}
+                      valueScore={fund.valueScore ?? 50}
+                      painScore={fund.painScore ?? 50}
+                      regimeScore={fund.regimeScore ?? 50}
+                      frictionScore={fund.frictionScore ?? 50}
+                      expenseScore={fund.expenseScore ?? 50}
+                      finalScore={fund.convictionScore ?? 50}
+                    />
+                  </div>
                   
                   <motion.div variants={container} initial="hidden" animate="show" className="space-y-2">
                     {components.map((c) => (
@@ -416,63 +414,238 @@ export default function FundDetailView({
               </div>
 
               {/* Fama-French Attribution Section */}
-              <section className="bg-surface-elevated border border-white/5 p-8 rounded-[2.5rem] space-y-6 shadow-inner group hover:border-white/10 transition-all">
+              <section className="bg-surface-elevated border border-white/5 p-8 rounded-[2.5rem] space-y-8 shadow-inner group hover:border-white/10 transition-all">
                 <div className="flex items-center justify-between">
                   <div className="space-y-1">
                     <h3 className="text-primary text-[10px] font-black uppercase tracking-[0.2em]">Fama-French Attribution</h3>
-                    <p className="text-[9px] text-muted font-bold uppercase tracking-widest opacity-40">3-Factor Regression Analysis (Log Returns)</p>
+                    <p className="text-[9px] text-muted font-bold uppercase tracking-widest opacity-40">Style & Factor Topography (OLS Regression)</p>
                   </div>
                   <div className="px-3 py-1 bg-accent/10 border border-accent/20 rounded-full">
-                    <span className="text-[9px] font-black text-accent uppercase tracking-widest">Confidence: {(fund.rSquared * 100).toFixed(0)}% (R²)</span>
+                    <span className="text-[9px] font-black text-accent uppercase tracking-widest">Confidence: {((fund.rSquared || 0) * 100).toFixed(0)}% (R²)</span>
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
-                  {[
-                    { 
-                      label: 'Alpha (Selection)', 
-                      value: `${(fund.alpha * 100).toFixed(2)}%`, 
-                      desc: 'Excess return beyond style factors.',
-                      color: fund.alpha > 0 ? 'text-buy' : 'text-exit',
-                      glow: fund.alpha > 0 ? 'glow-buy' : 'glow-exit'
-                    },
-                    { 
-                      label: 'Beta (Market)', 
-                      value: fund.betaMkt?.toFixed(2), 
-                      desc: 'Sensitivity to Nifty 50.',
-                      color: 'text-primary'
-                    },
-                    { 
-                      label: 'Size (SMB)', 
-                      value: fund.betaSmb?.toFixed(2), 
-                      desc: 'Small-cap vs Large-cap tilt.',
-                      color: fund.betaSmb > 0.3 ? 'text-accent' : 'text-secondary'
-                    },
-                    { 
-                      label: 'Value (HML)', 
-                      value: fund.betaHml?.toFixed(2), 
-                      desc: 'Value vs Growth orientation.',
-                      color: fund.betaHml > 0.3 ? 'text-warning' : 'text-secondary'
-                    }
-                  ].map((f, i) => (
-                    <div key={i} className="space-y-2 p-4 bg-black/20 rounded-2xl border border-white/5 group/f hover:border-white/10 transition-all">
-                      <p className="text-[8px] font-black uppercase tracking-widest text-muted opacity-60">{f.label}</p>
-                      <p className={`text-2xl font-black tabular-nums tracking-tighter ${f.color} ${f.glow || ''}`}>
-                        {f.value}
-                      </p>
-                      <p className="text-[8px] font-medium text-muted/60 leading-tight group-hover/f:text-muted transition-colors">{f.desc}</p>
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+                  {/* Left Column: Manager Selection Edge (Alpha) & R² */}
+                  <div className="lg:col-span-4 flex flex-col justify-between space-y-6">
+                    {/* Alpha Card */}
+                    <div className="p-6 bg-black/20 rounded-3xl border border-white/5 relative overflow-hidden flex flex-col items-center text-center justify-center min-h-[180px]">
+                      {/* Semi-circular gradient background glow */}
+                      <div className={`absolute -bottom-12 w-32 h-32 rounded-full blur-[40px] opacity-20 ${
+                        (fund.alpha || 0) > 0.02 ? 'bg-buy' : (fund.alpha || 0) > 0 ? 'bg-hold' : 'bg-exit'
+                      }`} />
+                      
+                      <span className="text-[9px] font-black uppercase tracking-widest text-muted mb-2">Manager Selection Edge</span>
+                      
+                      <div className="relative flex items-center justify-center my-2">
+                        {/* Circular progress background */}
+                        <svg className="w-24 h-24 transform -rotate-90">
+                          <circle cx="48" cy="48" r="40" stroke="rgba(255,255,255,0.03)" strokeWidth="8" fill="transparent" />
+                          <circle cx="48" cy="48" r="40" 
+                            stroke={(fund.alpha || 0) > 0.02 ? '#a6e3a1' : (fund.alpha || 0) > 0 ? '#89b4fa' : '#f38ba8'} 
+                            strokeWidth="8" 
+                            fill="transparent" 
+                            strokeDasharray={2 * Math.PI * 40}
+                            strokeDashoffset={2 * Math.PI * 40 * (1 - Math.min(Math.max(((fund.alpha || 0) * 100 + 10) / 20, 0), 1))}
+                            strokeLinecap="round"
+                            className="transition-all duration-1000 ease-out"
+                          />
+                        </svg>
+                        <div className="absolute inset-0 flex flex-col items-center justify-center">
+                          <span className={`text-xl font-black tabular-nums tracking-tighter ${(fund.alpha || 0) > 0 ? 'text-buy glow-buy' : 'text-exit glow-exit'}`}>
+                            {(fund.alpha || 0) > 0 ? '+' : ''}{((fund.alpha || 0) * 100).toFixed(2)}%
+                          </span>
+                          <span className="text-[8px] text-muted font-bold uppercase tracking-widest">Alpha p.a.</span>
+                        </div>
+                      </div>
+
+                      <div className="mt-3">
+                        <span className={`chip text-[8px] px-3 py-0.5 ${
+                          (fund.alpha || 0) > 0.02 ? 'chip-buy' : (fund.alpha || 0) > 0 ? 'chip-hold' : 'chip-exit'
+                        }`}>
+                          {(fund.alpha || 0) > 0.02 ? 'Strong Selection Edge' : (fund.alpha || 0) > 0 ? 'Moderate Selection Edge' : 'No Selection Edge'}
+                        </span>
+                      </div>
                     </div>
-                  ))}
+
+                    {/* R² Confidence bar */}
+                    <div className="p-5 bg-black/20 rounded-3xl border border-white/5 space-y-3">
+                      <div className="flex justify-between items-center text-[9px] font-black uppercase tracking-widest">
+                        <span className="text-muted">Regression R² (Fit)</span>
+                        <span className="text-secondary">{((fund.rSquared || 0) * 100).toFixed(0)}% Fit</span>
+                      </div>
+                      <div className="w-full bg-white/5 rounded-full h-1.5 overflow-hidden">
+                        <div 
+                          className="bg-accent h-full rounded-full transition-all duration-1000 ease-out"
+                          style={{ width: `${Math.min(Math.max((fund.rSquared || 0) * 100, 0), 100)}%` }}
+                        />
+                      </div>
+                      <p className="text-[8px] text-muted/60 leading-tight">
+                        {(fund.rSquared || 0) > 0.75 
+                          ? "High style model accuracy. Factors strongly explain return variance."
+                          : "Moderate style accuracy. Portion of returns driven by other factors."}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Right Column: Visual Sliders/Gauges */}
+                  <div className="lg:col-span-8 space-y-6 flex flex-col justify-between">
+                    {/* Market Beta (0 to 2.0) */}
+                    <div className="p-5 bg-black/20 rounded-3xl border border-white/5 space-y-3 relative overflow-hidden">
+                      <div className="flex justify-between items-center">
+                        <div className="space-y-0.5">
+                          <span className="text-[9px] font-black uppercase tracking-widest text-muted">Market Correlation (Beta)</span>
+                          <p className="text-[11px] font-bold text-primary">
+                            {(fund.betaMkt || 0) < 0.8 ? 'Defensive & Lower Risk' : (fund.betaMkt || 0) <= 1.2 ? 'Market-Aligned Volatility' : 'Leveraged / Aggressive'}
+                          </p>
+                        </div>
+                        <span className="text-lg font-black text-primary tabular-nums">{(fund.betaMkt || 0).toFixed(2)}</span>
+                      </div>
+                      
+                      {/* Track and slider bar */}
+                      <div className="relative py-2">
+                        {/* Scale markers */}
+                        <div className="flex justify-between text-[7px] font-black text-muted/40 uppercase tracking-widest px-1 mb-1">
+                          <span>Conservative (0.0)</span>
+                          <span>Market (1.0)</span>
+                          <span>Aggressive (2.0)</span>
+                        </div>
+                        <div className="w-full bg-white/5 rounded-full h-2 relative overflow-hidden">
+                          {/* Color overlay zones */}
+                          <div className="absolute left-0 top-0 bottom-0 bg-info/20" style={{ width: '40%' }} /> {/* 0.0 - 0.8 */}
+                          <div className="absolute left-[40%] top-0 bottom-0 bg-buy/20" style={{ width: '20%' }} /> {/* 0.8 - 1.2 */}
+                          <div className="absolute left-[60%] top-0 bottom-0 bg-warning/20" style={{ width: '40%' }} /> {/* 1.2 - 2.0 */}
+                        </div>
+                        {/* Pointer indicator */}
+                        <div 
+                          className="absolute w-4 h-4 bg-white border-2 border-accent rounded-full -top-1.5 -ml-2 shadow-lg transition-all duration-1000 ease-out flex items-center justify-center"
+                          style={{ left: `${Math.min(Math.max(((fund.betaMkt || 0) / 2.0) * 100, 0), 100)}%` }}
+                        >
+                          <div className="w-1.5 h-1.5 bg-accent rounded-full" />
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Size Tilt (SMB: -1 to +1) */}
+                    <div className="p-5 bg-black/20 rounded-3xl border border-white/5 space-y-3 relative overflow-hidden">
+                      <div className="flex justify-between items-center">
+                        <div className="space-y-0.5">
+                          <span className="text-[9px] font-black uppercase tracking-widest text-muted">Market Capitalization Bias (SMB)</span>
+                          <p className="text-[11px] font-bold text-primary">
+                            {(fund.betaSmb || 0) < -0.15 ? 'Tilt towards Large-Cap Stocks' : (fund.betaSmb || 0) <= 0.15 ? 'Blended / Multi-Cap Stance' : 'Tilt towards Small & Mid-Caps'}
+                          </p>
+                        </div>
+                        <span className={`text-lg font-black tabular-nums ${(fund.betaSmb || 0) > 0 ? 'text-accent' : 'text-hold'}`}>
+                          {(fund.betaSmb || 0) > 0 ? '+' : ''}{(fund.betaSmb || 0).toFixed(2)}
+                        </span>
+                      </div>
+                      
+                      {/* Track and slider bar */}
+                      <div className="relative py-2">
+                        {/* Scale markers */}
+                        <div className="flex justify-between text-[7px] font-black text-muted/40 uppercase tracking-widest px-1 mb-1">
+                          <span>Large-Cap Focus</span>
+                          <span>Neutral (0.0)</span>
+                          <span>Small-Cap Focus</span>
+                        </div>
+                        <div className="w-full bg-white/5 rounded-full h-2 relative">
+                          {/* Centered zero line */}
+                          <div className="absolute left-1/2 top-0 bottom-0 w-0.5 bg-white/20" />
+                          {/* Color fill from center to indicator */}
+                          <div 
+                            className={`absolute top-0 bottom-0 rounded-full ${(fund.betaSmb || 0) >= 0 ? 'bg-accent/40' : 'bg-hold/40'}`} 
+                            style={{ 
+                              left: `${(fund.betaSmb || 0) >= 0 ? 50 : Math.max(50 + (fund.betaSmb || 0) * 50, 0)}%`,
+                              right: `${(fund.betaSmb || 0) >= 0 ? Math.max(50 - (fund.betaSmb || 0) * 50, 0) : 50}%`
+                            }}
+                          />
+                        </div>
+                        {/* Pointer indicator */}
+                        <div 
+                          className={`absolute w-4 h-4 bg-white border-2 rounded-full -top-1.5 -ml-2 shadow-lg transition-all duration-1000 ease-out flex items-center justify-center ${
+                            (fund.betaSmb || 0) >= 0 ? 'border-accent' : 'border-hold'
+                          }`}
+                          style={{ left: `${Math.min(Math.max(50 + (fund.betaSmb || 0) * 50, 0), 100)}%` }}
+                        >
+                          <div className={`w-1.5 h-1.5 rounded-full ${(fund.betaSmb || 0) >= 0 ? 'bg-accent' : 'bg-hold'}`} />
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Value vs Growth Tilt (HML: -1 to +1) */}
+                    <div className="p-5 bg-black/20 rounded-3xl border border-white/5 space-y-3 relative overflow-hidden">
+                      <div className="flex justify-between items-center">
+                        <div className="space-y-0.5">
+                          <span className="text-[9px] font-black uppercase tracking-widest text-muted">Value vs Growth Style Bias (HML)</span>
+                          <p className="text-[11px] font-bold text-primary">
+                            {(fund.betaHml || 0) < -0.15 ? 'High-growth Stock Selection' : (fund.betaHml || 0) <= 0.15 ? 'Balanced/Core Equity Stance' : 'Value & High-Yield Orientation'}
+                          </p>
+                        </div>
+                        <span className={`text-lg font-black tabular-nums ${(fund.betaHml || 0) > 0 ? 'text-warning' : 'text-accent-bright'}`}>
+                          {(fund.betaHml || 0) > 0 ? '+' : ''}{(fund.betaHml || 0).toFixed(2)}
+                        </span>
+                      </div>
+                      
+                      {/* Track and slider bar */}
+                      <div className="relative py-2">
+                        {/* Scale markers */}
+                        <div className="flex justify-between text-[7px] font-black text-muted/40 uppercase tracking-widest px-1 mb-1">
+                          <span>Growth (High PE)</span>
+                          <span>Blended (0.0)</span>
+                          <span>Value (Low PE)</span>
+                        </div>
+                        <div className="w-full bg-white/5 rounded-full h-2 relative">
+                          {/* Centered zero line */}
+                          <div className="absolute left-1/2 top-0 bottom-0 w-0.5 bg-white/20" />
+                          {/* Color fill from center to indicator */}
+                          <div 
+                            className={`absolute top-0 bottom-0 rounded-full ${(fund.betaHml || 0) >= 0 ? 'bg-warning/40' : 'bg-accent-bright/40'}`} 
+                            style={{ 
+                              left: `${(fund.betaHml || 0) >= 0 ? 50 : Math.max(50 + (fund.betaHml || 0) * 50, 0)}%`,
+                              right: `${(fund.betaHml || 0) >= 0 ? Math.max(50 - (fund.betaHml || 0) * 50, 0) : 50}%`
+                            }}
+                          />
+                        </div>
+                        {/* Pointer indicator */}
+                        <div 
+                          className={`absolute w-4 h-4 bg-white border-2 rounded-full -top-1.5 -ml-2 shadow-lg transition-all duration-1000 ease-out flex items-center justify-center ${
+                            (fund.betaHml || 0) >= 0 ? 'border-warning' : 'border-accent-bright'
+                          }`}
+                          style={{ left: `${Math.min(Math.max(50 + (fund.betaHml || 0) * 50, 0), 100)}%` }}
+                        >
+                          <div className={`w-1.5 h-1.5 rounded-full ${(fund.betaHml || 0) >= 0 ? 'bg-warning' : 'bg-accent-bright'}`} />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
                 </div>
 
-                <div className="pt-2">
-                  <div className="p-4 bg-white/[0.02] border border-dashed border-white/10 rounded-2xl">
-                    <p className="text-[10px] text-secondary font-medium leading-relaxed italic opacity-80">
-                      {fund.betaSmb > 0.4 ? "This fund heavily exploits the Small-Cap factor (SMB)." : 
-                       fund.betaHml > 0.4 ? "This fund maintains a strong Value-style tilt (HML)." :
-                       fund.alpha > 0.05 ? "Significant stock selection alpha detected beyond market factors." :
-                       "Fund returns are largely explained by Market Beta."}
-                    </p>
+                {/* Plain English summary */}
+                <div className="p-5 bg-white/[0.02] border border-dashed border-white/10 rounded-3xl">
+                  <div className="flex items-start gap-3">
+                    <div className="p-2 bg-accent/10 border border-accent/20 rounded-xl mt-0.5 flex-shrink-0">
+                      <Zap size={14} className="text-accent" />
+                    </div>
+                    <div className="space-y-1">
+                      <h4 className="text-[10px] font-black uppercase tracking-wider text-secondary">Attribution Intelligence Summary</h4>
+                      <p className="text-[11px] text-secondary font-medium leading-relaxed italic opacity-80">
+                        {Math.abs(fund.betaSmb || 0) > 0.15 
+                          ? (fund.betaSmb || 0) > 0.15 
+                            ? `This fund heavily exploits the Small-Cap factor (SMB = ${(fund.betaSmb || 0).toFixed(2)}), making it highly sensitive to mid and small-cap market rallies. ` 
+                            : `This fund maintains a deep Large-Cap core (SMB = ${(fund.betaSmb || 0).toFixed(2)}), offering relative stability during high volatility. `
+                          : `This fund maintains a flexible capitalisation blend (SMB = ${(fund.betaSmb || 0).toFixed(2)}). `}
+                        {Math.abs(fund.betaHml || 0) > 0.15 
+                          ? (fund.betaHml || 0) > 0.15 
+                            ? `It exhibits a strong Value tilt (HML = ${(fund.betaHml || 0).toFixed(2)}), investing in undervalued, cash-flow rich businesses. ` 
+                            : `It maintains a heavy Growth style bias (HML = ${(fund.betaHml || 0).toFixed(2)}), buying high-multiple compounders. ` 
+                          : `It pursues a blended style valuation approach (HML = ${(fund.betaHml || 0).toFixed(2)}). `}
+                        {(fund.alpha || 0) > 0.02 
+                          ? `The manager has generated an impressive annualized alpha of ${((fund.alpha || 0) * 100).toFixed(2)}%, indicating strong stock selection execution.` 
+                          : (fund.alpha || 0) < -0.01 
+                          ? `The manager has underperformed standard style benchmarks (Alpha = ${((fund.alpha || 0) * 100).toFixed(2)}%), meaning returns are fully market-beta driven.` 
+                          : `Returns are largely aligned with market beta, with nominal selection alpha.`}
+                      </p>
+                    </div>
                   </div>
                 </div>
               </section>

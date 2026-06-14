@@ -301,10 +301,11 @@ async def sync_market_data():
     """Scrapes historical benchmark data from Yahoo Finance and pushes to Java Backend."""
     benchmarks = {
         "NIFTY 50": "^NSEI",
-        "NIFTY MIDCAP 150": "^NSMIDCP150", 
-        "NIFTY SMALLCAP 250": "^NSESCP250",
-        "NIFTY 500": "^NSE500",
-        "NIFTY 50 VALUE 20": "^NS50V20",
+        "NIFTY MIDCAP 150": "NIFTYMIDCAP150.NS", 
+        "NIFTY SMALLCAP 250": "0P0001KR2T.BO",
+        "NIFTY 500": "^NSEI",
+        "NIFTY 50 VALUE 20": "NV20.NS",
+        "NIFTY 200 MOMENTUM 30": "0P0001LMOA.BO",
         "GOLD_PRICE_INDEX": "GC=F"
     }
 

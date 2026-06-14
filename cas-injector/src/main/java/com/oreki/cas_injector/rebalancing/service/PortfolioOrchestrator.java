@@ -305,17 +305,23 @@ public class PortfolioOrchestrator {
             Double.class, pan, CommonUtils.getCurrentFyStart());
         if (fyLtcgRealized == null) fyLtcgRealized = 0.0;
 
-        Map<String, String> nameToAmfiMap = holdings.stream()
-            .collect(Collectors.toMap(AggregatedHolding::getSchemeName, h -> {
-                Scheme s = schemeRepository.findByName(h.getSchemeName()).orElse(null);
-                return (s != null) ? CommonUtils.SANITIZE_AMFI.apply(s.getAmfiCode()) : "";
-            }, (a, b) -> a));
+        Map<String, String> isinToAmfiMap = holdings.stream()
+            .collect(Collectors.toMap(
+                h -> h.getIsin() != null ? h.getIsin() : "",
+                h -> {
+                    if (h.getIsin() == null || h.getIsin().isEmpty()) return "";
+                    return schemeRepository.findByIsin(h.getIsin())
+                        .map(s -> CommonUtils.SANITIZE_AMFI.apply(s.getAmfiCode()))
+                        .orElse("");
+                },
+                (a, b) -> a
+            ));
 
         Map<String, MarketMetrics> mutableMetricsMap = new HashMap<>(metricsMap);
         List<String> missingAmfiCodes = new ArrayList<>();
 
         for (AggregatedHolding h : holdings) {
-            String amfi = nameToAmfiMap.get(h.getSchemeName());
+            String amfi = isinToAmfiMap.get(h.getIsin() != null ? h.getIsin() : "");
             if (amfi != null && !amfi.isEmpty()) {
                 if (!mutableMetricsMap.containsKey(amfi)) {
                     mutableMetricsMap.put(amfi, MarketMetrics.defaultInstance());
@@ -352,7 +358,7 @@ public class PortfolioOrchestrator {
             .holdings(holdings)
             .targets(targets)
             .metrics(mutableMetricsMap)
-            .amfiMap(nameToAmfiMap)
+            .amfiMap(isinToAmfiMap)
             .build();
             
         return rebalanceEngine.computeSignals(rebalanceReq);
