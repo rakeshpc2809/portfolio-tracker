@@ -71,6 +71,21 @@ export const fetchTlhOpportunities = async (pan: string) => {
   return response.json();
 };
 
+export const fetchRebalanceActions = async (pan: string) => {
+  const response = await authenticatedFetch(`${BASE_URL}/portfolio/${pan}/rebalance-actions`);
+  if (response.status === 204) return [];
+  if (!response.ok) throw new Error("Failed to fetch rebalance actions");
+  return response.json();
+};
+
+export const fetchSmartSip = async (pan: string, budget: number) => {
+  const response = await authenticatedFetch(
+    `${BASE_URL}/portfolio/${pan}/smart-sip?budget=${budget}`
+  );
+  if (!response.ok) throw new Error("Failed to calculate Smart SIP split");
+  return response.json();
+};
+
 export const fetchPortfolioState = async () => {
   const response = await authenticatedFetch(`${BASE_URL}/v1/portfolio/state`);
   if (!response.ok) throw new Error("Failed to fetch portfolio state");
@@ -298,6 +313,13 @@ export const benchmarkService = {
       `${BASE_URL}/history/benchmark/${encodeURIComponent(index)}`
     );
     if (!response.ok) throw new Error("Failed to fetch benchmark returns");
+    return response.json();
+  },
+  getBenchmarkReturnsForAllPeriods: async (index: string) => {
+    const response = await authenticatedFetch(
+      `${BASE_URL}/history/benchmark/${encodeURIComponent(index)}/returns`
+    );
+    if (!response.ok) throw new Error("Failed to fetch benchmark returns for all periods");
     return response.json();
   }
 };

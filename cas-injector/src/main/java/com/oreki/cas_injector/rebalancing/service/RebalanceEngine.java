@@ -72,14 +72,16 @@ public class RebalanceEngine {
         
         Set<String> processedIsins = new java.util.HashSet<>();
 
-        // 1. First Pass: Process Mandatory Exits (DROPPED/EXIT) and Clutter positions
+        // Group holdings into active and mandatory/clutter
+        List<AggregatedHolding> mandatoryOrClutterHoldings = new ArrayList<>();
+        List<ActiveEvaluationItem> activeItems = new ArrayList<>();
+
         for (AggregatedHolding holding : req.getHoldings()) {
             String isin = holding.getIsin();
             if (isin == null) continue;
             
             StrategyTarget target = targetMap.get(isin);
-            String amfiCode = req.getAmfiMap().getOrDefault(isin, "");
-
+            
             double actualPct = 0.0;
             if (req.getTotalPortfolioValue().compareTo(BigDecimal.ZERO) > 0) {
                 BigDecimal holdingVal = holding.getCurrentValue() != null ? holding.getCurrentValue() : BigDecimal.ZERO;
@@ -100,102 +102,29 @@ public class RebalanceEngine {
                 isMandatoryExit = true; // No target weight configured means we want to exit it
             }
 
-            // Clutter definition: targetPct == 0, and actualPct < 1.0% or value < ₹5000 (and not explicitly active)
+            // Clutter definition: targetPct == 0 (or target is null), and actualPct < 0.2%
             if (target != null && target.targetPortfolioPct() == 0 && !isMandatoryExit) {
-                BigDecimal val = holding.getCurrentValue() != null ? holding.getCurrentValue() : BigDecimal.ZERO;
-                if (actualPct < 1.0 || val.compareTo(BigDecimal.valueOf(5000.0)) < 0) {
+                if (actualPct < 0.2) {
                     isClutter = true;
                 }
             } else if (target == null) {
-                BigDecimal val = holding.getCurrentValue() != null ? holding.getCurrentValue() : BigDecimal.ZERO;
-                if (actualPct < 1.0 || val.compareTo(BigDecimal.valueOf(5000.0)) < 0) {
+                if (actualPct < 0.2) {
                     isClutter = true;
                     isMandatoryExit = false; // prioritize clutter label
                 }
             }
 
             if (isMandatoryExit || isClutter) {
-                processedIsins.add(isin);
-                BigDecimal currentNav = BigDecimal.ZERO;
-                if (amfiCode != null && !amfiCode.isEmpty()) {
-                    try {
-                        var details = amfiService.getLatestSchemeDetails(amfiCode);
-                        if (details != null && details.getNav() != null) {
-                            currentNav = details.getNav();
-                        }
-                    } catch (Exception e) {
-                        log.warn("Failed to get NAV for mandatory/clutter exit fund amfi {}: {}", amfiCode, e.getMessage());
-                    }
+                mandatoryOrClutterHoldings.add(holding);
+            } else {
+                if (target != null) {
+                    activeItems.add(new ActiveEvaluationItem(holding, target));
                 }
-                if (currentNav.compareTo(BigDecimal.ZERO) <= 0) {
-                    currentNav = holding.getNav() != null ? holding.getNav() : BigDecimal.ZERO;
-                }
-
-                BigDecimal totalLtcgGain = BigDecimal.ZERO;
-                BigDecimal totalStcgGain = BigDecimal.ZERO;
-                BigDecimal unitsToSell = holding.getUnits() != null ? holding.getUnits() : BigDecimal.ZERO;
-
-                if (unitsToSell.compareTo(BigDecimal.ZERO) > 0 && amfiCode != null && !amfiCode.isEmpty()) {
-                    try {
-                        List<TaxLot> openLots = taxLotRepository.findByStatusAndSchemeAmfiCodeAndSchemeFolioInvestorPan("OPEN", amfiCode, req.getPan());
-                        for (TaxLot lot : openLots) {
-                            long daysHeld = ChronoUnit.DAYS.between(lot.getBuyDate(), currentDate);
-                            BigDecimal remUnits = lot.getRemainingUnits() != null ? lot.getRemainingUnits() : BigDecimal.ZERO;
-                            BigDecimal costBasis = lot.getCostBasisPerUnit() != null ? lot.getCostBasisPerUnit() : BigDecimal.ZERO;
-                            BigDecimal gainPerUnit = currentNav.subtract(costBasis);
-                            BigDecimal gain = gainPerUnit.multiply(remUnits);
-
-                            if (gain.compareTo(BigDecimal.ZERO) > 0) {
-                                if (daysHeld > 365) {
-                                    totalLtcgGain = totalLtcgGain.add(gain);
-                                } else {
-                                    totalStcgGain = totalStcgGain.add(gain);
-                                }
-                            }
-                        }
-                    } catch (Exception e) {
-                        log.warn("Failed to query open lots for exit scheme amfi {}: {}", amfiCode, e.getMessage());
-                    }
-                }
-
-                // Deduct mandatory exit LTCG from remaining tax headroom
-                headroomRemaining = headroomRemaining.subtract(totalLtcgGain);
-                if (headroomRemaining.compareTo(BigDecimal.ZERO) < 0) {
-                    headroomRemaining = BigDecimal.ZERO;
-                }
-
-                String signal = isClutter ? "SELL" : "EXIT";
-                String reason = isClutter 
-                    ? String.format("Sell (Clutter): Small position (< 1.0%% or < ₹5,000) identified as portfolio clutter. Liquidating entire position. Est. LTCG: ₹%,.0f, STCG: ₹%,.0f.", totalLtcgGain, totalStcgGain)
-                    : String.format("Exit (Mandatory): Fund is marked as DROPPED/EXIT. Liquidating entire position. Est. LTCG: ₹%,.0f, STCG: ₹%,.0f.", totalLtcgGain, totalStcgGain);
-
-                actions.add(RebalanceActionDTO.builder()
-                    .schemeName(holding.getSchemeName() != null ? holding.getSchemeName() : (target != null ? target.schemeName() : "Unknown Fund"))
-                    .amfiCode(amfiCode)
-                    .isin(isin)
-                    .signal(signal)
-                    .unitsToTransact(unitsToSell.setScale(4, RoundingMode.HALF_UP))
-                    .justification(reason)
-                    .zScore(BigDecimal.ZERO)
-                    .hurstExponent(BigDecimal.valueOf(0.5))
-                    .build());
             }
-        }
-
-        // 2. Second Pass: Process Active Holdings (held active funds + targets not yet held)
-        List<ActiveEvaluationItem> activeItems = new ArrayList<>();
-
-        for (AggregatedHolding holding : req.getHoldings()) {
-            String isin = holding.getIsin();
-            if (isin == null || processedIsins.contains(isin)) continue;
-
-            StrategyTarget target = targetMap.get(isin);
-            if (target == null) continue; 
-
-            activeItems.add(new ActiveEvaluationItem(holding, target));
             processedIsins.add(isin);
         }
 
+        // Add active targets that are not yet held
         for (StrategyTarget target : req.getTargets()) {
             String isin = target.isin();
             if (isin == null || processedIsins.contains(isin)) continue;
@@ -216,7 +145,7 @@ public class RebalanceEngine {
             }
         }
 
-        // Evaluate standard rebalancing actions
+        // --- STEP 1: Process Active Items First ---
         for (ActiveEvaluationItem item : activeItems) {
             AggregatedHolding holding = item.holding;
             StrategyTarget target = item.target;
@@ -287,6 +216,15 @@ public class RebalanceEngine {
                 threshold = 1.5;
             }
 
+            // Retrieve HMM bear probability
+            double hmmBearProb = 0.33; // Default fallback
+            if (req.getMetrics() != null && req.getMetrics().containsKey(amfiCode)) {
+                var m = req.getMetrics().get(amfiCode);
+                if (m != null) {
+                    hmmBearProb = m.hmmBearProb();
+                }
+            }
+
             String signal = "HOLD";
             BigDecimal unitsToTransact = BigDecimal.ZERO;
             String justification = String.format("Hold: Current deviation (%+.2f%%) is within the rebalance threshold for %s funds (%.1f%%).", drift, bucket, threshold);
@@ -301,13 +239,13 @@ public class RebalanceEngine {
                         boolean triggerBuy = true;
                         String condNote = "";
                         if ("TACTICAL".equals(bucket)) {
-                            if (zScore < -1.5) {
-                                condNote = String.format("Tactical cheapness trigger met (Z=%.2f)", zScore);
-                            } else if (hurstExponent > 0.55 && zScore < 0) {
-                                condNote = String.format("Tactical momentum/trend trigger met (H=%.3f, Z=%.2f)", hurstExponent, zScore);
+                            if (zScore < -1.5 && hmmBearProb < 0.6) {
+                                condNote = String.format("Tactical cheapness trigger met (Z=%.2f, HMM Bear=%.2f)", zScore, hmmBearProb);
+                            } else if (hurstExponent > 0.55 && zScore < 0 && hmmBearProb < 0.6) {
+                                condNote = String.format("Tactical momentum/trend trigger met (H=%.3f, Z=%.2f, HMM Bear=%.2f)", hurstExponent, zScore, hmmBearProb);
                             } else {
                                 triggerBuy = false;
-                                justification = String.format("Hold (Tactical): Underweight by %.2f%%, but tactical buy triggers (Z-Score < -1.5 or positive trend with H > 0.55) are not met (Z=%.2f, H=%.3f).", Math.abs(drift), zScore, hurstExponent);
+                                justification = String.format("Hold (Tactical): Underweight by %.2f%%, but tactical buy triggers (Z-Score < -1.5 or positive trend with H > 0.55) under HMM Bear < 0.6 gating are not met (Z=%.2f, H=%.3f, HMM Bear=%.2f).", Math.abs(drift), zScore, hurstExponent, hmmBearProb);
                             }
                         } else if ("SATELLITE".equals(bucket)) {
                             if (zScore < -1.0) {
@@ -331,13 +269,17 @@ public class RebalanceEngine {
                     }
                 } else if (drift > 0) {
                     // Overweight (SELL)
-                    if (hurstExponent > 0.55) {
+                    boolean triggerSell = false;
+                    String condNote = "";
+
+                    if (drift >= 2 * threshold) {
+                        triggerSell = true;
+                        condNote = String.format("Hard Sell Override: Drift (%+.2f%%) exceeds 2x threshold (%.1f%%)", drift, threshold);
+                    } else if (hurstExponent > 0.55) {
                         signal = "HOLD";
                         unitsToTransact = BigDecimal.ZERO;
                         justification = String.format("Hold (Wave Rider): Target is overweight by %.2f%% but Hurst Exponent indicates a strong upward trend (H=%.3f). Letting profits run.", drift, hurstExponent);
                     } else {
-                        boolean triggerSell = false;
-                        String condNote = "";
                         if ("TACTICAL".equals(bucket)) {
                             if (zScore > 1.5) {
                                 triggerSell = true;
@@ -363,75 +305,75 @@ public class RebalanceEngine {
                                 justification = String.format("Hold (Core): Overweight by %.2f%%, but sell trigger Z-Score > 2.0 is not met (Z=%.2f).", drift, zScore);
                             }
                         }
+                    }
 
-                        if (triggerSell) {
-                            if (currentNav.compareTo(BigDecimal.ZERO) > 0) {
-                                BigDecimal overweightPct = BigDecimal.valueOf(drift);
-                                BigDecimal overweightValue = overweightPct.divide(BigDecimal.valueOf(100.0), 6, RoundingMode.HALF_UP)
-                                    .multiply(req.getTotalPortfolioValue());
-                                BigDecimal desiredUnitsToSell = overweightValue.divide(currentNav, 4, RoundingMode.HALF_UP);
+                    if (triggerSell) {
+                        if (currentNav.compareTo(BigDecimal.ZERO) > 0) {
+                            BigDecimal overweightPct = BigDecimal.valueOf(drift);
+                            BigDecimal overweightValue = overweightPct.divide(BigDecimal.valueOf(100.0), 6, RoundingMode.HALF_UP)
+                                .multiply(req.getTotalPortfolioValue());
+                            BigDecimal desiredUnitsToSell = overweightValue.divide(currentNav, 4, RoundingMode.HALF_UP);
 
-                                List<TaxLot> openLots = java.util.Collections.emptyList();
-                                if (amfiCode != null && !amfiCode.isEmpty()) {
-                                    try {
-                                        openLots = taxLotRepository.findByStatusAndSchemeAmfiCodeAndSchemeFolioInvestorPan("OPEN", amfiCode, req.getPan());
-                                    } catch (Exception e) {
-                                        log.warn("Failed to query open lots for scheme amfi {}: {}", amfiCode, e.getMessage());
-                                    }
+                            List<TaxLot> openLots = java.util.Collections.emptyList();
+                            if (amfiCode != null && !amfiCode.isEmpty()) {
+                                try {
+                                    openLots = taxLotRepository.findByStatusAndSchemeAmfiCodeAndSchemeFolioInvestorPan("OPEN", amfiCode, req.getPan());
+                                } catch (Exception e) {
+                                    log.warn("Failed to query open lots for scheme amfi {}: {}", amfiCode, e.getMessage());
                                 }
-                                
-                                BigDecimal ltcgUnitsAvailable = BigDecimal.ZERO;
-                                BigDecimal totalLtcgCost = BigDecimal.ZERO;
+                            }
+                            
+                            BigDecimal ltcgUnitsAvailable = BigDecimal.ZERO;
+                            BigDecimal totalLtcgCost = BigDecimal.ZERO;
 
-                                for (TaxLot lot : openLots) {
-                                    long daysHeld = ChronoUnit.DAYS.between(lot.getBuyDate(), currentDate);
-                                    if (daysHeld > 365) {
-                                        BigDecimal remUnits = lot.getRemainingUnits() != null ? lot.getRemainingUnits() : BigDecimal.ZERO;
-                                        BigDecimal costBasis = lot.getCostBasisPerUnit() != null ? lot.getCostBasisPerUnit() : BigDecimal.ZERO;
-                                        ltcgUnitsAvailable = ltcgUnitsAvailable.add(remUnits);
-                                        totalLtcgCost = totalLtcgCost.add(remUnits.multiply(costBasis));
-                                    }
+                            for (TaxLot lot : openLots) {
+                                long daysHeld = ChronoUnit.DAYS.between(lot.getBuyDate(), currentDate);
+                                if (daysHeld > 365) {
+                                    BigDecimal remUnits = lot.getRemainingUnits() != null ? lot.getRemainingUnits() : BigDecimal.ZERO;
+                                    BigDecimal costBasis = lot.getCostBasisPerUnit() != null ? lot.getCostBasisPerUnit() : BigDecimal.ZERO;
+                                    ltcgUnitsAvailable = ltcgUnitsAvailable.add(remUnits);
+                                    totalLtcgCost = totalLtcgCost.add(remUnits.multiply(costBasis));
                                 }
+                            }
 
-                                BigDecimal avgLtcgCostBasis = BigDecimal.ZERO;
-                                if (ltcgUnitsAvailable.compareTo(BigDecimal.ZERO) > 0) {
-                                    avgLtcgCostBasis = totalLtcgCost.divide(ltcgUnitsAvailable, 6, RoundingMode.HALF_UP);
-                                }
+                            BigDecimal avgLtcgCostBasis = BigDecimal.ZERO;
+                            if (ltcgUnitsAvailable.compareTo(BigDecimal.ZERO) > 0) {
+                                avgLtcgCostBasis = totalLtcgCost.divide(ltcgUnitsAvailable, 6, RoundingMode.HALF_UP);
+                            }
 
-                                BigDecimal gainPerUnit = currentNav.subtract(avgLtcgCostBasis);
-                                BigDecimal unitsToSell = desiredUnitsToSell.min(ltcgUnitsAvailable);
+                            BigDecimal gainPerUnit = currentNav.subtract(avgLtcgCostBasis);
+                            BigDecimal unitsToSell = desiredUnitsToSell.min(ltcgUnitsAvailable);
 
-                                if (unitsToSell.compareTo(BigDecimal.ZERO) <= 0) {
-                                    signal = "HOLD";
-                                    unitsToTransact = BigDecimal.ZERO;
-                                    justification = String.format("Hold (%s): Overweight by %.2f%%, but no long-term (LTCG) units are available to sell (preserving short-term lots).", bucket, drift);
-                                } else {
-                                    if (gainPerUnit.compareTo(BigDecimal.ZERO) > 0) {
-                                        BigDecimal estimatedGain = gainPerUnit.multiply(unitsToSell);
-                                        if (estimatedGain.compareTo(headroomRemaining) <= 0) {
-                                            signal = "SELL";
-                                            unitsToTransact = unitsToSell;
-                                            justification = String.format("Sell (%s): Target is overweight by %.2f%%. %s. Est. LTCG: ₹%,.0f fits within remaining tax headroom (₹%,.0f).", bucket, drift, condNote, estimatedGain, headroomRemaining);
-                                            headroomRemaining = headroomRemaining.subtract(estimatedGain);
-                                        } else {
-                                            BigDecimal allowedUnits = headroomRemaining.divide(gainPerUnit, 4, RoundingMode.HALF_UP);
-                                            BigDecimal finalUnits = allowedUnits.min(ltcgUnitsAvailable);
-                                            if (finalUnits.compareTo(BigDecimal.ZERO) > 0) {
-                                                signal = "SELL";
-                                                unitsToTransact = finalUnits;
-                                                justification = String.format("Sell (Capped %s): Target is overweight by %.2f%%. %s. Capped to fit remaining LTCG tax headroom (₹%,.0f).", bucket, drift, condNote, headroomRemaining);
-                                                headroomRemaining = BigDecimal.ZERO;
-                                            } else {
-                                                signal = "HOLD";
-                                                unitsToTransact = BigDecimal.ZERO;
-                                                justification = String.format("Hold (%s): Overweight by %.2f%%, but remaining tax headroom is ₹%,.0f (too low to rebalance long-term units).", bucket, drift, headroomRemaining);
-                                            }
-                                        }
-                                    } else {
+                            if (unitsToSell.compareTo(BigDecimal.ZERO) <= 0) {
+                                signal = "HOLD";
+                                unitsToTransact = BigDecimal.ZERO;
+                                justification = String.format("Hold (%s): Overweight by %.2f%%, but no long-term (LTCG) units are available to sell (preserving short-term lots).", bucket, drift);
+                            } else {
+                                if (gainPerUnit.compareTo(BigDecimal.ZERO) > 0) {
+                                    BigDecimal estimatedGain = gainPerUnit.multiply(unitsToSell);
+                                    if (estimatedGain.compareTo(headroomRemaining) <= 0) {
                                         signal = "SELL";
                                         unitsToTransact = unitsToSell;
-                                        justification = String.format("Sell (%s): Target is overweight by %.2f%%. %s. No capital gain generated (selling at or below cost basis).", bucket, drift, condNote);
+                                        justification = String.format("Sell (%s): Target is overweight by %.2f%%. %s. Est. LTCG: ₹%,.0f fits within remaining tax headroom (₹%,.0f).", bucket, drift, condNote, estimatedGain, headroomRemaining);
+                                        headroomRemaining = headroomRemaining.subtract(estimatedGain);
+                                    } else {
+                                        BigDecimal allowedUnits = headroomRemaining.divide(gainPerUnit, 4, RoundingMode.HALF_UP);
+                                        BigDecimal finalUnits = allowedUnits.min(ltcgUnitsAvailable);
+                                        if (finalUnits.compareTo(BigDecimal.ZERO) > 0) {
+                                            signal = "SELL";
+                                            unitsToTransact = finalUnits;
+                                            justification = String.format("Sell (Capped %s): Target is overweight by %.2f%%. %s. Capped to fit remaining LTCG tax headroom (₹%,.0f).", bucket, drift, condNote, headroomRemaining);
+                                            headroomRemaining = BigDecimal.ZERO;
+                                        } else {
+                                            signal = "HOLD";
+                                            unitsToTransact = BigDecimal.ZERO;
+                                            justification = String.format("Hold (%s): Overweight by %.2f%%, but remaining tax headroom is ₹%,.0f (too low to rebalance long-term units).", bucket, drift, headroomRemaining);
+                                        }
                                     }
+                                } else {
+                                    signal = "SELL";
+                                    unitsToTransact = unitsToSell;
+                                    justification = String.format("Sell (%s): Target is overweight by %.2f%%. %s. No capital gain generated (selling at or below cost basis).", bucket, drift, condNote);
                                 }
                             }
                         }
@@ -445,9 +387,113 @@ public class RebalanceEngine {
                 .isin(holding.getIsin() != null ? holding.getIsin() : target.isin())
                 .signal(signal)
                 .unitsToTransact(unitsToTransact.setScale(4, RoundingMode.HALF_UP))
+                .amount(unitsToTransact.multiply(currentNav).setScale(2, RoundingMode.HALF_UP))
                 .justification(justification)
                 .zScore(BigDecimal.valueOf(zScore).setScale(2, RoundingMode.HALF_UP))
                 .hurstExponent(BigDecimal.valueOf(hurstExponent).setScale(3, RoundingMode.HALF_UP))
+                .build());
+        }
+
+        // --- STEP 2: Process Mandatory Exits and Clutter Positions Second ---
+        for (AggregatedHolding holding : mandatoryOrClutterHoldings) {
+            String isin = holding.getIsin();
+            StrategyTarget target = targetMap.get(isin);
+            String amfiCode = req.getAmfiMap().getOrDefault(isin, "");
+
+            double actualPct = 0.0;
+            if (req.getTotalPortfolioValue().compareTo(BigDecimal.ZERO) > 0) {
+                BigDecimal holdingVal = holding.getCurrentValue() != null ? holding.getCurrentValue() : BigDecimal.ZERO;
+                actualPct = holdingVal.divide(req.getTotalPortfolioValue(), 6, RoundingMode.HALF_UP)
+                    .multiply(BigDecimal.valueOf(100.0)).doubleValue();
+            }
+
+            boolean isMandatoryExit = false;
+            boolean isClutter = false;
+
+            if (target != null) {
+                String status = target.status() != null ? target.status().toUpperCase() : "ACTIVE";
+                String bucket = target.bucket() != null ? target.bucket().toUpperCase() : "CORE";
+                if ("DROPPED".equals(status) || "EXIT".equals(status) || "DROPPED".equals(bucket) || "EXIT".equals(bucket)) {
+                    isMandatoryExit = true;
+                }
+            } else {
+                isMandatoryExit = true;
+            }
+
+            if (target != null && target.targetPortfolioPct() == 0 && !isMandatoryExit) {
+                if (actualPct < 0.2) {
+                    isClutter = true;
+                }
+            } else if (target == null) {
+                if (actualPct < 0.2) {
+                    isClutter = true;
+                    isMandatoryExit = false;
+                }
+            }
+
+            BigDecimal currentNav = BigDecimal.ZERO;
+            if (amfiCode != null && !amfiCode.isEmpty()) {
+                try {
+                    var details = amfiService.getLatestSchemeDetails(amfiCode);
+                    if (details != null && details.getNav() != null) {
+                        currentNav = details.getNav();
+                    }
+                } catch (Exception e) {
+                    log.warn("Failed to get NAV for mandatory/clutter exit fund amfi {}: {}", amfiCode, e.getMessage());
+                }
+            }
+            if (currentNav.compareTo(BigDecimal.ZERO) <= 0) {
+                currentNav = holding.getNav() != null ? holding.getNav() : BigDecimal.ZERO;
+            }
+
+            BigDecimal totalLtcgGain = BigDecimal.ZERO;
+            BigDecimal totalStcgGain = BigDecimal.ZERO;
+            BigDecimal unitsToSell = holding.getUnits() != null ? holding.getUnits() : BigDecimal.ZERO;
+
+            if (unitsToSell.compareTo(BigDecimal.ZERO) > 0 && amfiCode != null && !amfiCode.isEmpty()) {
+                try {
+                    List<TaxLot> openLots = taxLotRepository.findByStatusAndSchemeAmfiCodeAndSchemeFolioInvestorPan("OPEN", amfiCode, req.getPan());
+                    for (TaxLot lot : openLots) {
+                        long daysHeld = ChronoUnit.DAYS.between(lot.getBuyDate(), currentDate);
+                        BigDecimal remUnits = lot.getRemainingUnits() != null ? lot.getRemainingUnits() : BigDecimal.ZERO;
+                        BigDecimal costBasis = lot.getCostBasisPerUnit() != null ? lot.getCostBasisPerUnit() : BigDecimal.ZERO;
+                        BigDecimal gainPerUnit = currentNav.subtract(costBasis);
+                        BigDecimal gain = gainPerUnit.multiply(remUnits);
+
+                        if (gain.compareTo(BigDecimal.ZERO) > 0) {
+                            if (daysHeld > 365) {
+                                totalLtcgGain = totalLtcgGain.add(gain);
+                            } else {
+                                totalStcgGain = totalStcgGain.add(gain);
+                            }
+                        }
+                    }
+                } catch (Exception e) {
+                    log.warn("Failed to query open lots for exit scheme amfi {}: {}", amfiCode, e.getMessage());
+                }
+            }
+
+            // Deduct mandatory exit LTCG from leftover headroom
+            headroomRemaining = headroomRemaining.subtract(totalLtcgGain);
+            if (headroomRemaining.compareTo(BigDecimal.ZERO) < 0) {
+                headroomRemaining = BigDecimal.ZERO;
+            }
+
+            String signal = isClutter ? "SELL" : "EXIT";
+            String reason = isClutter 
+                ? String.format("Sell (Clutter): Small position (< 0.2%% of portfolio value) identified as portfolio clutter. Liquidating entire position. Est. LTCG: ₹%,.0f, STCG: ₹%,.0f.", totalLtcgGain, totalStcgGain)
+                : String.format("Exit (Mandatory): Fund is marked as DROPPED/EXIT. Liquidating entire position. Est. LTCG: ₹%,.0f, STCG: ₹%,.0f.", totalLtcgGain, totalStcgGain);
+
+            actions.add(RebalanceActionDTO.builder()
+                .schemeName(holding.getSchemeName() != null ? holding.getSchemeName() : (target != null ? target.schemeName() : "Unknown Fund"))
+                .amfiCode(amfiCode)
+                .isin(isin)
+                .signal(signal)
+                .unitsToTransact(unitsToSell.setScale(4, RoundingMode.HALF_UP))
+                .amount(unitsToSell.multiply(currentNav).setScale(2, RoundingMode.HALF_UP))
+                .justification(reason)
+                .zScore(BigDecimal.ZERO)
+                .hurstExponent(BigDecimal.valueOf(0.5))
                 .build());
         }
 
@@ -495,7 +541,8 @@ public class RebalanceEngine {
                     .multiply(BigDecimal.valueOf(100.0)).doubleValue();
             }
 
-            BigDecimal currentNav = amfiService.getLatestSchemeDetails(amfiCode).getNav();
+            var details = amfiService.getLatestSchemeDetails(amfiCode);
+            BigDecimal currentNav = (details != null && details.getNav() != null) ? details.getNav() : BigDecimal.ZERO;
             if (currentNav == null || currentNav.compareTo(BigDecimal.ZERO) <= 0) {
                 currentNav = holding != null && holding.getNav() != null ? holding.getNav() : BigDecimal.ZERO;
             }

@@ -26,6 +26,7 @@ public class SecurityConfig {
                 .requestMatchers("/investor/check/**").permitAll()
                 .requestMatchers("/cas/**").permitAll()
                 .requestMatchers("/market/**", "/history/**").permitAll()
+                .requestMatchers("/v1/webhook/**").permitAll()
                 .requestMatchers("/error", "/actuator/**", "/health/**", "/status/**", "/ws/**").permitAll()
                 .anyRequest().authenticated()
             )

@@ -12,7 +12,9 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.oreki.cas_injector.rebalancing.dto.PortfolioStateItemDTO;
 import com.oreki.cas_injector.rebalancing.dto.TaxHeadroomDTO;
+import com.oreki.cas_injector.rebalancing.dto.TacticalSignal;
 import com.oreki.cas_injector.rebalancing.service.PortfolioOrchestrator;
+import com.oreki.cas_injector.rebalancing.service.RebalanceOrchestrator;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -25,6 +27,7 @@ import lombok.extern.slf4j.Slf4j;
 public class PortfolioController {
 
     private final PortfolioOrchestrator portfolioOrchestrator;
+    private final RebalanceOrchestrator rebalanceOrchestrator;
 
     @GetMapping("/state")
     public ResponseEntity<List<PortfolioStateItemDTO>> getPortfolioState() {
@@ -32,6 +35,14 @@ public class PortfolioController {
         log.info("📥 GET /api/v1/portfolio/state called for PAN: {}", pan);
         List<PortfolioStateItemDTO> state = portfolioOrchestrator.getPortfolioState(pan);
         return ResponseEntity.ok(state);
+    }
+
+    @GetMapping("/signals")
+    public ResponseEntity<List<TacticalSignal>> getPortfolioSignals() {
+        String pan = getAuthenticatedPan();
+        log.info("📥 GET /api/v1/portfolio/signals called for PAN: {}", pan);
+        List<TacticalSignal> signals = rebalanceOrchestrator.getTacticalSignals(pan);
+        return ResponseEntity.ok(signals);
     }
 
     @GetMapping("/tax-headroom")

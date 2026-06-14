@@ -523,12 +523,12 @@ export default function PortfolioView({
                 <YAxis 
                   type="number" 
                   dataKey="y" 
-                  name="Max Drawdown" 
+                  name="Max Drawdown (3yr)" 
                   unit="%" 
                   axisLine={false} 
                   tickLine={false} 
                   tick={{ fill: '#6c7086', fontSize: 10, fontWeight: 700 }}
-                  label={{ value: '↑ Max drawdown %', angle: -90, position: 'insideLeft', fill: '#6c7086', fontSize: 9, fontWeight: 900 }}
+                  label={{ value: '↑ Max Drawdown (3yr) %', angle: -90, position: 'insideLeft', fill: '#6c7086', fontSize: 9, fontWeight: 900 }}
                 />
                 <ZAxis type="number" dataKey="z" range={[50, 400]} name="Value" />
                 <RechartsTooltip 
@@ -540,7 +540,7 @@ export default function PortfolioView({
                       <div className="bg-surface-overlay/95 backdrop-blur-2xl border border-white/10 p-4 rounded-2xl shadow-2xl space-y-1">
                         <p className="text-[10px] font-black text-primary uppercase tracking-widest">{d.name}</p>
                         <p className="text-xs font-bold text-secondary">Conviction: {d.x}</p>
-                        <p className="text-xs font-bold text-exit">Drawdown: {d.y.toFixed(1)}%</p>
+                        <p className="text-xs font-bold text-exit">Drawdown (3yr): {d.y.toFixed(1)}%</p>
                         <p className="text-xs font-bold text-hint">Value: {mask(formatCurrency(d.z))}</p>
                       </div>
                     );

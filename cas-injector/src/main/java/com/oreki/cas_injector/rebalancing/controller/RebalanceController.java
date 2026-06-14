@@ -17,6 +17,8 @@ import com.oreki.cas_injector.rebalancing.dto.RebalanceActionDTO;
 import com.oreki.cas_injector.rebalancing.service.RebalanceOrchestrator;
 import com.oreki.cas_injector.taxmanagement.dto.TlhOpportunity;
 import com.oreki.cas_injector.taxmanagement.service.TaxLossHarvestingService;
+import com.oreki.cas_injector.rebalancing.dto.SmartSipAllocation;
+import com.oreki.cas_injector.rebalancing.service.DynamicSipService;
 
 import lombok.AllArgsConstructor;
 
@@ -28,6 +30,7 @@ public class RebalanceController {
 
     private final RebalanceOrchestrator orchestrator;
     private final TaxLossHarvestingService taxLossHarvestingService;
+    private final DynamicSipService dynamicSipService;
     /**
      * Endpoint to fetch the daily tactical signals for a specific investor.
      * Example URL: GET /api/portfolio/ABCDE1234F/tactical-signals
@@ -75,6 +78,14 @@ public class RebalanceController {
             return ResponseEntity.noContent().build();
         }
         return ResponseEntity.ok(actions);
+    }
+
+    @GetMapping("/{pan}/smart-sip")
+    public ResponseEntity<List<SmartSipAllocation>> getSmartSipAllocation(
+            @PathVariable("pan") String pan,
+            @RequestParam("budget") java.math.BigDecimal budget) {
+        validatePan(pan);
+        return ResponseEntity.ok(dynamicSipService.calculateSipSplit(pan, budget));
     }
 
     private java.math.BigDecimal parseAmount(String amt) {

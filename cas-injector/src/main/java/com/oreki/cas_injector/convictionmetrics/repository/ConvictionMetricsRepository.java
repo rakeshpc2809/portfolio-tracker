@@ -94,7 +94,7 @@ public class ConvictionMetricsRepository {
         // PRUNING: Drop dead columns from previous versions to reduce bloat
         String[] columnsToDrop = {
             "hurst_20d", "hurst_60d", "multi_scale_regime",
-            "ou_theta", "ou_mu", "ou_sigma"
+            "ou_theta", "ou_mu", "ou_sigma", "composite_quant_score"
         };
         for (String col : columnsToDrop) {
             try {

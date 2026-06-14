@@ -16,6 +16,7 @@ public class RebalanceActionDTO {
     private String isin;
     private String signal;
     private BigDecimal unitsToTransact;
+    private BigDecimal amount;
     private String justification;
     private BigDecimal zScore;
     private BigDecimal hurstExponent;

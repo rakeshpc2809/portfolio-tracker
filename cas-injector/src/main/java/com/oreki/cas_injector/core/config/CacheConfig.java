@@ -36,6 +36,20 @@ public class CacheConfig {
             .maximumSize(50)
             .recordStats()
             .build());
+
+    manager.registerCustomCache("portfolioState",
+        Caffeine.newBuilder()
+            .expireAfterWrite(10, TimeUnit.MINUTES)
+            .maximumSize(50)
+            .recordStats()
+            .build());
+
+    manager.registerCustomCache("portfolioSignals",
+        Caffeine.newBuilder()
+            .expireAfterWrite(10, TimeUnit.MINUTES)
+            .maximumSize(50)
+            .recordStats()
+            .build());
             
     manager.registerCustomCache("navCache",
         Caffeine.newBuilder()

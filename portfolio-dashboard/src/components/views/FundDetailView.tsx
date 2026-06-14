@@ -119,7 +119,7 @@ export default function FundDetailView({
       score: hasRealScores ? fund.painScore : 50, 
       weight: '15%', 
       full: 'Recovery Quality',
-      tooltip: 'Blended Max Drawdown + OU Mean Reversion Speed.' 
+      tooltip: 'Blended Max Drawdown (3yr) + OU Mean Reversion Speed.' 
     },
     { 
       label: 'Regime', 
@@ -242,7 +242,7 @@ export default function FundDetailView({
                   <p className="text-xs font-black text-exit uppercase tracking-tighter">{fund.volatilityTax?.toFixed(2) || '0.00'}% Annual</p>
                 </div>
                 <div className="flex-none px-4 py-2 rounded-2xl bg-white/[0.03] border border-white/5 space-y-1">
-                  <p className="text-[8px] font-black uppercase tracking-widest text-muted opacity-60">Range Index</p>
+                  <p className="text-[8px] font-black uppercase tracking-widest text-muted opacity-60">1-Year NAV Percentile</p>
                   <p className="text-xs font-black text-primary uppercase tracking-tighter">{Math.round((fund.navPercentile1yr || 0) * 100)}%</p>
                 </div>
                 <div className="flex-none px-4 py-2 rounded-2xl bg-white/[0.03] border border-white/5 space-y-1">
@@ -716,7 +716,7 @@ export default function FundDetailView({
                   
                   <div className="grid grid-cols-2 gap-12 pt-4">
                     <div className="space-y-1">
-                      <p className="text-muted text-[9px] font-black uppercase tracking-[0.2em] opacity-50">Range Index</p>
+                      <p className="text-muted text-[9px] font-black uppercase tracking-[0.2em] opacity-50">1-Year NAV Percentile</p>
                       <p className="text-xl font-black text-primary tracking-tighter">
                         {Math.round((fund.navPercentile1yr || 0) * 100)}<span className="text-xs text-muted font-light ml-1">%ile</span>
                       </p>

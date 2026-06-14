@@ -14,6 +14,7 @@ import java.math.BigDecimal;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.cache.CacheManager;
+import org.springframework.cache.annotation.Cacheable;
 
 import com.oreki.cas_injector.backfill.service.NavService;
 import com.oreki.cas_injector.convictionmetrics.dto.MarketMetrics;
@@ -363,5 +364,10 @@ public class RebalanceOrchestrator {
             .metrics(mutableMetricsMap)
             .amfiMap(isinToAmfiMap)
             .build();
+    }
+
+    @Cacheable(value = "portfolioSignals", key = "#pan")
+    public List<TacticalSignal> getTacticalSignals(String pan) {
+        return evaluateAll(pan);
     }
 }

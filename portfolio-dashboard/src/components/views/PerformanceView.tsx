@@ -23,8 +23,8 @@ export default function PerformanceView({
 }) {
   const { data: perf, isLoading } = usePerformanceHistory(pan);
   const { data: benchmarkData } = useQuery({
-    queryKey: ['benchmark', 'NIFTY 50'],
-    queryFn: () => benchmarkService.getBenchmarkReturns("NIFTY 50"),
+    queryKey: ['benchmark-returns', 'NIFTY 50'],
+    queryFn: () => benchmarkService.getBenchmarkReturnsForAllPeriods("NIFTY 50"),
     staleTime: 1000 * 60 * 60, // 1 hour
   });
 
@@ -627,12 +627,12 @@ export default function PerformanceView({
           <div className="flex items-center justify-between">
             <div className="space-y-1">
               <h3 className="text-primary text-[10px] font-black uppercase tracking-[0.3em]">Rolling Risk Metrics</h3>
-              <p className="text-sm font-bold text-secondary">90-Day Rolling Sortino Ratio vs Max Drawdown</p>
+              <p className="text-sm font-bold text-secondary">90-Day Rolling Sortino Ratio vs Max Drawdown (3yr)</p>
             </div>
             <div className="flex gap-4">
               <div className="flex items-center gap-2">
                 <div className="w-3 h-3 rounded-full bg-[#f38ba8]" />
-                <span className="text-[10px] font-bold text-muted uppercase">Max DD %</span>
+                <span className="text-[10px] font-bold text-muted uppercase">Max DD (3yr) %</span>
               </div>
               <div className="flex items-center gap-2">
                 <div className="w-3 h-1 rounded-full bg-[#a6e3a1]" />
@@ -712,7 +712,7 @@ export default function PerformanceView({
           <div className="flex items-center justify-between">
             <div className="space-y-1">
               <h3 className="text-primary text-[10px] font-black uppercase tracking-[0.3em]">Risk-Return Efficiency Frontier</h3>
-              <p className="text-sm font-bold text-secondary">Fund return (XIRR) plotted against risk (Max Drawdown). Larger spheres denote higher allocation weight.</p>
+              <p className="text-sm font-bold text-secondary">Fund return (XIRR) plotted against risk (Max Drawdown (3yr)). Larger spheres denote higher allocation weight.</p>
             </div>
           </div>
           <div className="h-96 w-full bg-black/20 rounded-3xl border border-white/5 p-6 shadow-inner relative">
@@ -727,7 +727,7 @@ export default function PerformanceView({
                 tickSize: 5,
                 tickPadding: 5,
                 tickRotation: 0,
-                legend: 'Risk (Maximum Drawdown %)',
+                legend: 'Risk (Max Drawdown (3yr) %)',
                 legendPosition: 'middle',
                 legendOffset: 40
               }}

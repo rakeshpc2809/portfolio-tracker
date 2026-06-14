@@ -1,12 +1,59 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { 
   ResponsiveContainer, XAxis, YAxis, Tooltip, 
   BarChart, Bar, Cell, CartesianGrid, ReferenceLine
 } from "recharts";
 import CurrencyValue from '../ui/CurrencyValue';
-import { Target, Clock, ArrowRight, TrendingUp, AlertCircle, ShieldAlert } from 'lucide-react';
+import { Target, Clock, ArrowRight, TrendingUp, AlertCircle, ShieldAlert, Sparkles, AlertTriangle, Download } from 'lucide-react';
 import type { RebalancingTrade } from '../../types/signals';
 import { useDashboardContext } from '../../context/DashboardContext';
+import { fetchSmartSip, fetchRebalanceActions } from '../../services/api';
+
+interface TradeRow {
+  action: 'BUY' | 'SELL';
+  isin: string;
+  schemeName: string;
+  orderType: 'AMOUNT' | 'UNITS';
+  quantity: number;
+}
+
+const escapeCSV = (val: string | number | undefined | null) => {
+  if (val === undefined || val === null) return '';
+  const str = String(val).trim();
+  if (str.includes(',') || str.includes('"') || str.includes('\n') || str.includes('\r')) {
+    return `"${str.replace(/"/g, '""')}"`;
+  }
+  return str;
+};
+
+const exportToBrokerCSV = (trades: TradeRow[]): string => {
+  const headers = ['Action (BUY/SELL)', 'ISIN', 'Scheme Name', 'Order Type (AMOUNT/UNITS)', 'Quantity'];
+  const rows = trades.map(t => [
+    t.action,
+    t.isin || '',
+    t.schemeName || '',
+    t.orderType,
+    t.quantity
+  ]);
+  
+  return [
+    headers.join(','),
+    ...rows.map(row => row.map(escapeCSV).join(','))
+  ].join('\n');
+};
+
+const downloadCSV = (csvContent: string, filename: string) => {
+  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.setAttribute('href', url);
+  link.setAttribute('download', filename);
+  link.style.visibility = 'hidden';
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+};
 
 export default function RebalanceView({ 
   portfolioData, 
@@ -19,7 +66,108 @@ export default function RebalanceView({
   setSipAmount: (val: number) => void;
   isPrivate: boolean;
 }) {
-  const { setIsStrategyOpen } = useDashboardContext();
+  const { setIsStrategyOpen, pan } = useDashboardContext();
+
+  const [exportingRebalance, setExportingRebalance] = useState<boolean>(false);
+  const [rebalanceExportError, setRebalanceExportError] = useState<string | null>(null);
+
+  interface RebalanceAction {
+    schemeName: string;
+    amfiCode: string;
+    isin: string;
+    signal: string;
+    unitsToTransact: number;
+    amount: number;
+    justification: string;
+    zScore: number;
+    hurstExponent: number;
+  }
+
+  const handleDownloadRebalanceCSV = async () => {
+    setExportingRebalance(true);
+    setRebalanceExportError(null);
+    try {
+      const actions: RebalanceAction[] = await fetchRebalanceActions(pan);
+      const tradeActions = actions.filter(
+        a => a.signal === 'BUY' || a.signal === 'SELL' || a.signal === 'EXIT'
+      );
+      
+      if (tradeActions.length === 0) {
+        setRebalanceExportError("No execution trades found to export.");
+        return;
+      }
+      
+      const trades: TradeRow[] = tradeActions.map(a => {
+        const action: 'BUY' | 'SELL' = (a.signal === 'SELL' || a.signal === 'EXIT') ? 'SELL' : 'BUY';
+        const orderType: 'AMOUNT' | 'UNITS' = action === 'SELL' ? 'UNITS' : 'AMOUNT';
+        const quantity = action === 'SELL' ? a.unitsToTransact : a.amount;
+        return {
+          action,
+          isin: a.isin || '',
+          schemeName: a.schemeName,
+          orderType,
+          quantity
+        };
+      });
+      
+      const csvContent = exportToBrokerCSV(trades);
+      const dateStr = new Date().toISOString().split('T')[0].replace(/-/g, '_');
+      downloadCSV(csvContent, `portfolio_execution_${dateStr}.csv`);
+    } catch (err: any) {
+      console.error(err);
+      setRebalanceExportError(err.message || "Failed to export rebalance actions.");
+    } finally {
+      setExportingRebalance(false);
+    }
+  };
+
+  const handleDownloadSmartSipCSV = () => {
+    if (smartSipAllocations.length === 0) return;
+    
+    const activeAllocations = smartSipAllocations.filter(a => (a.allocatedAmount || 0) > 0);
+    if (activeAllocations.length === 0) {
+      alert("No active SIP allocations to export.");
+      return;
+    }
+    
+    const trades: TradeRow[] = activeAllocations.map(a => ({
+      action: 'BUY',
+      isin: a.isin || '',
+      schemeName: a.schemeName,
+      orderType: 'AMOUNT',
+      quantity: a.allocatedAmount
+    }));
+    
+    const csvContent = exportToBrokerCSV(trades);
+    const dateStr = new Date().toISOString().split('T')[0].replace(/-/g, '_');
+    downloadCSV(csvContent, `portfolio_execution_${dateStr}.csv`);
+  };
+
+  // Smart SIP Planner State
+  const [sipBudget, setSipBudget] = useState<string>('50000');
+  const [smartSipAllocations, setSmartSipAllocations] = useState<any[]>([]);
+  const [smartSipLoading, setSmartSipLoading] = useState<boolean>(false);
+  const [smartSipError, setSmartSipError] = useState<string | null>(null);
+
+  const handleCalculateSmartSip = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!sipBudget || parseFloat(sipBudget) <= 0) {
+      setSmartSipError("Please enter a valid monthly SIP budget.");
+      return;
+    }
+    setSmartSipLoading(true);
+    setSmartSipError(null);
+    try {
+      const data = await fetchSmartSip(pan, parseFloat(sipBudget));
+      setSmartSipAllocations(data);
+    } catch (err: any) {
+      console.error(err);
+      setSmartSipError(err.message || "Failed to calculate Smart SIP allocations.");
+    } finally {
+      setSmartSipLoading(false);
+    }
+  };
+
   const data = useMemo(() => (portfolioData.schemeBreakdown || [])
     .filter((s: any) => (s.currentValue || 0) > 0) // Only active positions
     .map((s: any) => {
@@ -88,7 +236,24 @@ export default function RebalanceView({
             </h3>
             <p className="text-xs text-muted font-bold uppercase tracking-widest opacity-60">Paired Sell → Buy transactions for funded rebalancing</p>
           </div>
+          <button
+            onClick={handleDownloadRebalanceCSV}
+            disabled={exportingRebalance}
+            className="px-3 py-1.5 bg-accent/10 border border-accent/20 rounded-xl text-[10px] font-black uppercase tracking-wider text-accent hover:bg-accent/20 transition-all cursor-pointer flex items-center gap-1.5 disabled:opacity-50"
+          >
+            <Download size={12} />
+            {exportingRebalance ? 'Exporting...' : 'Download Execution Sheet'}
+          </button>
         </div>
+
+        {rebalanceExportError && (
+          <div className="mx-2 bg-exit/10 border border-exit/20 p-3 rounded-xl flex items-center gap-3">
+            <AlertTriangle size={14} className="text-exit" />
+            <p className="text-[10px] font-black text-exit uppercase tracking-widest leading-relaxed">
+              {rebalanceExportError}
+            </p>
+          </div>
+        )}
 
         <div className="grid grid-cols-1 gap-4">
           {rebalancingTrades.map((trade, idx) => (
@@ -356,6 +521,123 @@ export default function RebalanceView({
             </div>
           )}
         </div>
+      </section>
+
+      {/* SMART SIP PLANNER */}
+      <section className="bg-surface/40 backdrop-blur-xl border border-white/5 p-8 rounded-3xl shadow-xl space-y-6">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="space-y-1">
+            <h3 className="text-primary text-[10px] font-black uppercase tracking-[0.3em] flex items-center gap-2">
+              <Sparkles size={12} className="text-accent" /> Smart SIP Planner
+            </h3>
+            <p className="text-xs text-muted font-bold uppercase tracking-widest opacity-60">
+              Conviction-weighted, deficit-closing dynamic SIP routing
+            </p>
+          </div>
+          
+          <form onSubmit={handleCalculateSmartSip} className="flex items-center gap-3 w-full sm:w-auto">
+            <div className="relative flex-1 sm:flex-initial">
+              <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-muted text-xs font-bold">₹</span>
+              <input 
+                type="number" 
+                value={sipBudget}
+                onChange={(e) => setSipBudget(e.target.value)}
+                className="bg-black/40 border border-white/10 rounded-xl pl-8 pr-4 py-2 text-sm text-primary font-bold focus:border-accent focus:outline-none w-full sm:w-44 tabular-nums"
+                placeholder="SIP Budget"
+                min="0"
+                step="500"
+              />
+            </div>
+            <button
+              type="submit"
+              disabled={smartSipLoading}
+              className="px-4 py-2 bg-accent/10 border border-accent/20 rounded-xl text-[10px] font-black uppercase tracking-wider text-accent hover:bg-accent/20 transition-all cursor-pointer flex items-center gap-1.5 disabled:opacity-50"
+            >
+              {smartSipLoading ? 'Calculating...' : 'Calculate'}
+            </button>
+            {smartSipAllocations.length > 0 && (
+              <button
+                type="button"
+                onClick={handleDownloadSmartSipCSV}
+                className="px-4 py-2 bg-accent/10 border border-accent/20 rounded-xl text-[10px] font-black uppercase tracking-wider text-accent hover:bg-accent/20 transition-all cursor-pointer flex items-center gap-1.5"
+              >
+                <Download size={12} />
+                Download Execution Sheet
+              </button>
+            )}
+          </form>
+        </div>
+
+        {smartSipError && (
+          <div className="bg-exit/10 border border-exit/20 p-4 rounded-2xl flex items-center gap-4">
+            <AlertTriangle size={20} className="text-exit" />
+            <p className="text-[10px] font-black text-exit uppercase tracking-widest leading-relaxed">
+              {smartSipError}
+            </p>
+          </div>
+        )}
+
+        {smartSipAllocations.length > 0 && (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="border-b border-white/5 text-[9px] font-black text-muted uppercase tracking-widest">
+                  <th className="pb-3 pr-4">Fund Name</th>
+                  <th className="pb-3 px-4 text-center">Target / Current</th>
+                  <th className="pb-3 px-4 text-center">Z-Score</th>
+                  <th className="pb-3 px-4 text-center">Weight Deficit</th>
+                  <th className="pb-3 px-4 text-center">Multiplier</th>
+                  <th className="pb-3 px-4 text-right">Allocated Share</th>
+                  <th className="pb-3 pl-4 text-right">SIP Allocation</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-white/5">
+                {smartSipAllocations.map((alloc, idx) => {
+                  const isCheap = alloc.zScore < -1.0;
+                  const isExpensive = alloc.zScore > 1.0;
+                  const zScoreColor = isCheap ? 'text-buy' : isExpensive ? 'text-exit' : 'text-slate-400';
+                  
+                  return (
+                    <tr key={idx} className="group hover:bg-white/[0.01] transition-all">
+                      <td className="py-4 pr-4 min-w-[200px]">
+                        <p className="text-xs font-black text-primary leading-tight tracking-tight">
+                          {alloc.schemeName}
+                        </p>
+                        <p className="text-[9px] font-bold text-muted uppercase tracking-wider mt-0.5">
+                          AMFI: {alloc.amfiCode}
+                        </p>
+                      </td>
+                      <td className="py-4 px-4 text-center tabular-nums text-xs font-bold text-primary">
+                        {alloc.targetPercentage.toFixed(1)}% / {alloc.currentPercentage.toFixed(1)}%
+                      </td>
+                      <td className="py-4 px-4 text-center tabular-nums text-xs font-black">
+                        <span className={`px-2 py-0.5 rounded ${isCheap ? 'bg-buy/10' : isExpensive ? 'bg-exit/10' : 'bg-white/5'} ${zScoreColor}`}>
+                          {alloc.zScore.toFixed(2)}
+                        </span>
+                      </td>
+                      <td className="py-4 px-4 text-center tabular-nums text-xs font-bold text-slate-300">
+                        {alloc.weightDeficit > 0 ? `${alloc.weightDeficit.toFixed(1)}%` : '-'}
+                      </td>
+                      <td className="py-4 px-4 text-center tabular-nums text-xs font-bold">
+                        {alloc.weightDeficit > 0 ? (
+                          <span className={alloc.adjustedDeficit > alloc.weightDeficit ? 'text-buy font-black' : alloc.adjustedDeficit < alloc.weightDeficit ? 'text-exit font-black' : 'text-slate-500'}>
+                            {alloc.adjustedDeficit > alloc.weightDeficit ? '1.5x' : alloc.adjustedDeficit < alloc.weightDeficit ? '0.5x' : '1.0x'}
+                          </span>
+                        ) : '-'}
+                      </td>
+                      <td className="py-4 px-4 text-right tabular-nums text-xs font-black text-secondary">
+                        {alloc.allocatedPercentage.toFixed(1)}%
+                      </td>
+                      <td className="py-4 pl-4 text-right tabular-nums text-sm font-black text-buy">
+                        <CurrencyValue isPrivate={isPrivate} value={alloc.allocatedAmount} />
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
       </section>
 
       {/* SIP SIMULATOR */}

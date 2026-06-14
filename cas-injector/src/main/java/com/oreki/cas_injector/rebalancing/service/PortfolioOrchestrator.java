@@ -10,6 +10,7 @@ import java.util.stream.Collectors;
 
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
+import org.springframework.cache.annotation.Cacheable;
 
 import com.oreki.cas_injector.backfill.service.NavService;
 import com.oreki.cas_injector.core.model.Scheme;
@@ -106,6 +107,7 @@ public class PortfolioOrchestrator {
     /**
      * Returns current unit balances grouped by Scheme alongside locked STCG and harvestable LTCG units.
      */
+    @Cacheable(value = "portfolioState", key = "#pan")
     public List<PortfolioStateItemDTO> getPortfolioState(String pan) {
         log.info("📊 Fetching strict Portfolio State for PAN: {}", pan);
 

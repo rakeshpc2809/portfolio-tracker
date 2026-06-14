@@ -130,19 +130,38 @@ async def push_navs_to_java(records):
         except Exception as e:
             logger.error(f"Error pushing NAVs to Java: {e}")
 
+async def notify_java_amfi_sync():
+    url = f"{JAVA_BACKEND_URL}/v1/webhook/amfi-sync"
+    logger.info(f"Notifying Java backend of AMFI sync completion at: {url}")
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                url,
+                headers={"X-API-KEY": API_KEY},
+                timeout=15.0
+            )
+            if response.status_code == 200 or response.status_code == 202:
+                logger.info("Java backend notified successfully.")
+            else:
+                logger.error(f"Java backend returned error code {response.status_code}: {response.text}")
+    except Exception as e:
+        logger.error(f"Error calling Java webhook: {e}")
+
 @scheduler.scheduled_job('cron', hour=23, minute=45, timezone='Asia/Kolkata')
 async def daily_amfi_sync():
     logger.info("Triggering scheduled daily AMFI NAV sync...")
     records = await scrape_amfi_navs()
     if records:
         await push_navs_to_java(records)
+        await notify_java_amfi_sync()
 
 @app.post("/api/v1/quant/trigger-sync")
 async def trigger_sync():
     records = await scrape_amfi_navs()
     if records:
         await push_navs_to_java(records)
-        return {"status": "success", "message": f"Synced {len(records)} records"}
+        await notify_java_amfi_sync()
+        return {"status": "success", "message": f"Synced {len(records)} records and triggered cache eviction"}
     return {"status": "error", "message": "No records scraped"}
 
 @app.on_event("startup")

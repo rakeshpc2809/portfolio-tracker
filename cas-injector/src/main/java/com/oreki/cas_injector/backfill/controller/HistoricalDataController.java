@@ -4,6 +4,7 @@ import com.oreki.cas_injector.backfill.model.HistoricalNav;
 import com.oreki.cas_injector.backfill.repository.HistoricalNavRepository;
 import com.oreki.cas_injector.core.model.IndexFundamentals;
 import com.oreki.cas_injector.core.repository.IndexFundamentalsRepository;
+import com.oreki.cas_injector.dashboard.service.BenchmarkService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -19,6 +20,13 @@ public class HistoricalDataController {
 
     private final HistoricalNavRepository navRepo;
     private final IndexFundamentalsRepository indexRepo;
+    private final BenchmarkService benchmarkService;
+
+    @GetMapping("/benchmark/{indexName}/returns")
+    public ResponseEntity<com.oreki.cas_injector.dashboard.dto.PeriodReturns> getBenchmarkReturnsForAllPeriods(
+            @PathVariable String indexName) {
+        return ResponseEntity.ok(benchmarkService.getBenchmarkReturnsForAllPeriods(indexName));
+    }
 
     @PostMapping("/nav")
     public ResponseEntity<String> saveHistoricalNavs(@RequestBody List<HistoricalNav> navs) {

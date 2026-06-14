@@ -162,7 +162,8 @@ const MetaphorVisual: React.FC<{
   }
 };
 
-const SignalNoiseTable: React.FC<{ meta: ReasoningMetadata }> = ({ meta }) => {
+const SignalNoiseTable: React.FC<{ meta: ReasoningMetadata; action: string }> = ({ meta, action }) => {
+  const showVolTax = action === 'BUY' || action === 'SELL';
   const rows = [
     {
       technical: `Z-Score: ${meta.zScore.toFixed(2)}σ`,
@@ -187,12 +188,12 @@ const SignalNoiseTable: React.FC<{ meta: ReasoningMetadata }> = ({ meta }) => {
            : meta.hurstRegime === 'TRENDING'         ? 'text-accent'
            : 'text-muted',
     },
-    {
+    ...(showVolTax ? [{
       technical: `Volatility Tax: ${(meta.volatilityTax * 100).toFixed(2)}% p.a.`,
       noob: '🌾 Bonus Potential',
       value: 'Free money from rebalancing',
       color: 'text-buy',
-    },
+    }] : []),
   ];
 
   return (
@@ -375,7 +376,7 @@ export const RecommendationDetailCard: React.FC<Props> = ({
 
             <FeatureAttributionChart attr={meta.featureAttribution} />
 
-            <SignalNoiseTable meta={meta} />
+            <SignalNoiseTable meta={meta} action={signal.action} />
 
             <div className="space-y-2">
               <p className="text-[9px] text-muted uppercase tracking-widest font-bold">Technical Reasoning</p>

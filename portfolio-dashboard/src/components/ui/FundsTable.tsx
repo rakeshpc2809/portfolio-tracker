@@ -15,6 +15,12 @@ interface FundsTableProps {
   schemeBreakdown: any[];
 }
 
+const formatHurst = (val: number): string => {
+  if (val < 0.45) return 'MEAN REVERTING';
+  if (val > 0.55) return 'TRENDING';
+  return 'RANDOM WALK';
+};
+
 export default function FundsTable({ allSignals, schemeBreakdown }: FundsTableProps) {
   const xirrMap = useMemo(() => {
     const map = new Map<string, string>();
@@ -92,8 +98,8 @@ export default function FundsTable({ allSignals, schemeBreakdown }: FundsTablePr
                 <TableCell className="py-2 px-3 text-xs font-bold text-slate-300 text-right tabular-nums">
                   {zScoreVal.toFixed(2)}
                 </TableCell>
-                <TableCell className="py-2 px-3 text-xs font-bold text-slate-300 text-right tabular-nums">
-                  {hurstVal.toFixed(3)}
+                <TableCell className="py-2 px-3 text-xs font-bold text-slate-300 text-right">
+                  {formatHurst(hurstVal)}
                 </TableCell>
                 <TableCell className="py-2 px-3 text-center">
                   <Tooltip.Provider delayDuration={100}>
